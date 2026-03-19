@@ -1,0 +1,7 @@
+.DS_Store
+
+src/**/bin/
+src/**/obj/
+
+backend/php-api/storage/runtime/*
+!backend/php-api/storage/runtime/.gitkeep
