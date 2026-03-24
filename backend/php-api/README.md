@@ -6,6 +6,8 @@ It is intentionally framework-free so it can run behind nginx with plain PHP-FPM
 
 Current endpoints:
 - `GET /admin` (simple admin web view)
+- `GET /admin/seed-jobs`
+- `GET /admin/install-agent`
 - `GET /admin/login` (Google login page for admin)
 - `GET /v1/admin/auth/status`
 - `GET /v1/admin/auth/google/start`
@@ -68,7 +70,12 @@ Admin authentication supports either:
 - `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl/UI optional token input)
 - Google OAuth session login when `PATCH_API_GOOGLE_CLIENT_ID`, `PATCH_API_GOOGLE_CLIENT_SECRET`, and `PATCH_API_GOOGLE_REDIRECT_URI` are set
 
-The admin page can generate one-time enrollment keys, rename agents, show installed patch inventory, and queue Windows patch install jobs.
+Admin pages:
+- `/admin` main dashboard (agents + jobs)
+- `/admin/seed-jobs` generic job seeding
+- `/admin/install-agent` enrollment key + installer generation
+
+The admin UI can generate one-time enrollment keys, rename agents, show installed update inventory, and queue Windows update install jobs.
 
 Suggested nginx site:
 

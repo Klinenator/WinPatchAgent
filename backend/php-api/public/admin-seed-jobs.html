@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PatchAgent Admin - Seed Jobs</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: "Segoe UI", Tahoma, sans-serif;
+            --bg: #f4f6f9;
+            --card: #ffffff;
+            --text: #1f2933;
+            --muted: #52606d;
+            --border: #d9e2ec;
+            --primary: #1160ff;
+            --success: #0f9d58;
+            --danger: #b42318;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        main {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 24px 18px 44px;
+        }
+
+        h1, h2 { margin: 0 0 12px; }
+        p { margin: 0 0 14px; color: var(--muted); }
+
+        .topbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 0 0 12px;
+        }
+
+        .topbar a {
+            display: inline-block;
+            text-decoration: none;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 9px 12px;
+            color: var(--text);
+            background: #fff;
+            font-weight: 600;
+        }
+
+        .topbar a.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 14px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        input, textarea, button {
+            font: inherit;
+        }
+
+        input, textarea {
+            width: 100%;
+            padding: 10px 11px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #fff;
+            color: var(--text);
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        button {
+            padding: 10px 14px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #fff;
+            background: var(--primary);
+        }
+
+        button.secondary { background: #334e68; }
+        button.danger { background: var(--danger); }
+
+        .status {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .status.success { color: var(--success); }
+        .status.error { color: var(--danger); }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            background: #fff;
+        }
+
+        th, td {
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            padding: 9px;
+            font-size: 13px;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f0f4f8;
+            font-size: 12px;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+
+        .small {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        @media (max-width: 860px) {
+            .row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <nav class="topbar">
+        <a href="/admin">Main</a>
+        <a href="/admin/seed-jobs" class="active">Seed Jobs</a>
+        <a href="/admin/install-agent">Install Agent</a>
+    </nav>
+
+    <h1>Seed Jobs</h1>
+    <p>Create targeted jobs for agents and verify they were queued.</p>
+
+    <section class="card">
+        <p class="small">Signed in user: <strong id="authUser">checking...</strong></p>
+        <div class="actions">
+            <button id="logoutBtn" type="button" class="secondary">Sign Out</button>
+            <button id="refreshJobsBtn" type="button">Refresh Jobs</button>
+        </div>
+        <label for="adminToken">Admin Bearer Token (optional)</label>
+        <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
+        <div class="actions">
+            <button id="saveTokenBtn" type="button" class="secondary">Save In Browser</button>
+            <button id="clearTokenBtn" type="button" class="danger">Clear Saved Token</button>
+        </div>
+        <div id="tokenStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+        <h2>Create Job</h2>
+        <div class="row">
+            <div>
+                <label for="targetDeviceId">Target Device ID</label>
+                <input id="targetDeviceId" type="text" placeholder="ubuntu-node-001">
+            </div>
+            <div>
+                <label for="targetAgentId">Target Agent ID (optional)</label>
+                <input id="targetAgentId" type="text" placeholder="agt_...">
+            </div>
+        </div>
+        <div class="row">
+            <div>
+                <label for="jobType">Job Type</label>
+                <input id="jobType" type="text" value="ubuntu_apt_upgrade">
+            </div>
+            <div>
+                <label for="correlationId">Correlation ID (optional)</label>
+                <input id="correlationId" type="text" placeholder="rollout-001">
+            </div>
+        </div>
+        <label for="jobPayload">Payload JSON</label>
+        <textarea id="jobPayload">{
+  "apt": {
+    "upgrade_all": true
+  }
+}</textarea>
+        <label for="jobPolicy">Policy JSON (optional)</label>
+        <textarea id="jobPolicy">{
+  "maintenance_window": {
+    "start": null,
+    "end": null
+  }
+}</textarea>
+        <div class="actions">
+            <button id="createJobBtn" type="button">Create Job</button>
+        </div>
+        <div id="createStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+        <h2>Recent Jobs</h2>
+        <p class="small">Newest jobs appear first.</p>
+        <table>
+            <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Target Device</th>
+                <th>Target Agent</th>
+                <th>Created</th>
+            </tr>
+            </thead>
+            <tbody id="jobsTableBody">
+            <tr><td colspan="6" class="small">No jobs loaded.</td></tr>
+            </tbody>
+        </table>
+    </section>
+</main>
+
+<script>
+(() => {
+    const authUser = document.getElementById("authUser");
+    const tokenInput = document.getElementById("adminToken");
+    const tokenStatus = document.getElementById("tokenStatus");
+    const createStatus = document.getElementById("createStatus");
+    const jobsTableBody = document.getElementById("jobsTableBody");
+
+    const logoutBtn = document.getElementById("logoutBtn");
+    const refreshJobsBtn = document.getElementById("refreshJobsBtn");
+    const saveTokenBtn = document.getElementById("saveTokenBtn");
+    const clearTokenBtn = document.getElementById("clearTokenBtn");
+    const createJobBtn = document.getElementById("createJobBtn");
+
+    const targetDeviceIdInput = document.getElementById("targetDeviceId");
+    const targetAgentIdInput = document.getElementById("targetAgentId");
+    const jobTypeInput = document.getElementById("jobType");
+    const correlationIdInput = document.getElementById("correlationId");
+    const jobPayloadInput = document.getElementById("jobPayload");
+    const jobPolicyInput = document.getElementById("jobPolicy");
+
+    const STORAGE_KEY = "patchagent_admin_token";
+    const savedToken = localStorage.getItem(STORAGE_KEY);
+    if (savedToken) {
+        tokenInput.value = savedToken;
+        setStatus(tokenStatus, "Token loaded from browser storage.", "success");
+    }
+
+    saveTokenBtn.addEventListener("click", () => {
+        localStorage.setItem(STORAGE_KEY, tokenInput.value.trim());
+        setStatus(tokenStatus, "Token saved in browser storage.", "success");
+    });
+
+    clearTokenBtn.addEventListener("click", () => {
+        localStorage.removeItem(STORAGE_KEY);
+        tokenInput.value = "";
+        setStatus(tokenStatus, "Saved token cleared.", "");
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+        try {
+            await apiFetch("/v1/admin/auth/logout", { method: "POST" });
+        } catch {
+        }
+
+        window.location.href = "/admin/login";
+    });
+
+    refreshJobsBtn.addEventListener("click", async () => {
+        await loadJobs();
+    });
+
+    createJobBtn.addEventListener("click", async () => {
+        const payload = parseJsonField(jobPayloadInput.value, "Payload JSON");
+        if (payload === null) {
+            return;
+        }
+
+        const policy = parseJsonField(jobPolicyInput.value, "Policy JSON");
+        if (policy === null) {
+            return;
+        }
+
+        const targetDeviceId = targetDeviceIdInput.value.trim();
+        const targetAgentId = targetAgentIdInput.value.trim();
+        if (!targetDeviceId && !targetAgentId) {
+            setStatus(createStatus, "Set either Target Device ID or Target Agent ID.", "error");
+            return;
+        }
+
+        const body = {
+            type: jobTypeInput.value.trim() || "ubuntu_apt_upgrade",
+            payload: payload,
+            policy: policy
+        };
+
+        const correlationId = correlationIdInput.value.trim();
+        if (correlationId) {
+            body.correlation_id = correlationId;
+        }
+        if (targetDeviceId) {
+            body.target_device_id = targetDeviceId;
+        }
+        if (targetAgentId) {
+            body.target_agent_id = targetAgentId;
+        }
+
+        try {
+            const response = await apiFetch("/v1/admin/jobs", {
+                method: "POST",
+                body: JSON.stringify(body)
+            });
+
+            const jobId = response?.job?.job_id || "(unknown)";
+            setStatus(createStatus, "Job created: " + jobId, "success");
+            await loadJobs();
+        } catch (error) {
+            setStatus(createStatus, String(error.message || error), "error");
+        }
+    });
+
+    async function loadAuthStatus() {
+        try {
+            const response = await fetch("/v1/admin/auth/status", {
+                method: "GET",
+                headers: { "Accept": "application/json" }
+            });
+            const data = await response.json();
+
+            const user = data && typeof data.user === "object" ? data.user : null;
+            if (data.logged_in === true && user) {
+                const email = String(user.email || "").trim();
+                const name = String(user.name || "").trim();
+                authUser.textContent = name ? (name + " <" + email + ">") : email;
+                setStatus(tokenStatus, "Authenticated session is active.", "success");
+                return;
+            }
+
+            if (data.oauth_enabled === true) {
+                authUser.textContent = "Not signed in";
+                setStatus(tokenStatus, "Use Google login or set a bearer token.", "");
+                return;
+            }
+
+            authUser.textContent = "OAuth not configured";
+            setStatus(tokenStatus, "Google OAuth is not configured on this server.", "");
+        } catch {
+            authUser.textContent = "Unknown";
+            setStatus(tokenStatus, "Could not load auth status.", "error");
+        }
+    }
+
+    async function loadJobs() {
+        try {
+            const response = await apiFetch("/v1/admin/jobs", { method: "GET" });
+            const jobs = Array.isArray(response.jobs) ? response.jobs.slice().reverse() : [];
+            renderJobs(jobs);
+            setStatus(tokenStatus, "Loaded " + jobs.length + " job(s).", "success");
+        } catch (error) {
+            renderJobs([]);
+            setStatus(tokenStatus, String(error.message || error), "error");
+        }
+    }
+
+    function renderJobs(jobs) {
+        if (!jobs.length) {
+            jobsTableBody.innerHTML = '<tr><td colspan="6" class="small">No jobs found.</td></tr>';
+            return;
+        }
+
+        jobsTableBody.innerHTML = jobs.map((job) => {
+            return "<tr>" +
+                "<td><code>" + escapeHtml(String(job.job_id || "")) + "</code></td>" +
+                "<td>" + escapeHtml(String(job.status || "")) + "</td>" +
+                "<td>" + escapeHtml(String(job.type || "")) + "</td>" +
+                "<td>" + escapeHtml(String(job.target_device_id || "")) + "</td>" +
+                "<td><code>" + escapeHtml(String(job.target_agent_id || "")) + "</code></td>" +
+                "<td>" + escapeHtml(String(job.created_at || "")) + "</td>" +
+                "</tr>";
+        }).join("");
+    }
+
+    async function apiFetch(path, options) {
+        const headers = new Headers(options?.headers || {});
+        headers.set("Accept", "application/json");
+
+        const token = tokenInput.value.trim();
+        if (token) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+
+        if (options?.body) {
+            headers.set("Content-Type", "application/json");
+        }
+
+        const response = await fetch(path, {
+            method: options?.method || "GET",
+            headers: headers,
+            body: options?.body
+        });
+
+        const raw = await response.text();
+        let data = {};
+
+        if (raw.trim() !== "") {
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                throw new Error("Server returned non-JSON response.");
+            }
+        }
+
+        if (!response.ok) {
+            if (response.status === 401 && data?.error?.code === "admin_auth_required") {
+                window.location.href = "/admin/login";
+                throw new Error("Redirecting to login.");
+            }
+
+            const message = data?.error?.message || ("Request failed with status " + response.status);
+            throw new Error(message);
+        }
+
+        return data;
+    }
+
+    function parseJsonField(value, name) {
+        const text = value.trim();
+        if (!text) {
+            return {};
+        }
+
+        try {
+            const parsed = JSON.parse(text);
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                setStatus(createStatus, name + " must be a JSON object.", "error");
+                return null;
+            }
+            return parsed;
+        } catch {
+            setStatus(createStatus, name + " is not valid JSON.", "error");
+            return null;
+        }
+    }
+
+    function setStatus(element, message, kind) {
+        element.textContent = message;
+        element.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function escapeHtml(value) {
+        return value
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+    }
+
+    async function initialize() {
+        await loadAuthStatus();
+        await loadJobs();
+    }
+
+    initialize();
+})();
+</script>
+</body>
+</html>

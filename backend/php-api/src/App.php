@@ -72,6 +72,16 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && ($path === '/admin/seed-jobs' || $path === '/admin/seed-jobs/')) {
+                $this->handleAdminSeedJobsView();
+                return;
+            }
+
+            if ($method === 'GET' && ($path === '/admin/install-agent' || $path === '/admin/install-agent/')) {
+                $this->handleAdminInstallAgentView();
+                return;
+            }
+
             if ($method === 'GET' && ($path === '/admin/login' || $path === '/admin/login/')) {
                 $this->handleAdminLoginView();
                 return;
@@ -479,12 +489,27 @@ final class App
 
     private function handleAdminView(): void
     {
+        $this->handleAdminProtectedView('admin.html', 'Admin page is missing.');
+    }
+
+    private function handleAdminSeedJobsView(): void
+    {
+        $this->handleAdminProtectedView('admin-seed-jobs.html', 'Admin seed jobs page is missing.');
+    }
+
+    private function handleAdminInstallAgentView(): void
+    {
+        $this->handleAdminProtectedView('admin-install-agent.html', 'Admin install agent page is missing.');
+    }
+
+    private function handleAdminProtectedView(string $filename, string $missingMessage): void
+    {
         if ($this->isGoogleOAuthEnabled() && !$this->isAdminSessionAuthenticated()) {
             $this->redirect('/admin/login');
             return;
         }
 
-        $this->servePublicHtmlFile('admin.html', 'Admin page is missing.');
+        $this->servePublicHtmlFile($filename, $missingMessage);
     }
 
     private function handleAdminLoginView(): void

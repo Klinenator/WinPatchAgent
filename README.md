@@ -75,6 +75,7 @@ API scaffold is under `backend/php-api/`.
 It now includes a basic admin web view at `/admin` for viewing agents, generating installer links, and seeding/listing jobs.
 Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth.
 The admin UI also supports agent renaming, viewing installed patch inventory, and queuing Windows update install jobs.
+Admin pages are split into `/admin` (main), `/admin/seed-jobs`, and `/admin/install-agent`.
 
 Local dev run:
 
