@@ -1,34 +1,86 @@
-# Windows Patch Management Agent
+# WinPatchAgent (Windows + Ubuntu)
 
-This folder captures the design thread for a Windows desktop patch management endpoint agent.
+Patch management scaffold with:
+- A `.NET` endpoint agent (`src/PatchAgent.Service/`)
+- A minimal PHP API backend (`backend/php-api/`) designed for nginx + PHP-FPM
+- Job seeding endpoints for both Windows update and Ubuntu apt-based patch jobs
 
-Files:
-- `THREAD.md`: Conversation transcript and design discussion.
-- `PatchAgent.sln`: Solution scaffold for the endpoint agent service.
-- `src/PatchAgent.Service/`: Initial Windows service boilerplate.
-- `docs/php-backend-api.md`: API notes for a PHP backend behind nginx.
-- `backend/php-api/`: Minimal PHP backend scaffold for nginx + PHP-FPM.
+## Fast Start: Ubuntu Agent
 
-Current focus:
-- Endpoint agent responsibilities
-- Internal agent architecture
-- Agent/backend API contracts
-- MVP sequencing for implementation
+### Recommended: clone and run one script
 
-Suggested next steps:
-- Define C# data models for the API payloads
-- Define the agent state machine and persistence model
-- Choose Windows-native integration points for scan, download, install, and reboot handling
+```bash
+git clone https://github.com/Klinenator/WinPatchAgent.git
+cd WinPatchAgent
+sudo bash ./scripts/setup_ubuntu_agent.sh \
+  --backend-url https://patch-api.example.com \
+  --enrollment-key change-me
+```
 
-Current scaffold status:
-- .NET worker service configured to run as `PatchAgentSvc`
-- Config-driven polling intervals and storage paths
-- Local JSON-backed state store and telemetry queue
-- HTTP client for registration, heartbeat, inventory upload, job polling, and event publishing
-- Main service loop with registration, heartbeat, inventory, job polling, and telemetry flush hooks
-- State now stores issued agent tokens and server-provided poll intervals
-- Plain PHP backend scaffold with file-backed agent registration, inventory, job polling, and event ingestion
+`setup_ubuntu_agent.sh` installs dotnet SDK if needed, publishes the agent, and registers a `systemd` service.
+If an existing agent install is detected, it is automatically uninstalled and replaced.
 
-Build note:
-- The scaffold has been built successfully with .NET 8 in this environment.
-- PHP is not installed in this environment yet, so the backend scaffold has not been executed here.
+Optional: pass extra installer args after `--`:
+
+```bash
+sudo bash ./scripts/setup_ubuntu_agent.sh \
+  --backend-url https://patch-api.example.com \
+  -- --service-name winpatchagent --self-contained
+```
+
+### Alternate path (bootstrap script)
+
+Run this on an Ubuntu/Debian host as root. It installs dotnet SDK if needed, clones the repo, publishes the agent, and registers a `systemd` service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Klinenator/WinPatchAgent/main/scripts/bootstrap_ubuntu_agent.sh -o /tmp/bootstrap_winpatchagent.sh
+sudo bash /tmp/bootstrap_winpatchagent.sh \
+  --backend-url https://patch-api.example.com \
+  --enrollment-key change-me
+```
+
+Optional: pass extra installer args after `--`:
+
+```bash
+sudo bash /tmp/bootstrap_winpatchagent.sh \
+  --backend-url https://patch-api.example.com \
+  -- --service-name winpatchagent --self-contained
+```
+
+### Install from local checkout (direct installer only)
+
+```bash
+cd /path/to/WinPatchAgent
+sudo bash ./scripts/install_ubuntu_agent.sh \
+  --backend-url https://patch-api.example.com \
+  --enrollment-key change-me
+```
+
+### Uninstall from Ubuntu/Debian
+
+```bash
+cd /path/to/WinPatchAgent
+sudo bash ./scripts/uninstall_ubuntu_agent.sh
+```
+
+To also delete persisted agent state:
+
+```bash
+sudo bash ./scripts/uninstall_ubuntu_agent.sh --purge-state
+```
+
+## Backend (PHP + nginx)
+
+API scaffold is under `backend/php-api/`.
+It now includes a basic admin web view at `/admin` for seeding and listing jobs.
+
+Local dev run:
+
+```bash
+cd backend/php-api
+php -S 127.0.0.1:8080 -t public
+```
+
+See backend details and endpoints in:
+- `backend/php-api/README.md`
+- `docs/php-backend-api.md`
