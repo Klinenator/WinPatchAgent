@@ -54,6 +54,11 @@ final class App
             $path = $request->path();
             $method = $request->method();
 
+            if ($method === 'GET' && ($path === '/' || $path === '')) {
+                $this->redirect($this->isGoogleOAuthEnabled() ? '/admin/login' : '/admin');
+                return;
+            }
+
             if ($method === 'GET' && $path === '/healthz') {
                 JsonResponse::ok([
                     'status' => 'ok',
