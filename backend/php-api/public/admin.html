@@ -5,17 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>PatchAgent Admin - Main</title>
     <style>
+        @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+
         :root {
             color-scheme: light;
-            font-family: "Segoe UI", Tahoma, sans-serif;
-            --bg: #f4f6f9;
-            --card: #ffffff;
-            --text: #1f2933;
-            --muted: #52606d;
-            --border: #d9e2ec;
-            --primary: #1160ff;
-            --success: #0f9d58;
-            --danger: #b42318;
+            --bg: #ecf2f4;
+            --ink: #111827;
+            --muted: #5c687f;
+            --line: #d6e1e7;
+            --panel: #f9fcfe;
+            --panel-strong: #ffffff;
+            --brand-900: #00373f;
+            --brand-800: #04505a;
+            --brand-700: #0d6671;
+            --brand-500: #0b93a2;
+            --blue: #2d82da;
+            --green: #1f9d66;
+            --amber: #c77700;
+            --red: #cc3042;
+            --shadow: 0 14px 40px rgba(8, 31, 44, 0.08);
+            --radius: 14px;
+            --radius-sm: 10px;
+            --sidebar-width: 240px;
         }
 
         * {
@@ -24,287 +35,746 @@
 
         body {
             margin: 0;
-            background: var(--bg);
-            color: var(--text);
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 18% 0%, #d7eff7 0, rgba(215, 239, 247, 0) 45%),
+                radial-gradient(circle at 78% 14%, #d9f1ea 0, rgba(217, 241, 234, 0) 48%),
+                var(--bg);
+            color: var(--ink);
+            font-family: "IBM Plex Sans", "Trebuchet MS", "Gill Sans", sans-serif;
         }
 
-        main {
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 24px 18px 44px;
+        .app-shell {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+            min-height: 100vh;
         }
 
-        h1, h2 {
-            margin: 0 0 12px;
-        }
-
-        p {
-            margin: 0 0 14px;
-            color: var(--muted);
-        }
-
-        .topbar {
+        .sidebar {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            padding: 18px 12px;
+            background: linear-gradient(180deg, var(--brand-900) 0%, var(--brand-800) 58%, #034950 100%);
+            color: #d6f5f8;
+            border-right: 1px solid rgba(255, 255, 255, 0.14);
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin: 0 0 12px;
+            flex-direction: column;
+            gap: 18px;
         }
 
-        .topbar a {
-            display: inline-block;
-            text-decoration: none;
-            border: 1px solid var(--border);
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            color: #f0fdff;
+        }
+
+        .brand-mark {
+            width: 28px;
+            height: 28px;
             border-radius: 8px;
-            padding: 9px 12px;
-            color: var(--text);
-            background: #fff;
-            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.16);
         }
 
-        .topbar a.active {
-            background: var(--primary);
-            border-color: var(--primary);
-            color: #fff;
+        .side-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
         }
 
-        .card {
-            background: var(--card);
-            border: 1px solid var(--border);
+        .side-link {
+            text-decoration: none;
+            color: #dbf7f9;
+            border-radius: 11px;
+            padding: 10px 12px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid transparent;
+            transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .side-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.16);
+            transform: translateX(2px);
+        }
+
+        .side-link.active {
+            background: rgba(174, 239, 244, 0.18);
+            border-color: rgba(174, 239, 244, 0.44);
+            color: #ffffff;
+        }
+
+        .side-foot {
+            margin-top: auto;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 12px;
-            padding: 16px;
-            margin-top: 14px;
+            padding: 10px;
         }
 
-        label {
+        .side-foot-label {
+            margin: 0;
+            color: #b8e7eb;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .side-foot-user {
+            margin: 5px 0 10px;
+            font-size: 13px;
+            color: #fff;
+            word-break: break-word;
+        }
+
+        .workspace {
+            padding: 16px 20px 26px;
+        }
+
+        .top-command {
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            animation: rise 0.42s ease;
+        }
+
+        .top-copy h1 {
+            margin: 0;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 28px;
+            letter-spacing: -0.02em;
+        }
+
+        .top-copy p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .command-actions {
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .token-wrap {
+            min-width: 240px;
+        }
+
+        .label-mini {
             display: block;
-            font-weight: 600;
-            margin-bottom: 6px;
+            margin-bottom: 3px;
+            font-size: 11px;
+            letter-spacing: 0.05em;
+            color: var(--muted);
+            text-transform: uppercase;
         }
 
-        input, textarea, button {
+        input, textarea, select, button {
             font: inherit;
         }
 
         input, textarea, select {
             width: 100%;
-            padding: 10px 11px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
             background: #fff;
-            color: var(--text);
+            color: var(--ink);
+            padding: 10px 11px;
         }
 
-        textarea {
-            min-height: 100px;
-            resize: vertical;
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #74b8f3;
+            box-shadow: 0 0 0 3px rgba(46, 130, 218, 0.15);
         }
 
-        .row {
+        .btn {
+            border: 1px solid transparent;
+            border-radius: 999px;
+            padding: 9px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn.primary {
+            background: linear-gradient(180deg, #3a97eb 0%, #2d82da 100%);
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(45, 130, 218, 0.28);
+        }
+
+        .btn.subtle {
+            background: #eaf1f6;
+            color: #294259;
+            border-color: #c5d5e2;
+        }
+
+        .btn.danger {
+            background: #fff0f1;
+            color: var(--red);
+            border-color: #f5c4ca;
+        }
+
+        .btn.ghost {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.22);
+        }
+
+        .btn.light-link {
+            background: #eff7ff;
+            color: var(--blue);
+            border-color: #cde4fb;
+        }
+
+        .btn.tiny {
+            border-radius: 8px;
+            padding: 5px 9px;
+            font-size: 12px;
+            background: #e8f5ff;
+            color: #1764a9;
+            border-color: #bedff7;
+        }
+
+        .status-line {
+            margin: 9px 2px 2px;
+            min-height: 20px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .status-line.success {
+            color: var(--green);
+        }
+
+        .status-line.error {
+            color: var(--red);
+        }
+
+        .banner {
+            margin-top: 12px;
+            border-radius: 12px;
+            padding: 10px 14px;
+            border: 1px solid #9dd0f7;
+            background: linear-gradient(90deg, #2d82da 0%, #30a7b7 100%);
+            color: #ecf7ff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            animation: rise 0.5s ease;
+        }
+
+        .banner strong {
+            color: #fff;
+        }
+
+        .banner .chip {
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .metrics {
+            margin-top: 12px;
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 10px;
-            margin-bottom: 10px;
         }
 
-        .actions {
+        .metric {
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            box-shadow: var(--shadow);
+            animation: rise 0.58s ease;
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-size: 12px;
+            margin: 0;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            margin: 4px 0 0;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 28px;
+            line-height: 1.05;
+        }
+
+        .main-grid {
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
+            gap: 12px;
+        }
+
+        .panel {
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 13px;
+            animation: rise 0.62s ease;
+        }
+
+        .panel h2 {
+            margin: 0;
+            font-size: 18px;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+        }
+
+        .panel h3 {
+            margin: 12px 0 8px;
+            font-size: 14px;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            color: #334e68;
+        }
+
+        .panel-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .hint {
+            margin: 0;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .toolbar-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 180px;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .field-block {
+            margin-top: 9px;
+        }
+
+        .field-block label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 12px;
+            color: #3d5770;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .button-row {
+            margin-top: 9px;
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
-            margin-top: 10px;
         }
 
-        button {
-            padding: 10px 14px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            color: #fff;
-            background: var(--primary);
+        .table-wrap {
+            overflow: auto;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
         }
 
-        button.secondary {
-            background: #334e68;
-        }
-
-        button.danger {
-            background: var(--danger);
-        }
-
-        .status {
-            margin-top: 8px;
-            color: var(--muted);
-            font-size: 14px;
-        }
-
-        .status.success {
-            color: var(--success);
-        }
-
-        .status.error {
-            color: var(--danger);
+        .table-wrap.compact {
+            max-height: 300px;
         }
 
         table {
             width: 100%;
-            border-collapse: collapse;
-            margin-top: 12px;
-            background: #fff;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13px;
         }
 
-        th, td {
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-            padding: 9px;
-            font-size: 13px;
+        thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #eaf3f9;
+            color: #314f6a;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            padding: 10px 8px;
+            border-bottom: 1px solid #d3e2ec;
+        }
+
+        tbody td {
+            padding: 8px;
+            border-bottom: 1px solid #deeaef;
             vertical-align: top;
         }
 
-        th {
-            background: #f0f4f8;
-            font-size: 12px;
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
-            color: var(--muted);
+        tbody tr:hover {
+            background: #f4fbff;
         }
 
-        code {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        tbody tr.selected {
+            background: #e8f4ff;
+        }
+
+        .cell-main {
+            font-weight: 600;
+            color: #1c2f3f;
+            line-height: 1.2;
+        }
+
+        .cell-sub {
+            margin-top: 2px;
+            color: #64748b;
             font-size: 12px;
+            line-height: 1.2;
         }
 
         .mono {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        }
-
-        .small {
             font-size: 12px;
-            color: var(--muted);
         }
 
-        @media (max-width: 860px) {
-            .row {
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+
+        .pill.online {
+            color: #0f6b44;
+            background: #d9f6e8;
+            border-color: #9fdfc2;
+        }
+
+        .pill.stale {
+            color: #8b5200;
+            background: #fff1db;
+            border-color: #f2d5a8;
+        }
+
+        .pill.offline {
+            color: #8b1f2d;
+            background: #ffe5e8;
+            border-color: #f4b9c1;
+        }
+
+        .pill.unknown {
+            color: #394a5d;
+            background: #e7edf2;
+            border-color: #cfd9e3;
+        }
+
+        .jobs-panel {
+            margin-top: 12px;
+        }
+
+        .fade-up {
+            animation: rise 0.66s ease;
+        }
+
+        @keyframes rise {
+            0% {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 1220px) {
+            .metrics {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .main-grid {
                 grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .app-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+                height: auto;
+            }
+
+            .side-foot {
+                margin-top: 2px;
+            }
+
+            .workspace {
+                padding: 12px;
+            }
+
+            .top-command {
+                padding: 12px;
+            }
+
+            .command-actions {
+                justify-content: flex-start;
+                width: 100%;
+            }
+
+            .token-wrap {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .toolbar-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .metrics {
+                grid-template-columns: 1fr;
+            }
+
+            .top-copy h1 {
+                font-size: 23px;
             }
         }
     </style>
 </head>
 <body>
-<main>
-    <nav class="topbar">
-        <a href="/admin" class="active">Main</a>
-        <a href="/admin/seed-jobs">Seed Jobs</a>
-        <a href="/admin/install-agent">Install Agent</a>
-    </nav>
-
-    <h1>PatchAgent Admin</h1>
-    <p>Monitor agents and jobs, rename nodes, and queue package installs from one place.</p>
-
-    <section class="card">
-        <p class="small">Signed in user: <strong id="authUser">checking...</strong></p>
-        <div class="actions">
-            <button id="logoutBtn" type="button" class="secondary">Sign Out</button>
-            <button id="refreshBtn" type="button">Refresh Dashboard</button>
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand-mark">WP</span>
+            <span>PATCH AGENT</span>
         </div>
-        <label for="adminToken">Admin Bearer Token (optional)</label>
-        <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
-        <div class="actions">
-            <button id="saveTokenBtn" type="button" class="secondary">Save In Browser</button>
-            <button id="clearTokenBtn" type="button" class="danger">Clear Saved Token</button>
+        <nav class="side-nav">
+            <a href="/admin" class="side-link active">Main</a>
+            <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
+            <a href="/admin/install-agent" class="side-link">Install Agent</a>
+        </nav>
+        <div class="side-foot">
+            <p class="side-foot-label">Signed In User</p>
+            <p id="authUser" class="side-foot-user">checking...</p>
+            <button id="logoutBtn" type="button" class="btn ghost">Sign Out</button>
         </div>
-        <div id="tokenStatus" class="status"></div>
-    </section>
+    </aside>
 
-    <section class="card">
-        <h2>Agents</h2>
-        <p class="small">Agents are sorted by most recent heartbeat.</p>
-        <table>
-            <thead>
-            <tr>
-                <th>Name</th>
-                <th>Agent ID</th>
-                <th>Hostname</th>
-                <th>Device ID</th>
-                <th>Last Seen</th>
-                <th>Service State</th>
-                <th>Installed Packages</th>
-                <th>Current Job</th>
-                <th>Action</th>
-            </tr>
-            </thead>
-            <tbody id="agentsTableBody">
-            <tr><td colspan="9" class="small">No agents loaded.</td></tr>
-            </tbody>
-        </table>
-    </section>
-
-    <section class="card">
-        <h2>Selected Agent</h2>
-        <p class="small">Rename an agent, view installed packages, and queue package install jobs.</p>
-        <div class="row">
-            <div>
-                <label for="selectedAgentId">Agent ID</label>
-                <input id="selectedAgentId" class="mono" type="text" readonly>
+    <main class="workspace">
+        <section class="top-command">
+            <div class="top-copy">
+                <h1>Devices</h1>
+                <p>Monitor agents, queue package jobs, and track rollout status in one console.</p>
             </div>
-            <div>
-                <label for="selectedAgentDisplayName">Display Name</label>
-                <input id="selectedAgentDisplayName" type="text" placeholder="Production Node 01">
+            <div class="command-actions">
+                <div class="token-wrap">
+                    <label class="label-mini" for="adminToken">Admin Bearer Token (Optional)</label>
+                    <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
+                </div>
+                <button id="saveTokenBtn" type="button" class="btn subtle">Save Token</button>
+                <button id="clearTokenBtn" type="button" class="btn danger">Clear Token</button>
+                <button id="refreshBtn" type="button" class="btn primary">Refresh</button>
+                <a href="/admin/install-agent" class="btn light-link">Install Agent</a>
             </div>
-        </div>
-        <div class="actions">
-            <button id="renameAgentBtn" type="button">Save Agent Name</button>
-        </div>
+        </section>
+        <div id="tokenStatus" class="status-line"></div>
 
-        <div class="row">
-            <div>
-                <label for="updateIdsInput">Package IDs (comma-separated)</label>
-                <input id="updateIdsInput" type="text" placeholder="KB5035849, KB5035853">
+        <section class="banner fade-up">
+            <span>Operations center is live. <strong id="activeOnlineCopy">0 online agents</strong> currently checking in.</span>
+            <span class="chip" id="bannerTotalCopy">0 devices</span>
+        </section>
+
+        <section class="metrics">
+            <article class="metric">
+                <p class="metric-label">Total Agents</p>
+                <p id="metricTotalAgents" class="metric-value">0</p>
+            </article>
+            <article class="metric">
+                <p class="metric-label">Online Agents</p>
+                <p id="metricOnlineAgents" class="metric-value">0</p>
+            </article>
+            <article class="metric">
+                <p class="metric-label">Queued Jobs</p>
+                <p id="metricQueuedJobs" class="metric-value">0</p>
+            </article>
+            <article class="metric">
+                <p class="metric-label">Failed Jobs</p>
+                <p id="metricFailedJobs" class="metric-value">0</p>
+            </article>
+        </section>
+
+        <section class="main-grid">
+            <section class="panel">
+                <div class="panel-top">
+                    <h2>Agents</h2>
+                    <p class="hint" id="agentsSummary">Showing 0 of 0 agents</p>
+                </div>
+                <div class="toolbar-row">
+                    <input id="agentSearchInput" type="search" placeholder="Search by name, hostname, or agent ID">
+                    <select id="availabilityFilter">
+                        <option value="all">All Availability</option>
+                        <option value="online">Online</option>
+                        <option value="stale">Stale</option>
+                        <option value="offline">Offline</option>
+                        <option value="unknown">Unknown</option>
+                    </select>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Agent ID</th>
+                            <th>Last Seen</th>
+                            <th>Availability</th>
+                            <th>Service</th>
+                            <th>Packages</th>
+                            <th>Current Job</th>
+                            <th>Action</th>
+                        </tr>
+                        </thead>
+                        <tbody id="agentsTableBody">
+                        <tr><td colspan="8" class="hint">No agents loaded.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel">
+                <h2>Selected Agent</h2>
+                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename and queue installs.</p>
+
+                <div class="field-grid">
+                    <div class="field-block">
+                        <label for="selectedAgentId">Agent ID</label>
+                        <input id="selectedAgentId" class="mono" type="text" readonly>
+                    </div>
+                    <div class="field-block">
+                        <label for="selectedAgentDisplayName">Display Name</label>
+                        <input id="selectedAgentDisplayName" type="text" placeholder="Production Node 01">
+                    </div>
+                </div>
+                <div class="button-row">
+                    <button id="renameAgentBtn" type="button" class="btn subtle">Save Agent Name</button>
+                </div>
+
+                <div class="field-grid">
+                    <div class="field-block">
+                        <label for="updateIdsInput">Package IDs (comma-separated)</label>
+                        <input id="updateIdsInput" type="text" placeholder="pkg-security-2026-03, KB5035853">
+                    </div>
+                    <div class="field-block">
+                        <label for="updateCorrelationId">Package Correlation ID (optional)</label>
+                        <input id="updateCorrelationId" type="text" placeholder="package-rollout-001">
+                    </div>
+                </div>
+
+                <div class="button-row">
+                    <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Listed Packages</button>
+                    <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                </div>
+                <div id="agentActionStatus" class="status-line"></div>
+
+                <h3>Installed Packages</h3>
+                <div class="table-wrap compact">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Package ID</th>
+                            <th>Title</th>
+                            <th>Installed At</th>
+                        </tr>
+                        </thead>
+                        <tbody id="installedUpdatesTableBody">
+                        <tr><td colspan="3" class="hint">Select an agent to view installed packages.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+
+        <section class="panel jobs-panel">
+            <div class="panel-top">
+                <h2>Recent Jobs</h2>
+                <p class="hint">Newest jobs appear first.</p>
             </div>
-            <div>
-                <label for="updateCorrelationId">Package Correlation ID (optional)</label>
-                <input id="updateCorrelationId" type="text" placeholder="package-rollout-001">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Target Device</th>
+                        <th>Target Agent</th>
+                        <th>Created</th>
+                    </tr>
+                    </thead>
+                    <tbody id="jobsTableBody">
+                    <tr><td colspan="6" class="hint">No jobs loaded.</td></tr>
+                    </tbody>
+                </table>
             </div>
-        </div>
-        <div class="actions">
-            <button id="installListedUpdatesBtn" type="button">Install Listed Packages</button>
-            <button id="installAllUpdatesBtn" type="button" class="secondary">Install All Available Packages</button>
-        </div>
-        <div id="agentActionStatus" class="status"></div>
-
-        <p class="small">Installed packages from latest inventory snapshot.</p>
-        <table>
-            <thead>
-            <tr>
-                <th>Package ID</th>
-                <th>Title</th>
-                <th>Installed At</th>
-            </tr>
-            </thead>
-            <tbody id="installedUpdatesTableBody">
-            <tr><td colspan="3" class="small">Select an agent to view installed packages.</td></tr>
-            </tbody>
-        </table>
-    </section>
-
-    <section class="card">
-        <h2>Jobs</h2>
-        <p class="small">Newest jobs appear first.</p>
-        <table>
-            <thead>
-            <tr>
-                <th>Job ID</th>
-                <th>Status</th>
-                <th>Type</th>
-                <th>Target Device</th>
-                <th>Target Agent</th>
-                <th>Created</th>
-            </tr>
-            </thead>
-            <tbody id="jobsTableBody">
-            <tr><td colspan="6" class="small">No jobs loaded.</td></tr>
-            </tbody>
-        </table>
-    </section>
-</main>
+        </section>
+    </main>
+</div>
 
 <script>
 (() => {
@@ -315,6 +785,15 @@
     const jobsTableBody = document.getElementById("jobsTableBody");
     const installedUpdatesTableBody = document.getElementById("installedUpdatesTableBody");
     const agentActionStatus = document.getElementById("agentActionStatus");
+    const selectedAgentHint = document.getElementById("selectedAgentHint");
+    const agentsSummary = document.getElementById("agentsSummary");
+
+    const metricTotalAgents = document.getElementById("metricTotalAgents");
+    const metricOnlineAgents = document.getElementById("metricOnlineAgents");
+    const metricQueuedJobs = document.getElementById("metricQueuedJobs");
+    const metricFailedJobs = document.getElementById("metricFailedJobs");
+    const activeOnlineCopy = document.getElementById("activeOnlineCopy");
+    const bannerTotalCopy = document.getElementById("bannerTotalCopy");
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshBtn = document.getElementById("refreshBtn");
@@ -328,9 +807,12 @@
     const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
     const updateIdsInput = document.getElementById("updateIdsInput");
     const updateCorrelationIdInput = document.getElementById("updateCorrelationId");
+    const agentSearchInput = document.getElementById("agentSearchInput");
+    const availabilityFilterInput = document.getElementById("availabilityFilter");
 
     const STORAGE_KEY = "patchagent_admin_token";
     let latestAgents = [];
+    let latestJobs = [];
     let selectedAgentId = "";
 
     const savedToken = localStorage.getItem(STORAGE_KEY);
@@ -363,6 +845,14 @@
         await loadDashboard();
     });
 
+    agentSearchInput.addEventListener("input", () => {
+        renderAgents(latestAgents);
+    });
+
+    availabilityFilterInput.addEventListener("change", () => {
+        renderAgents(latestAgents);
+    });
+
     renameAgentBtn.addEventListener("click", async () => {
         if (!selectedAgentId) {
             setStatus(agentActionStatus, "Select an agent first.", "error");
@@ -393,7 +883,7 @@
             return;
         }
 
-        const updateIds = parseUpdateIds(updateIdsInput.value);
+        const updateIds = parsePackageIds(updateIdsInput.value);
         if (!updateIds.length) {
             setStatus(agentActionStatus, "Provide at least one package ID.", "error");
             return;
@@ -467,27 +957,66 @@
             const agentsResponse = responses[1];
             const jobs = Array.isArray(jobsResponse.jobs) ? jobsResponse.jobs.slice().reverse() : [];
             const agents = Array.isArray(agentsResponse.agents) ? agentsResponse.agents : [];
-            latestAgents = agents;
 
-            renderAgents(agents);
-            renderJobs(jobs);
+            latestJobs = jobs;
+            latestAgents = agents.slice().sort((a, b) => {
+                return Date.parse(String(b.last_seen_at || "")) - Date.parse(String(a.last_seen_at || ""));
+            });
+
+            renderMetrics(latestAgents, latestJobs);
+            renderAgents(latestAgents);
+            renderJobs(latestJobs);
             syncSelectedAgent();
-            setStatus(tokenStatus, "Loaded " + agents.length + " agent(s) and " + jobs.length + " job(s).", "success");
+            setStatus(tokenStatus, "Loaded " + latestAgents.length + " agent(s) and " + latestJobs.length + " job(s).", "success");
         } catch (error) {
+            latestJobs = [];
             latestAgents = [];
+            renderMetrics([], []);
             renderAgents([]);
             renderJobs([]);
             setStatus(tokenStatus, String(error.message || error), "error");
         }
     }
 
+    function renderMetrics(agents, jobs) {
+        const totalAgents = agents.length;
+        const onlineAgents = agents.filter((agent) => availabilityState(agent).value === "online").length;
+        const queuedJobs = jobs.filter((job) => String(job.status || "").toLowerCase() === "queued").length;
+        const failedJobs = jobs.filter((job) => String(job.status || "").toLowerCase() === "failed").length;
+
+        metricTotalAgents.textContent = String(totalAgents);
+        metricOnlineAgents.textContent = String(onlineAgents);
+        metricQueuedJobs.textContent = String(queuedJobs);
+        metricFailedJobs.textContent = String(failedJobs);
+        activeOnlineCopy.textContent = onlineAgents + " online agents";
+        bannerTotalCopy.textContent = totalAgents + " devices";
+    }
+
     function renderAgents(agents) {
-        if (!agents.length) {
-            agentsTableBody.innerHTML = '<tr><td colspan="9" class="small">No agents found.</td></tr>';
+        const query = agentSearchInput.value.trim().toLowerCase();
+        const availabilityFilter = availabilityFilterInput.value;
+
+        const filtered = agents.filter((agent) => {
+            const displayName = String(agent.display_name || agent.hostname || "");
+            const agentId = String(agent.agent_record_id || "");
+            const hostname = String(agent.hostname || "");
+            const deviceId = String(agent.device_id || "");
+            const haystack = (displayName + " " + agentId + " " + hostname + " " + deviceId).toLowerCase();
+            const availability = availabilityState(agent).value;
+
+            const queryMatch = query === "" || haystack.includes(query);
+            const availabilityMatch = availabilityFilter === "all" || availabilityFilter === availability;
+            return queryMatch && availabilityMatch;
+        });
+
+        agentsSummary.textContent = "Showing " + filtered.length + " of " + agents.length + " agents";
+
+        if (!filtered.length) {
+            agentsTableBody.innerHTML = '<tr><td colspan="8" class="hint">No agents match your filters.</td></tr>';
             return;
         }
 
-        agentsTableBody.innerHTML = agents.map((agent) => {
+        agentsTableBody.innerHTML = filtered.map((agent) => {
             const heartbeat = (typeof agent.last_heartbeat === "object" && agent.last_heartbeat !== null)
                 ? agent.last_heartbeat
                 : {};
@@ -501,17 +1030,22 @@
             const displayName = String(agent.display_name || agent.hostname || "");
             const installedCount = countInstalledUpdates(agent);
             const agentId = String(agent.agent_record_id || "");
+            const selectedClass = selectedAgentId && selectedAgentId === agentId ? " selected" : "";
+            const status = availabilityState(agent);
+            const serviceState = String(heartbeat.service_state || "unknown");
 
-            return "<tr>" +
-                "<td>" + escapeHtml(displayName) + "</td>" +
-                "<td><code>" + escapeHtml(agentId) + "</code></td>" +
-                "<td>" + escapeHtml(String(agent.hostname || "")) + "</td>" +
-                "<td>" + escapeHtml(String(agent.device_id || "")) + "</td>" +
+            return "<tr class=\"" + selectedClass.trim() + "\">" +
+                "<td>" +
+                "<div class=\"cell-main\">" + escapeHtml(displayName) + "</div>" +
+                "<div class=\"cell-sub\">" + escapeHtml(String(agent.hostname || "")) + "</div>" +
+                "</td>" +
+                "<td><code class=\"mono\">" + escapeHtml(agentId) + "</code></td>" +
                 "<td>" + escapeHtml(describeLastSeen(String(agent.last_seen_at || ""))) + "</td>" +
-                "<td>" + escapeHtml(String(heartbeat.service_state || "unknown")) + "</td>" +
+                "<td><span class=\"pill " + escapeHtml(status.value) + "\">" + escapeHtml(status.label) + "</span></td>" +
+                "<td>" + escapeHtml(serviceState) + "</td>" +
                 "<td>" + escapeHtml(String(installedCount)) + "</td>" +
-                "<td><code>" + escapeHtml(currentJobText) + "</code></td>" +
-                "<td><button type=\"button\" class=\"secondary manage-agent-btn\" data-agent-id=\"" + escapeHtml(agentId) + "\">Manage</button></td>" +
+                "<td><code class=\"mono\">" + escapeHtml(currentJobText) + "</code></td>" +
+                "<td><button type=\"button\" class=\"btn tiny manage-agent-btn\" data-agent-id=\"" + escapeHtml(agentId) + "\">Manage</button></td>" +
                 "</tr>";
         }).join("");
 
@@ -525,17 +1059,20 @@
 
     function renderJobs(jobs) {
         if (!jobs.length) {
-            jobsTableBody.innerHTML = '<tr><td colspan="6" class="small">No jobs found.</td></tr>';
+            jobsTableBody.innerHTML = '<tr><td colspan="6" class="hint">No jobs found.</td></tr>';
             return;
         }
 
         jobsTableBody.innerHTML = jobs.map((job) => {
+            const status = String(job.status || "");
+            const statusClass = statusToClass(status);
+
             return "<tr>" +
-                "<td><code>" + escapeHtml(String(job.job_id || "")) + "</code></td>" +
-                "<td>" + escapeHtml(String(job.status || "")) + "</td>" +
+                "<td><code class=\"mono\">" + escapeHtml(String(job.job_id || "")) + "</code></td>" +
+                "<td><span class=\"pill " + escapeHtml(statusClass) + "\">" + escapeHtml(status || "unknown") + "</span></td>" +
                 "<td>" + escapeHtml(String(job.type || "")) + "</td>" +
                 "<td>" + escapeHtml(String(job.target_device_id || "")) + "</td>" +
-                "<td><code>" + escapeHtml(String(job.target_agent_id || "")) + "</code></td>" +
+                "<td><code class=\"mono\">" + escapeHtml(String(job.target_agent_id || "")) + "</code></td>" +
                 "<td>" + escapeHtml(String(job.created_at || "")) + "</td>" +
                 "</tr>";
         }).join("");
@@ -551,11 +1088,14 @@
         selectedAgentIdInput.value = selectedAgentId;
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
         renderInstalledUpdates(getInstalledUpdates(agent));
+        selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         setStatus(agentActionStatus, "Selected " + selectedAgentDisplayNameInput.value + ".", "");
+        renderAgents(latestAgents);
     }
 
     function syncSelectedAgent() {
         if (!selectedAgentId) {
+            selectedAgentHint.textContent = "Choose an agent from the list to rename and queue installs.";
             return;
         }
 
@@ -565,12 +1105,16 @@
             selectedAgentIdInput.value = "";
             selectedAgentDisplayNameInput.value = "";
             renderInstalledUpdates([]);
+            selectedAgentHint.textContent = "Selected agent is no longer present.";
             setStatus(agentActionStatus, "Selected agent is no longer present.", "error");
+            renderAgents(latestAgents);
             return;
         }
 
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
         renderInstalledUpdates(getInstalledUpdates(agent));
+        selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
+        renderAgents(latestAgents);
     }
 
     function findAgent(agentId) {
@@ -612,13 +1156,13 @@
 
     function renderInstalledUpdates(updates) {
         if (!updates.length) {
-            installedUpdatesTableBody.innerHTML = '<tr><td colspan="3" class="small">No installed package data in latest inventory.</td></tr>';
+            installedUpdatesTableBody.innerHTML = '<tr><td colspan="3" class="hint">No installed package data in latest inventory.</td></tr>';
             return;
         }
 
         installedUpdatesTableBody.innerHTML = updates.map((update) => {
             return "<tr>" +
-                "<td><code>" + escapeHtml(String(update.update_id || "")) + "</code></td>" +
+                "<td><code class=\"mono\">" + escapeHtml(String(update.update_id || "")) + "</code></td>" +
                 "<td>" + escapeHtml(String(update.title || "")) + "</td>" +
                 "<td>" + escapeHtml(String(update.installed_at || "")) + "</td>" +
                 "</tr>";
@@ -646,22 +1190,66 @@
         });
     }
 
-    function parseUpdateIds(rawValue) {
-        const unique = new Set();
+    function parsePackageIds(rawValue) {
+        const seen = new Set();
+        const result = [];
+
         String(rawValue || "")
             .split(/[\s,]+/)
             .map((value) => value.trim())
             .filter((value) => value !== "")
             .forEach((value) => {
-                let normalized = value.toUpperCase();
+                let normalized = value;
+
                 if (/^\d+$/.test(normalized)) {
                     normalized = "KB" + normalized;
+                } else if (/^kb\d+$/i.test(normalized)) {
+                    normalized = normalized.toUpperCase();
                 }
 
-                unique.add(normalized);
+                const key = normalized.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    result.push(normalized);
+                }
             });
 
-        return Array.from(unique);
+        return result;
+    }
+
+    function availabilityState(agent) {
+        const lastSeen = String(agent.last_seen_at || "");
+        if (!lastSeen) {
+            return { value: "unknown", label: "Unknown" };
+        }
+
+        const timestamp = Date.parse(lastSeen);
+        if (Number.isNaN(timestamp)) {
+            return { value: "unknown", label: "Unknown" };
+        }
+
+        const ageSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+        if (ageSeconds <= 300) {
+            return { value: "online", label: "Online" };
+        }
+        if (ageSeconds <= 1800) {
+            return { value: "stale", label: "Stale" };
+        }
+        return { value: "offline", label: "Offline" };
+    }
+
+    function statusToClass(status) {
+        const normalized = String(status || "").toLowerCase();
+        if (normalized === "completed" || normalized === "success" || normalized === "succeeded") {
+            return "online";
+        }
+        if (normalized === "running" || normalized === "in_progress" || normalized === "queued") {
+            return "stale";
+        }
+        if (normalized === "failed" || normalized === "error") {
+            return "offline";
+        }
+        return "unknown";
     }
 
     async function apiFetch(path, options) {
@@ -709,11 +1297,11 @@
 
     function setStatus(element, message, kind) {
         element.textContent = message;
-        element.className = "status" + (kind ? " " + kind : "");
+        element.className = "status-line" + (kind ? " " + kind : "");
     }
 
     function escapeHtml(value) {
-        return value
+        return String(value)
             .replaceAll("&", "&amp;")
             .replaceAll("<", "&lt;")
             .replaceAll(">", "&gt;")
