@@ -167,15 +167,19 @@
 <body>
 <main>
     <h1>PatchAgent Admin</h1>
-    <p>View active agents and job status, then seed new patch jobs using your admin bearer token.</p>
+    <p>View active agents and job status, then seed new patch jobs.</p>
 
     <section class="card">
-        <label for="adminToken">Admin Bearer Token</label>
+        <p class="small">Signed in user: <strong id="authUser">checking...</strong></p>
+        <div class="actions">
+            <button id="logoutBtn" type="button" class="secondary">Sign Out</button>
+            <button id="refreshJobsBtn" type="button">Refresh Dashboard</button>
+        </div>
+        <label for="adminToken">Admin Bearer Token (optional)</label>
         <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
         <div class="actions">
             <button id="saveTokenBtn" type="button" class="secondary">Save In Browser</button>
             <button id="clearTokenBtn" type="button" class="danger">Clear Saved Token</button>
-            <button id="refreshJobsBtn" type="button">Refresh Dashboard</button>
         </div>
         <div id="tokenStatus" class="status"></div>
     </section>
@@ -299,6 +303,7 @@
 
 <script>
 (() => {
+    const authUser = document.getElementById("authUser");
     const tokenInput = document.getElementById("adminToken");
     const tokenStatus = document.getElementById("tokenStatus");
     const newAgentStatus = document.getElementById("newAgentStatus");
@@ -306,6 +311,7 @@
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
 
+    const logoutBtn = document.getElementById("logoutBtn");
     const refreshJobsBtn = document.getElementById("refreshJobsBtn");
     const generateAgentBtn = document.getElementById("generateAgentBtn");
     const saveTokenBtn = document.getElementById("saveTokenBtn");
@@ -341,6 +347,15 @@
         localStorage.removeItem(STORAGE_KEY);
         tokenInput.value = "";
         setStatus(tokenStatus, "Saved token cleared.", "");
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+        try {
+            await apiFetch("/v1/admin/auth/logout", { method: "POST" });
+        } catch {
+        }
+
+        window.location.href = "/admin/login";
     });
 
     refreshJobsBtn.addEventListener("click", async () => {
@@ -428,6 +443,37 @@
             setStatus(createStatus, String(error.message || error), "error");
         }
     });
+
+    async function loadAuthStatus() {
+        try {
+            const response = await fetch("/v1/admin/auth/status", {
+                method: "GET",
+                headers: { "Accept": "application/json" }
+            });
+            const data = await response.json();
+
+            const user = data && typeof data.user === "object" ? data.user : null;
+            if (data.logged_in === true && user) {
+                const email = String(user.email || "").trim();
+                const name = String(user.name || "").trim();
+                authUser.textContent = name ? (name + " <" + email + ">") : email;
+                setStatus(tokenStatus, "Authenticated session is active.", "success");
+                return;
+            }
+
+            if (data.oauth_enabled === true) {
+                authUser.textContent = "Not signed in";
+                setStatus(tokenStatus, "Use Google login or set a bearer token.", "");
+                return;
+            }
+
+            authUser.textContent = "OAuth not configured";
+            setStatus(tokenStatus, "Google OAuth is not configured on this server.", "");
+        } catch {
+            authUser.textContent = "Unknown";
+            setStatus(tokenStatus, "Could not load auth status.", "error");
+        }
+    }
 
     async function loadDashboard() {
         try {
@@ -536,6 +582,11 @@
         }
 
         if (!response.ok) {
+            if (response.status === 401 && data?.error?.code === "admin_auth_required") {
+                window.location.href = "/admin/login";
+                throw new Error("Redirecting to login.");
+            }
+
             const message = data?.error?.message || ("Request failed with status " + response.status);
             throw new Error(message);
         }
@@ -609,7 +660,12 @@
         return ageDays + "d ago";
     }
 
-    loadDashboard();
+    async function initialize() {
+        await loadAuthStatus();
+        await loadDashboard();
+    }
+
+    initialize();
 })();
 </script>
 </body>

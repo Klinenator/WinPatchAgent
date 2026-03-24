@@ -12,6 +12,7 @@ use PatchAgent\Api\Storage\EventRepository;
 use PatchAgent\Api\Storage\FileStore;
 use PatchAgent\Api\Storage\InventoryRepository;
 use PatchAgent\Api\Storage\JobRepository;
+use RuntimeException;
 use Throwable;
 
 final class App
@@ -19,6 +20,13 @@ final class App
     private const DEFAULT_ENROLLMENT_TTL_SECONDS = 604800;
     private const AGENT_REPO_URL = 'https://github.com/Klinenator/WinPatchAgent.git';
     private const AGENT_REPO_REF = 'main';
+    private const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+    private const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+    private const GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo';
+    private const OAUTH_SESSION_STATE_KEY = 'google_oauth_state';
+    private const OAUTH_SESSION_NONCE_KEY = 'google_oauth_nonce';
+    private const OAUTH_SESSION_STARTED_AT_KEY = 'google_oauth_started_at';
+    private const ADMIN_SESSION_USER_KEY = 'admin_user';
 
     private Config $config;
     private AgentRepository $agents;
@@ -59,6 +67,26 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && ($path === '/admin/login' || $path === '/admin/login/')) {
+                $this->handleAdminLoginView();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/auth/status') {
+                $this->handleAdminAuthStatus();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/auth/google/start') {
+                $this->handleGoogleAuthStart();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/auth/google/callback') {
+                $this->handleGoogleAuthCallback();
+                return;
+            }
+
             if ($method === 'GET' && $path === '/v1/admin/jobs') {
                 $this->requireAdmin($request);
                 $this->handleListJobs();
@@ -93,8 +121,13 @@ final class App
                 return;
             }
 
+            if ($method === 'POST' && $path === '/v1/admin/auth/logout') {
+                $this->handleAdminLogout();
+                return;
+            }
+
             if ($method !== 'POST') {
-                JsonResponse::error(405, 'method_not_allowed', 'Only POST is supported for this API.');
+                JsonResponse::error(405, 'method_not_allowed', 'The requested route does not support this HTTP method.');
                 return;
             }
 
@@ -380,17 +413,180 @@ final class App
 
     private function handleAdminView(): void
     {
-        $adminPagePath = dirname(__DIR__) . '/public/admin.html';
-        if (!is_file($adminPagePath)) {
+        if ($this->isGoogleOAuthEnabled() && !$this->isAdminSessionAuthenticated()) {
+            $this->redirect('/admin/login');
+            return;
+        }
+
+        $this->servePublicHtmlFile('admin.html', 'Admin page is missing.');
+    }
+
+    private function handleAdminLoginView(): void
+    {
+        if (!$this->isGoogleOAuthEnabled()) {
+            $this->redirect('/admin');
+            return;
+        }
+
+        if ($this->isAdminSessionAuthenticated()) {
+            $this->redirect('/admin');
+            return;
+        }
+
+        $this->servePublicHtmlFile('admin-login.html', 'Admin login page is missing.');
+    }
+
+    private function handleAdminAuthStatus(): void
+    {
+        $user = $this->currentAdminUser();
+
+        JsonResponse::ok([
+            'oauth_enabled' => $this->isGoogleOAuthEnabled(),
+            'logged_in' => $user !== null,
+            'user' => $user,
+            'login_url' => '/v1/admin/auth/google/start',
+            'logout_url' => '/v1/admin/auth/logout',
+            'hosted_domain' => $this->config->googleHostedDomain,
+        ]);
+    }
+
+    private function handleGoogleAuthStart(): void
+    {
+        if (!$this->isGoogleOAuthEnabled()) {
+            throw new ApiException(503, 'oauth_not_configured', 'Google OAuth is not configured on this server.');
+        }
+
+        $this->startAdminSession();
+
+        $state = bin2hex(random_bytes(24));
+        $nonce = bin2hex(random_bytes(24));
+
+        $_SESSION[self::OAUTH_SESSION_STATE_KEY] = $state;
+        $_SESSION[self::OAUTH_SESSION_NONCE_KEY] = $nonce;
+        $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY] = time();
+
+        $query = [
+            'client_id' => $this->config->googleClientId,
+            'redirect_uri' => $this->config->googleRedirectUri,
+            'response_type' => 'code',
+            'scope' => 'openid email profile',
+            'state' => $state,
+            'nonce' => $nonce,
+            'access_type' => 'online',
+            'prompt' => 'select_account',
+        ];
+
+        if ($this->config->googleHostedDomain !== '') {
+            $query['hd'] = $this->config->googleHostedDomain;
+        }
+
+        $authUrl = self::GOOGLE_AUTH_URL . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        $this->redirect($authUrl);
+    }
+
+    private function handleGoogleAuthCallback(): void
+    {
+        if (!$this->isGoogleOAuthEnabled()) {
+            throw new ApiException(503, 'oauth_not_configured', 'Google OAuth is not configured on this server.');
+        }
+
+        $error = trim((string) ($_GET['error'] ?? ''));
+        if ($error !== '') {
+            $this->redirect('/admin/login?error=' . rawurlencode($error));
+            return;
+        }
+
+        $this->startAdminSession();
+
+        $expectedState = (string) ($_SESSION[self::OAUTH_SESSION_STATE_KEY] ?? '');
+        $expectedNonce = (string) ($_SESSION[self::OAUTH_SESSION_NONCE_KEY] ?? '');
+
+        $receivedState = trim((string) ($_GET['state'] ?? ''));
+        if ($expectedState === '' || $receivedState === '' || !hash_equals($expectedState, $receivedState)) {
+            unset(
+                $_SESSION[self::OAUTH_SESSION_STATE_KEY],
+                $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
+                $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+            );
+            $this->redirect('/admin/login?error=invalid_state');
+            return;
+        }
+
+        $code = trim((string) ($_GET['code'] ?? ''));
+        if ($code === '') {
+            $this->redirect('/admin/login?error=missing_code');
+            return;
+        }
+
+        try {
+            $tokenPayload = $this->exchangeGoogleAuthorizationCode($code);
+            $idToken = trim((string) ($tokenPayload['id_token'] ?? ''));
+            if ($idToken === '') {
+                throw new RuntimeException('Google response did not include an id_token.');
+            }
+
+            $claims = $this->validateGoogleIdToken($idToken, $expectedNonce);
+        } catch (RuntimeException $exception) {
+            unset(
+                $_SESSION[self::OAUTH_SESSION_STATE_KEY],
+                $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
+                $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+            );
+            $this->redirect('/admin/login?error=oauth_failed&reason=' . rawurlencode($exception->getMessage()));
+            return;
+        }
+
+        unset(
+            $_SESSION[self::OAUTH_SESSION_STATE_KEY],
+            $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
+            $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+        );
+
+        $sessionTtl = max(300, $this->config->adminSessionTtlSeconds);
+        $_SESSION[self::ADMIN_SESSION_USER_KEY] = [
+            'email' => $claims['email'],
+            'name' => $claims['name'],
+            'picture' => $claims['picture'],
+            'sub' => $claims['sub'],
+            'hd' => $claims['hd'],
+            'authenticated_at' => gmdate(DATE_ATOM),
+            'expires_at' => time() + $sessionTtl,
+        ];
+        session_regenerate_id(true);
+
+        $this->redirect('/admin');
+    }
+
+    private function handleAdminLogout(): void
+    {
+        $this->startAdminSession();
+
+        unset(
+            $_SESSION[self::ADMIN_SESSION_USER_KEY],
+            $_SESSION[self::OAUTH_SESSION_STATE_KEY],
+            $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
+            $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+        );
+        session_regenerate_id(true);
+
+        JsonResponse::ok([
+            'logged_out' => true,
+        ]);
+    }
+
+    private function servePublicHtmlFile(string $filename, string $missingMessage): void
+    {
+        $path = dirname(__DIR__) . '/public/' . $filename;
+        if (!is_file($path)) {
             http_response_code(500);
             header('Content-Type: text/plain; charset=utf-8');
-            echo 'Admin page is missing.';
+            echo $missingMessage;
             return;
         }
 
         http_response_code(200);
         header('Content-Type: text/html; charset=utf-8');
-        readfile($adminPagePath);
+        readfile($path);
     }
 
     private function handleLinuxInstallScript(Request $request): void
@@ -618,18 +814,321 @@ POWERSHELL;
 
     private function requireAdmin(Request $request): void
     {
-        if ($this->config->adminKey === '') {
+        $token = $request->bearerToken();
+        if (
+            $token !== null
+            && $token !== ''
+            && $this->config->adminKey !== ''
+            && hash_equals($this->config->adminKey, $token)
+        ) {
             return;
         }
 
-        $token = $request->bearerToken();
-        if ($token === null || $token === '') {
-            throw new ApiException(401, 'missing_admin_token', 'The admin bearer token is required.');
+        if ($this->isAdminSessionAuthenticated()) {
+            return;
         }
 
-        if (!hash_equals($this->config->adminKey, $token)) {
+        if ($token !== null && $token !== '' && $this->config->adminKey !== '') {
             throw new ApiException(403, 'invalid_admin_token', 'The admin bearer token is invalid.');
         }
+
+        if ($this->isGoogleOAuthEnabled()) {
+            throw new ApiException(401, 'admin_auth_required', 'Admin login is required.');
+        }
+
+        if ($this->config->adminKey !== '') {
+            throw new ApiException(401, 'missing_admin_token', 'The admin bearer token is required.');
+        }
+    }
+
+    private function isGoogleOAuthEnabled(): bool
+    {
+        return $this->config->googleClientId !== ''
+            && $this->config->googleClientSecret !== ''
+            && $this->config->googleRedirectUri !== '';
+    }
+
+    private function startAdminSession(): void
+    {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        $sessionName = preg_replace('/[^a-zA-Z0-9_-]/', '', $this->config->adminSessionName);
+        if (!is_string($sessionName) || $sessionName === '') {
+            $sessionName = 'patchagent_admin';
+        }
+
+        session_name($sessionName);
+        session_set_cookie_params([
+            'lifetime' => max(300, $this->config->adminSessionTtlSeconds),
+            'path' => '/',
+            'secure' => $this->isHttpsRequest(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+        ini_set('session.use_strict_mode', '1');
+        session_start();
+    }
+
+    private function isHttpsRequest(): bool
+    {
+        $https = strtolower((string) ($_SERVER['HTTPS'] ?? 'off'));
+        if ($https !== '' && $https !== 'off' && $https !== '0') {
+            return true;
+        }
+
+        $forwardedProto = (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '');
+        $scheme = strtolower(trim(explode(',', $forwardedProto)[0]));
+        return $scheme === 'https';
+    }
+
+    private function currentAdminUser(): ?array
+    {
+        $this->startAdminSession();
+
+        $user = $_SESSION[self::ADMIN_SESSION_USER_KEY] ?? null;
+        if (!is_array($user)) {
+            return null;
+        }
+
+        $email = strtolower(trim((string) ($user['email'] ?? '')));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            unset($_SESSION[self::ADMIN_SESSION_USER_KEY]);
+            return null;
+        }
+
+        $expiresAt = (int) ($user['expires_at'] ?? 0);
+        if ($expiresAt > 0 && $expiresAt <= time()) {
+            unset($_SESSION[self::ADMIN_SESSION_USER_KEY]);
+            return null;
+        }
+
+        return [
+            'email' => $email,
+            'name' => trim((string) ($user['name'] ?? '')),
+            'picture' => trim((string) ($user['picture'] ?? '')),
+            'sub' => trim((string) ($user['sub'] ?? '')),
+            'hd' => trim((string) ($user['hd'] ?? '')),
+            'authenticated_at' => trim((string) ($user['authenticated_at'] ?? '')),
+            'expires_at' => $expiresAt,
+        ];
+    }
+
+    private function isAdminSessionAuthenticated(): bool
+    {
+        return $this->currentAdminUser() !== null;
+    }
+
+    private function exchangeGoogleAuthorizationCode(string $code): array
+    {
+        $payload = http_build_query([
+            'code' => $code,
+            'client_id' => $this->config->googleClientId,
+            'client_secret' => $this->config->googleClientSecret,
+            'redirect_uri' => $this->config->googleRedirectUri,
+            'grant_type' => 'authorization_code',
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        return $this->requestJsonFromUrl(
+            'POST',
+            self::GOOGLE_TOKEN_URL,
+            $payload,
+            ['Content-Type: application/x-www-form-urlencoded']
+        );
+    }
+
+    private function validateGoogleIdToken(string $idToken, string $expectedNonce): array
+    {
+        $tokenInfo = $this->requestJsonFromUrl(
+            'GET',
+            self::GOOGLE_TOKENINFO_URL . '?id_token=' . rawurlencode($idToken),
+            null,
+            []
+        );
+
+        $jwtPayload = $this->decodeJwtPayload($idToken);
+
+        $aud = trim((string) ($tokenInfo['aud'] ?? ''));
+        if ($aud === '' || !hash_equals($this->config->googleClientId, $aud)) {
+            throw new RuntimeException('Google token audience mismatch.');
+        }
+
+        $issuer = trim((string) ($tokenInfo['iss'] ?? ''));
+        if ($issuer !== 'accounts.google.com' && $issuer !== 'https://accounts.google.com') {
+            throw new RuntimeException('Google token issuer is invalid.');
+        }
+
+        $expiresAt = (int) ($tokenInfo['exp'] ?? 0);
+        if ($expiresAt <= time()) {
+            throw new RuntimeException('Google token is expired.');
+        }
+
+        $email = strtolower(trim((string) ($tokenInfo['email'] ?? '')));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new RuntimeException('Google token is missing a valid email.');
+        }
+
+        $emailVerified = strtolower(trim((string) ($tokenInfo['email_verified'] ?? 'false')));
+        if ($emailVerified !== 'true' && $emailVerified !== '1') {
+            throw new RuntimeException('Google account email is not verified.');
+        }
+
+        $nonce = trim((string) ($jwtPayload['nonce'] ?? ''));
+        if ($expectedNonce !== '' && ($nonce === '' || !hash_equals($expectedNonce, $nonce))) {
+            throw new RuntimeException('Google token nonce mismatch.');
+        }
+
+        $hostedDomain = strtolower(trim($this->config->googleHostedDomain));
+        $emailDomain = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
+        $hdClaim = strtolower(trim((string) ($tokenInfo['hd'] ?? ($jwtPayload['hd'] ?? ''))));
+        if ($hostedDomain !== '' && $emailDomain !== $hostedDomain && $hdClaim !== $hostedDomain) {
+            throw new RuntimeException('Google account is outside the allowed hosted domain.');
+        }
+
+        return [
+            'email' => $email,
+            'name' => trim((string) ($jwtPayload['name'] ?? '')),
+            'picture' => trim((string) ($jwtPayload['picture'] ?? '')),
+            'sub' => trim((string) ($tokenInfo['sub'] ?? ($jwtPayload['sub'] ?? ''))),
+            'hd' => $hdClaim,
+        ];
+    }
+
+    private function decodeJwtPayload(string $token): array
+    {
+        $parts = explode('.', $token);
+        if (count($parts) < 2) {
+            throw new RuntimeException('Invalid id_token format.');
+        }
+
+        $payload = strtr($parts[1], '-_', '+/');
+        $padding = strlen($payload) % 4;
+        if ($padding > 0) {
+            $payload .= str_repeat('=', 4 - $padding);
+        }
+
+        $decoded = base64_decode($payload, true);
+        if ($decoded === false || $decoded === '') {
+            throw new RuntimeException('Could not decode id_token payload.');
+        }
+
+        $parsed = json_decode($decoded, true);
+        if (!is_array($parsed)) {
+            throw new RuntimeException('id_token payload is not JSON.');
+        }
+
+        return $parsed;
+    }
+
+    private function requestJsonFromUrl(string $method, string $url, ?string $body, array $headers): array
+    {
+        $result = $this->requestRaw($method, $url, $body, $headers);
+        $rawBody = trim($result['body']);
+
+        $decoded = $rawBody === '' ? [] : json_decode($rawBody, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Remote endpoint returned a non-JSON response.');
+        }
+
+        if ($result['status'] < 200 || $result['status'] >= 300) {
+            $errorDescription = trim((string) ($decoded['error_description'] ?? ''));
+            $error = trim((string) ($decoded['error'] ?? ''));
+            $message = $errorDescription !== '' ? $errorDescription : ($error !== '' ? $error : 'Request failed.');
+            throw new RuntimeException($message);
+        }
+
+        return $decoded;
+    }
+
+    private function requestRaw(string $method, string $url, ?string $body, array $headers): array
+    {
+        if (function_exists('curl_init')) {
+            $curl = curl_init($url);
+            if ($curl === false) {
+                throw new RuntimeException('Could not initialize HTTP client.');
+            }
+
+            $requestHeaders = $headers;
+            if ($body !== null && $body !== '') {
+                $requestHeaders[] = 'Content-Length: ' . strlen($body);
+            }
+
+            curl_setopt_array($curl, [
+                CURLOPT_CUSTOMREQUEST => $method,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 20,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_HTTPHEADER => $requestHeaders,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+            ]);
+
+            if ($body !== null && $body !== '') {
+                curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+            }
+
+            $responseBody = curl_exec($curl);
+            if ($responseBody === false) {
+                $error = curl_error($curl);
+                curl_close($curl);
+                throw new RuntimeException('HTTP request failed: ' . $error);
+            }
+
+            $statusCode = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+            curl_close($curl);
+
+            return [
+                'status' => $statusCode,
+                'body' => (string) $responseBody,
+            ];
+        }
+
+        $contextHeaders = $headers;
+        if ($body !== null && $body !== '') {
+            $contextHeaders[] = 'Content-Length: ' . strlen($body);
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => $method,
+                'header' => implode("\r\n", $contextHeaders),
+                'content' => $body ?? '',
+                'ignore_errors' => true,
+                'timeout' => 20,
+            ],
+        ]);
+
+        $stream = @fopen($url, 'rb', false, $context);
+        if ($stream === false) {
+            throw new RuntimeException('HTTP request failed and returned no response body.');
+        }
+
+        $meta = stream_get_meta_data($stream);
+        $response = stream_get_contents($stream);
+        fclose($stream);
+
+        if ($response === false) {
+            throw new RuntimeException('HTTP request failed while reading response body.');
+        }
+
+        $statusCode = 0;
+        $responseHeaders = is_array($meta['wrapper_data'] ?? null) ? $meta['wrapper_data'] : [];
+
+        if (isset($responseHeaders[0]) && preg_match('#\s(\d{3})\s#', (string) $responseHeaders[0], $matches) === 1) {
+            $statusCode = (int) $matches[1];
+        }
+
+        return [
+            'status' => $statusCode,
+            'body' => (string) $response,
+        ];
+    }
+
+    private function redirect(string $location): void
+    {
+        http_response_code(302);
+        header('Location: ' . $location);
     }
 
     private function requireString(array $source, string $key): string

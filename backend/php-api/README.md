@@ -6,6 +6,11 @@ It is intentionally framework-free so it can run behind nginx with plain PHP-FPM
 
 Current endpoints:
 - `GET /admin` (simple admin web view)
+- `GET /admin/login` (Google login page for admin)
+- `GET /v1/admin/auth/status`
+- `GET /v1/admin/auth/google/start`
+- `GET /v1/admin/auth/google/callback`
+- `POST /v1/admin/auth/logout`
 - `POST /v1/agents/register`
 - `POST /v1/agents/heartbeat`
 - `POST /v1/agents/inventory`
@@ -34,6 +39,12 @@ Files:
 Environment variables:
 - `PATCH_API_ENROLLMENT_KEY`: optional shared key required at registration time
 - `PATCH_API_ADMIN_KEY`: optional bearer token required for admin routes
+- `PATCH_API_GOOGLE_CLIENT_ID`: optional Google OAuth client ID for admin login
+- `PATCH_API_GOOGLE_CLIENT_SECRET`: optional Google OAuth client secret for admin login
+- `PATCH_API_GOOGLE_REDIRECT_URI`: optional OAuth callback URL (example: `https://patch.rrsaccess.com/v1/admin/auth/google/callback`)
+- `PATCH_API_GOOGLE_HOSTED_DOMAIN`: optional Google Workspace domain allow-list (example: `accessrrs.com`)
+- `PATCH_API_ADMIN_SESSION_NAME`: optional admin session cookie name (default `patchagent_admin`)
+- `PATCH_API_ADMIN_SESSION_TTL_SECONDS`: optional admin session lifetime seconds (default `28800`)
 - `PATCH_API_STORAGE_ROOT`: optional override for the runtime storage path
 - `PATCH_API_HEARTBEAT_SECONDS`: default `300`
 - `PATCH_API_JOBS_SECONDS`: default `120`
@@ -50,8 +61,11 @@ Open the admin page in your browser:
 
 `http://127.0.0.1:8080/admin`
 
-The admin page is token-based and uses the same admin bearer token expected by `/v1/admin/jobs`, `/v1/admin/agents`, and `/v1/admin/enrollments`.
-It can generate one-time enrollment keys and per-platform installer links.
+Admin authentication supports either:
+- `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl/UI optional token input)
+- Google OAuth session login when `PATCH_API_GOOGLE_CLIENT_ID`, `PATCH_API_GOOGLE_CLIENT_SECRET`, and `PATCH_API_GOOGLE_REDIRECT_URI` are set
+
+The admin page can generate one-time enrollment keys and per-platform installer links.
 
 Suggested nginx site:
 

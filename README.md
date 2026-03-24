@@ -73,6 +73,7 @@ sudo bash ./scripts/uninstall_ubuntu_agent.sh --purge-state
 
 API scaffold is under `backend/php-api/`.
 It now includes a basic admin web view at `/admin` for viewing agents, generating installer links, and seeding/listing jobs.
+Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth.
 
 Local dev run:
 
