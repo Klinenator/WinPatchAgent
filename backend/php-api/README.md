@@ -75,7 +75,7 @@ Admin pages:
 - `/admin/seed-jobs` generic job seeding
 - `/admin/install-agent` enrollment key + installer generation
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed update inventory, and queue Windows update install jobs.
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, and queue package install jobs (Windows updates).
 
 Suggested nginx site:
 

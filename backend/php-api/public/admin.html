@@ -197,7 +197,7 @@
     </nav>
 
     <h1>PatchAgent Admin</h1>
-    <p>Monitor agents and jobs, rename nodes, and queue update installs from one place.</p>
+    <p>Monitor agents and jobs, rename nodes, and queue package installs from one place.</p>
 
     <section class="card">
         <p class="small">Signed in user: <strong id="authUser">checking...</strong></p>
@@ -226,7 +226,7 @@
                 <th>Device ID</th>
                 <th>Last Seen</th>
                 <th>Service State</th>
-                <th>Installed Updates</th>
+                <th>Installed Packages</th>
                 <th>Current Job</th>
                 <th>Action</th>
             </tr>
@@ -239,7 +239,7 @@
 
     <section class="card">
         <h2>Selected Agent</h2>
-        <p class="small">Rename an agent, view installed updates, and queue Windows update jobs.</p>
+        <p class="small">Rename an agent, view installed packages, and queue package install jobs.</p>
         <div class="row">
             <div>
                 <label for="selectedAgentId">Agent ID</label>
@@ -256,31 +256,31 @@
 
         <div class="row">
             <div>
-                <label for="updateIdsInput">Update IDs (comma-separated)</label>
+                <label for="updateIdsInput">Package IDs (comma-separated)</label>
                 <input id="updateIdsInput" type="text" placeholder="KB5035849, KB5035853">
             </div>
             <div>
-                <label for="updateCorrelationId">Update Correlation ID (optional)</label>
-                <input id="updateCorrelationId" type="text" placeholder="windows-rollout-001">
+                <label for="updateCorrelationId">Package Correlation ID (optional)</label>
+                <input id="updateCorrelationId" type="text" placeholder="package-rollout-001">
             </div>
         </div>
         <div class="actions">
-            <button id="installListedUpdatesBtn" type="button">Install Listed Updates</button>
-            <button id="installAllUpdatesBtn" type="button" class="secondary">Install All Available Windows Updates</button>
+            <button id="installListedUpdatesBtn" type="button">Install Listed Packages</button>
+            <button id="installAllUpdatesBtn" type="button" class="secondary">Install All Available Packages</button>
         </div>
         <div id="agentActionStatus" class="status"></div>
 
-        <p class="small">Installed updates from latest inventory snapshot.</p>
+        <p class="small">Installed packages from latest inventory snapshot.</p>
         <table>
             <thead>
             <tr>
-                <th>Update ID</th>
+                <th>Package ID</th>
                 <th>Title</th>
                 <th>Installed At</th>
             </tr>
             </thead>
             <tbody id="installedUpdatesTableBody">
-            <tr><td colspan="3" class="small">Select an agent to view installed updates.</td></tr>
+            <tr><td colspan="3" class="small">Select an agent to view installed packages.</td></tr>
             </tbody>
         </table>
     </section>
@@ -395,14 +395,14 @@
 
         const updateIds = parseUpdateIds(updateIdsInput.value);
         if (!updateIds.length) {
-            setStatus(agentActionStatus, "Provide at least one update ID.", "error");
+            setStatus(agentActionStatus, "Provide at least one package ID.", "error");
             return;
         }
 
         try {
             const response = await queueWindowsUpdateJob(selectedAgentId, false, updateIds);
             const jobId = response?.job?.job_id || "(unknown)";
-            setStatus(agentActionStatus, "Windows update job queued: " + jobId, "success");
+            setStatus(agentActionStatus, "Package install job queued: " + jobId, "success");
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
@@ -418,7 +418,7 @@
         try {
             const response = await queueWindowsUpdateJob(selectedAgentId, true, []);
             const jobId = response?.job?.job_id || "(unknown)";
-            setStatus(agentActionStatus, "Install-all job queued: " + jobId, "success");
+            setStatus(agentActionStatus, "Install-all package job queued: " + jobId, "success");
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
@@ -612,7 +612,7 @@
 
     function renderInstalledUpdates(updates) {
         if (!updates.length) {
-            installedUpdatesTableBody.innerHTML = '<tr><td colspan="3" class="small">No installed update data in latest inventory.</td></tr>';
+            installedUpdatesTableBody.innerHTML = '<tr><td colspan="3" class="small">No installed package data in latest inventory.</td></tr>';
             return;
         }
 
