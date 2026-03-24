@@ -14,6 +14,8 @@ final class Request
     public function __construct(
         private readonly string $method,
         private readonly string $path,
+        private readonly array $query,
+        private readonly string $baseUrl,
         private readonly array $headers,
         private readonly string $rawBody
     ) {
@@ -24,10 +26,26 @@ final class Request
         $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
         $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
         $path = (string) parse_url($uri, PHP_URL_PATH);
+        $query = is_array($_GET ?? null) ? $_GET : [];
         $headers = function_exists('getallheaders') ? getallheaders() : [];
         $rawBody = file_get_contents('php://input') ?: '';
 
-        return new self($method, $path, $headers, $rawBody);
+        $forwardedProto = (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '');
+        $scheme = strtolower(trim(explode(',', $forwardedProto)[0]));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            $https = (string) ($_SERVER['HTTPS'] ?? 'off');
+            $scheme = strtolower($https) !== 'off' && $https !== '' ? 'https' : 'http';
+        }
+
+        $forwardedHost = (string) ($_SERVER['HTTP_X_FORWARDED_HOST'] ?? '');
+        $host = trim(explode(',', $forwardedHost)[0]);
+        if ($host === '') {
+            $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        }
+
+        $baseUrl = sprintf('%s://%s', $scheme, $host);
+
+        return new self($method, $path, $query, $baseUrl, $headers, $rawBody);
     }
 
     public function method(): string
@@ -38,6 +56,22 @@ final class Request
     public function path(): string
     {
         return $this->path;
+    }
+
+    public function queryParam(string $name): ?string
+    {
+        $value = $this->query[$name] ?? null;
+        if (!is_scalar($value)) {
+            return null;
+        }
+
+        $text = trim((string) $value);
+        return $text === '' ? null : $text;
+    }
+
+    public function baseUrl(): string
+    {
+        return $this->baseUrl;
     }
 
     public function json(): array

@@ -7,6 +7,7 @@ namespace PatchAgent\Api;
 use PatchAgent\Api\Http\JsonResponse;
 use PatchAgent\Api\Http\Request;
 use PatchAgent\Api\Storage\AgentRepository;
+use PatchAgent\Api\Storage\EnrollmentRepository;
 use PatchAgent\Api\Storage\EventRepository;
 use PatchAgent\Api\Storage\FileStore;
 use PatchAgent\Api\Storage\InventoryRepository;
@@ -15,8 +16,13 @@ use Throwable;
 
 final class App
 {
+    private const DEFAULT_ENROLLMENT_TTL_SECONDS = 604800;
+    private const AGENT_REPO_URL = 'https://github.com/Klinenator/WinPatchAgent.git';
+    private const AGENT_REPO_REF = 'main';
+
     private Config $config;
     private AgentRepository $agents;
+    private EnrollmentRepository $enrollments;
     private InventoryRepository $inventory;
     private EventRepository $events;
     private JobRepository $jobs;
@@ -27,6 +33,7 @@ final class App
         $store = new FileStore($this->config->storageRoot);
 
         $this->agents = new AgentRepository($store);
+        $this->enrollments = new EnrollmentRepository($store);
         $this->inventory = new InventoryRepository($store);
         $this->events = new EventRepository($store);
         $this->jobs = new JobRepository($store);
@@ -61,6 +68,16 @@ final class App
             if ($method === 'GET' && $path === '/v1/admin/agents') {
                 $this->requireAdmin($request);
                 $this->handleListAgents();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/install/linux.sh') {
+                $this->handleLinuxInstallScript($request);
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/install/windows.ps1') {
+                $this->handleWindowsInstallScript($request);
                 return;
             }
 
@@ -110,6 +127,11 @@ final class App
                     $this->requireAdmin($request);
                     $this->handleCreateJob($request);
                     return;
+
+                case '/v1/admin/enrollments':
+                    $this->requireAdmin($request);
+                    $this->handleCreateEnrollment($request);
+                    return;
             }
 
             JsonResponse::error(404, 'not_found', 'The requested API route was not found.');
@@ -134,16 +156,16 @@ final class App
         $body = $request->json();
         $incomingEnrollmentKey = (string) ($body['enrollment_key'] ?? '');
 
-        if ($this->config->enrollmentKey !== '' && !hash_equals($this->config->enrollmentKey, $incomingEnrollmentKey)) {
-            throw new ApiException(403, 'invalid_enrollment_key', 'The enrollment key is invalid.');
-        }
-
         $device = $body['device'] ?? [];
         $agentInfo = $body['agent'] ?? [];
         $os = $body['os'] ?? [];
 
         $deviceId = $this->requireString($device, 'device_id');
         $hostname = $this->requireString($device, 'hostname');
+
+        if (!$this->isEnrollmentAuthorized($incomingEnrollmentKey, $deviceId)) {
+            throw new ApiException(403, 'invalid_enrollment_key', 'The enrollment key is invalid.');
+        }
 
         $record = $this->agents->upsertRegistration([
             'device_id' => $deviceId,
@@ -269,6 +291,40 @@ final class App
         ]);
     }
 
+    private function handleCreateEnrollment(Request $request): void
+    {
+        $body = $request->json();
+        $platform = strtolower($this->requireString($body, 'platform'));
+
+        if (!in_array($platform, ['linux', 'windows'], true)) {
+            throw new ApiException(422, 'invalid_request', 'Field "platform" must be "linux" or "windows".');
+        }
+
+        $ttlSeconds = $this->readEnrollmentTtlSeconds($body);
+        $enrollment = $this->enrollments->createEnrollment($platform, $ttlSeconds);
+
+        $scriptPath = $platform === 'windows' ? '/install/windows.ps1' : '/install/linux.sh';
+        $scriptUrl = sprintf(
+            '%s%s?enrollment_key=%s',
+            $request->baseUrl(),
+            $scriptPath,
+            rawurlencode((string) $enrollment['enrollment_key'])
+        );
+
+        $installCommand = $platform === 'windows'
+            ? $this->buildWindowsInstallCommand($scriptUrl)
+            : $this->buildLinuxInstallCommand($scriptUrl);
+
+        JsonResponse::created([
+            'enrollment' => $enrollment,
+            'install' => [
+                'platform' => $platform,
+                'script_url' => $scriptUrl,
+                'command' => $installCommand,
+            ],
+        ]);
+    }
+
     private function handleAcknowledgeJob(Request $request, array $agent, string $jobId): void
     {
         $body = $request->json();
@@ -335,6 +391,214 @@ final class App
         http_response_code(200);
         header('Content-Type: text/html; charset=utf-8');
         readfile($adminPagePath);
+    }
+
+    private function handleLinuxInstallScript(Request $request): void
+    {
+        $enrollmentKey = $request->queryParam('enrollment_key');
+        if ($enrollmentKey === null || !$this->enrollments->isEnrollmentKeyActive($enrollmentKey)) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "Invalid or expired enrollment key.\n";
+            return;
+        }
+
+        header('Content-Type: text/x-shellscript; charset=utf-8');
+        header('Content-Disposition: inline; filename="install-winpatchagent-linux.sh"');
+        echo $this->buildLinuxInstallScript($request->baseUrl(), $enrollmentKey);
+    }
+
+    private function handleWindowsInstallScript(Request $request): void
+    {
+        $enrollmentKey = $request->queryParam('enrollment_key');
+        if ($enrollmentKey === null || !$this->enrollments->isEnrollmentKeyActive($enrollmentKey)) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "Invalid or expired enrollment key.\n";
+            return;
+        }
+
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Content-Disposition: inline; filename="install-winpatchagent-windows.ps1"');
+        echo $this->buildWindowsInstallScript($request->baseUrl(), $enrollmentKey);
+    }
+
+    private function isEnrollmentAuthorized(string $incomingEnrollmentKey, string $deviceId): bool
+    {
+        if ($this->config->enrollmentKey !== '' && hash_equals($this->config->enrollmentKey, $incomingEnrollmentKey)) {
+            return true;
+        }
+
+        if ($incomingEnrollmentKey === '') {
+            return $this->config->enrollmentKey === '';
+        }
+
+        return $this->enrollments->consumeEnrollmentKey($incomingEnrollmentKey, $deviceId);
+    }
+
+    private function readEnrollmentTtlSeconds(array $body): int
+    {
+        $raw = $body['ttl_seconds'] ?? self::DEFAULT_ENROLLMENT_TTL_SECONDS;
+        if (is_int($raw)) {
+            $ttl = $raw;
+        } elseif (is_numeric($raw)) {
+            $ttl = (int) $raw;
+        } else {
+            throw new ApiException(422, 'invalid_request', 'Field "ttl_seconds" must be an integer.');
+        }
+
+        if ($ttl < 300 || $ttl > 2592000) {
+            throw new ApiException(422, 'invalid_request', 'Field "ttl_seconds" must be between 300 and 2592000.');
+        }
+
+        return $ttl;
+    }
+
+    private function buildLinuxInstallScript(string $baseUrl, string $enrollmentKey): string
+    {
+        $backendLiteral = escapeshellarg($baseUrl);
+        $keyLiteral = escapeshellarg($enrollmentKey);
+        $repoUrlLiteral = escapeshellarg(self::AGENT_REPO_URL);
+        $repoRefLiteral = escapeshellarg(self::AGENT_REPO_REF);
+
+        return <<<BASH
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKEND_URL={$backendLiteral}
+ENROLLMENT_KEY={$keyLiteral}
+REPO_URL={$repoUrlLiteral}
+REPO_REF={$repoRefLiteral}
+WORK_DIR="/opt/winpatchagent-src"
+
+if [[ "\${EUID}" -ne 0 ]]; then
+  echo "Run as root (or pipe into sudo bash)." >&2
+  exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "git is required and apt-get was not found. Install git, then rerun." >&2
+    exit 1
+  fi
+
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates curl
+fi
+
+if [[ -d "\${WORK_DIR}/.git" ]]; then
+  git -C "\${WORK_DIR}" fetch --depth 1 origin "\${REPO_REF}"
+  git -C "\${WORK_DIR}" checkout -B "\${REPO_REF}" FETCH_HEAD
+else
+  git clone --depth 1 --branch "\${REPO_REF}" "\${REPO_URL}" "\${WORK_DIR}"
+fi
+
+bash "\${WORK_DIR}/scripts/setup_ubuntu_agent.sh" \\
+  --backend-url "\${BACKEND_URL}" \\
+  --enrollment-key "\${ENROLLMENT_KEY}"
+BASH;
+    }
+
+    private function buildWindowsInstallScript(string $baseUrl, string $enrollmentKey): string
+    {
+        $backendUrlLiteral = $this->powershellLiteral($baseUrl);
+        $enrollmentKeyLiteral = $this->powershellLiteral($enrollmentKey);
+        $repoUrlLiteral = $this->powershellLiteral(self::AGENT_REPO_URL);
+        $repoRefLiteral = $this->powershellLiteral(self::AGENT_REPO_REF);
+
+        return <<<POWERSHELL
+\$ErrorActionPreference = "Stop"
+
+\$BackendUrl = {$backendUrlLiteral}
+\$EnrollmentKey = {$enrollmentKeyLiteral}
+\$RepoUrl = {$repoUrlLiteral}
+\$RepoRef = {$repoRefLiteral}
+\$WorkDir = "C:\\ProgramData\\WinPatchAgent\\src"
+\$InstallDir = "C:\\Program Files\\WinPatchAgent"
+\$ServiceName = "PatchAgentSvc"
+\$StateDir = "C:\\ProgramData\\WinPatchAgent\\state"
+
+function Require-Command {
+    param([string]\$Name, [string]\$Hint)
+    if (-not (Get-Command \$Name -ErrorAction SilentlyContinue)) {
+        throw "Missing required command '\$Name'. \$Hint"
+    }
+}
+
+Require-Command "git" "Install Git for Windows and rerun."
+Require-Command "dotnet" "Install .NET SDK 8+ and rerun."
+
+New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
+New-Item -ItemType Directory -Path \$StateDir -Force | Out-Null
+
+if (Test-Path "\$WorkDir\\.git") {
+    git -C \$WorkDir fetch --depth 1 origin \$RepoRef
+    git -C \$WorkDir checkout -B \$RepoRef FETCH_HEAD
+} else {
+    New-Item -ItemType Directory -Path \$WorkDir -Force | Out-Null
+    git clone --depth 1 --branch \$RepoRef \$RepoUrl \$WorkDir
+}
+
+\$ProjectPath = Join-Path \$WorkDir "src\\PatchAgent.Service\\PatchAgent.Service.csproj"
+dotnet publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
+
+\$ConfigPath = Join-Path \$InstallDir "appsettings.Production.json"
+\$ConfigObject = @{
+    Agent = @{
+        ServiceName = "PatchAgentSvc"
+        BackendBaseUrl = \$BackendUrl
+        EnrollmentKey = \$EnrollmentKey
+        AgentChannel = "stable"
+        StorageRoot = \$StateDir
+        RequestTimeoutSeconds = 30
+        LoopDelaySeconds = 15
+        HeartbeatIntervalSeconds = 300
+        InventoryIntervalSeconds = 21600
+        JobPollIntervalSeconds = 120
+        EnableStubJobExecution = \$true
+        StubJobDurationSeconds = 20
+        EnableAptJobExecution = \$false
+    }
+}
+\$ConfigObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$ConfigPath -Encoding UTF8
+
+if (Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue) {
+    Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
+    sc.exe delete \$ServiceName | Out-Null
+    Start-Sleep -Seconds 2
+}
+
+\$ExePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
+if (-not (Test-Path \$ExePath)) {
+    throw "Expected service binary not found: \$ExePath"
+}
+
+sc.exe create \$ServiceName binPath= "`"\$ExePath`"" start= auto | Out-Null
+sc.exe description \$ServiceName "WinPatchAgent endpoint service" | Out-Null
+Start-Service -Name \$ServiceName
+
+Write-Host "Install complete."
+Write-Host "Service: \$ServiceName"
+Write-Host "Status:  Get-Service -Name \$ServiceName"
+POWERSHELL;
+    }
+
+    private function buildLinuxInstallCommand(string $scriptUrl): string
+    {
+        return sprintf('curl -fsSL %s | sudo bash', escapeshellarg($scriptUrl));
+    }
+
+    private function buildWindowsInstallCommand(string $scriptUrl): string
+    {
+        return sprintf(
+            "powershell -ExecutionPolicy Bypass -NoProfile -Command \"iwr -UseBasicParsing '%s' | iex\"",
+            str_replace("'", "''", $scriptUrl)
+        );
+    }
+
+    private function powershellLiteral(string $value): string
+    {
+        return "'" . str_replace("'", "''", $value) . "'";
     }
 
     private function requireAgent(Request $request): array

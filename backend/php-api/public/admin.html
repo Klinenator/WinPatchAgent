@@ -181,6 +181,41 @@
     </section>
 
     <section class="card">
+        <h2>New Agent</h2>
+        <p class="small">Generate a one-time enrollment key and platform install link.</p>
+        <div class="row">
+            <div>
+                <label for="newAgentPlatform">Platform</label>
+                <select id="newAgentPlatform">
+                    <option value="linux">Linux (Ubuntu)</option>
+                    <option value="windows">Windows (PowerShell)</option>
+                </select>
+            </div>
+            <div>
+                <label for="newAgentTtlSeconds">Key TTL Seconds</label>
+                <input id="newAgentTtlSeconds" type="number" min="300" max="2592000" value="604800">
+            </div>
+        </div>
+        <div class="actions">
+            <button id="generateAgentBtn" type="button">Generate Installer</button>
+        </div>
+        <div id="newAgentStatus" class="status"></div>
+
+        <div class="row">
+            <div>
+                <label for="newAgentEnrollmentKey">Enrollment Key</label>
+                <input id="newAgentEnrollmentKey" class="mono" type="text" readonly>
+            </div>
+            <div>
+                <label for="newAgentScriptUrl">Install Script URL</label>
+                <input id="newAgentScriptUrl" class="mono" type="text" readonly>
+            </div>
+        </div>
+        <label for="newAgentInstallCommand">Install Command</label>
+        <textarea id="newAgentInstallCommand" class="mono" readonly></textarea>
+    </section>
+
+    <section class="card">
         <h2>Seed Job</h2>
         <div class="row">
             <div>
@@ -266,14 +301,22 @@
 (() => {
     const tokenInput = document.getElementById("adminToken");
     const tokenStatus = document.getElementById("tokenStatus");
+    const newAgentStatus = document.getElementById("newAgentStatus");
     const createStatus = document.getElementById("createStatus");
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
 
     const refreshJobsBtn = document.getElementById("refreshJobsBtn");
+    const generateAgentBtn = document.getElementById("generateAgentBtn");
     const saveTokenBtn = document.getElementById("saveTokenBtn");
     const clearTokenBtn = document.getElementById("clearTokenBtn");
     const createJobBtn = document.getElementById("createJobBtn");
+
+    const newAgentPlatformInput = document.getElementById("newAgentPlatform");
+    const newAgentTtlSecondsInput = document.getElementById("newAgentTtlSeconds");
+    const newAgentEnrollmentKeyInput = document.getElementById("newAgentEnrollmentKey");
+    const newAgentScriptUrlInput = document.getElementById("newAgentScriptUrl");
+    const newAgentInstallCommandInput = document.getElementById("newAgentInstallCommand");
 
     const targetDeviceIdInput = document.getElementById("targetDeviceId");
     const targetAgentIdInput = document.getElementById("targetAgentId");
@@ -302,6 +345,40 @@
 
     refreshJobsBtn.addEventListener("click", async () => {
         await loadDashboard();
+    });
+
+    generateAgentBtn.addEventListener("click", async () => {
+        const platform = newAgentPlatformInput.value;
+        const ttlRaw = newAgentTtlSecondsInput.value.trim();
+        const ttlSeconds = Number.parseInt(ttlRaw, 10);
+
+        if (!Number.isFinite(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 2592000) {
+            setStatus(newAgentStatus, "TTL must be between 300 and 2592000 seconds.", "error");
+            return;
+        }
+
+        try {
+            const response = await apiFetch("/v1/admin/enrollments", {
+                method: "POST",
+                body: JSON.stringify({
+                    platform: platform,
+                    ttl_seconds: ttlSeconds
+                })
+            });
+
+            const enrollment = response.enrollment || {};
+            const install = response.install || {};
+
+            newAgentEnrollmentKeyInput.value = String(enrollment.enrollment_key || "");
+            newAgentScriptUrlInput.value = String(install.script_url || "");
+            newAgentInstallCommandInput.value = String(install.command || "");
+
+            const expiresAt = String(enrollment.expires_at || "");
+            const expiryText = expiresAt ? (" Expires: " + expiresAt) : "";
+            setStatus(newAgentStatus, "Enrollment key generated." + expiryText, "success");
+        } catch (error) {
+            setStatus(newAgentStatus, String(error.message || error), "error");
+        }
     });
 
     createJobBtn.addEventListener("click", async () => {

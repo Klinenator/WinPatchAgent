@@ -8,6 +8,7 @@ require_once __DIR__ . '/Http/JsonResponse.php';
 require_once __DIR__ . '/Http/Request.php';
 require_once __DIR__ . '/Storage/FileStore.php';
 require_once __DIR__ . '/Storage/AgentRepository.php';
+require_once __DIR__ . '/Storage/EnrollmentRepository.php';
 require_once __DIR__ . '/Storage/InventoryRepository.php';
 require_once __DIR__ . '/Storage/EventRepository.php';
 require_once __DIR__ . '/Storage/JobRepository.php';

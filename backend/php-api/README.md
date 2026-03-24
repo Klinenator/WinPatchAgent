@@ -16,6 +16,9 @@ Current endpoints:
 - `POST /v1/admin/jobs`
 - `GET /v1/admin/jobs`
 - `GET /v1/admin/agents`
+- `POST /v1/admin/enrollments`
+- `GET /install/linux.sh?enrollment_key=...`
+- `GET /install/windows.ps1?enrollment_key=...`
 - `GET /healthz`
 
 Storage model:
@@ -47,7 +50,8 @@ Open the admin page in your browser:
 
 `http://127.0.0.1:8080/admin`
 
-The admin page is token-based and uses the same admin bearer token expected by `/v1/admin/jobs` and `/v1/admin/agents`.
+The admin page is token-based and uses the same admin bearer token expected by `/v1/admin/jobs`, `/v1/admin/agents`, and `/v1/admin/enrollments`.
+It can generate one-time enrollment keys and per-platform installer links.
 
 Suggested nginx site:
 
