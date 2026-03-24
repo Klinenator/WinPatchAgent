@@ -43,6 +43,7 @@ Environment variables:
 - `PATCH_API_GOOGLE_CLIENT_SECRET`: optional Google OAuth client secret for admin login
 - `PATCH_API_GOOGLE_REDIRECT_URI`: optional OAuth callback URL (example: `https://patch.rrsaccess.com/v1/admin/auth/google/callback`)
 - `PATCH_API_GOOGLE_HOSTED_DOMAIN`: optional Google Workspace domain allow-list (example: `accessrrs.com`)
+- `PATCH_API_LEGACY_CONFIG_FILE`: optional path to legacy PHP config include used as fallback for Google OAuth values (default `/var/lib/php/config.php`)
 - `PATCH_API_ADMIN_SESSION_NAME`: optional admin session cookie name (default `patchagent_admin`)
 - `PATCH_API_ADMIN_SESSION_TTL_SECONDS`: optional admin session lifetime seconds (default `28800`)
 - `PATCH_API_STORAGE_ROOT`: optional override for the runtime storage path

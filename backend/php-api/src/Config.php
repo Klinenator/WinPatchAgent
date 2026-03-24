@@ -27,21 +27,110 @@ final class Config
     public static function fromEnvironment(): self
     {
         $defaultRoot = Path::normalize(dirname(__DIR__) . '/storage/runtime');
+        $legacyConfig = self::legacyPhpConfig(
+            self::env('PATCH_API_LEGACY_CONFIG_FILE', '/var/lib/php/config.php')
+        );
 
         return new self(
             storageRoot: Path::normalize(self::env('PATCH_API_STORAGE_ROOT', $defaultRoot)),
             enrollmentKey: self::env('PATCH_API_ENROLLMENT_KEY', ''),
             adminKey: self::env('PATCH_API_ADMIN_KEY', ''),
-            googleClientId: self::env('PATCH_API_GOOGLE_CLIENT_ID', ''),
-            googleClientSecret: self::env('PATCH_API_GOOGLE_CLIENT_SECRET', ''),
-            googleRedirectUri: self::env('PATCH_API_GOOGLE_REDIRECT_URI', ''),
-            googleHostedDomain: self::env('PATCH_API_GOOGLE_HOSTED_DOMAIN', ''),
+            googleClientId: self::env('PATCH_API_GOOGLE_CLIENT_ID', $legacyConfig['google_client_id'] ?? ''),
+            googleClientSecret: self::env('PATCH_API_GOOGLE_CLIENT_SECRET', $legacyConfig['google_client_secret'] ?? ''),
+            googleRedirectUri: self::env('PATCH_API_GOOGLE_REDIRECT_URI', $legacyConfig['google_redirect_uri'] ?? ''),
+            googleHostedDomain: self::env('PATCH_API_GOOGLE_HOSTED_DOMAIN', $legacyConfig['google_hosted_domain'] ?? ''),
             adminSessionName: self::env('PATCH_API_ADMIN_SESSION_NAME', 'patchagent_admin'),
             adminSessionTtlSeconds: self::envInt('PATCH_API_ADMIN_SESSION_TTL_SECONDS', 28800),
             heartbeatSeconds: self::envInt('PATCH_API_HEARTBEAT_SECONDS', 300),
             jobsSeconds: self::envInt('PATCH_API_JOBS_SECONDS', 120),
             inventorySeconds: self::envInt('PATCH_API_INVENTORY_SECONDS', 21600)
         );
+    }
+
+    private static function legacyPhpConfig(string $filePath): array
+    {
+        static $cache = [];
+
+        $path = trim($filePath);
+        if ($path === '' || !is_file($path) || !is_readable($path)) {
+            return [];
+        }
+
+        if (array_key_exists($path, $cache)) {
+            return $cache[$path];
+        }
+
+        $clientID = null;
+        $clientSecret = null;
+        $redirectUri = null;
+        $hostedDomain = null;
+        $googleClientId = null;
+        $googleClientSecret = null;
+        $googleRedirectUri = null;
+        $googleHostedDomain = null;
+
+        try {
+            include $path;
+        } catch (\Throwable) {
+            $cache[$path] = [];
+            return [];
+        }
+
+        $result = [];
+
+        $resolvedClientId = self::readLegacyString($googleClientId)
+            ?? self::readLegacyString($clientID)
+            ?? self::readLegacyConstant('GOOGLE_CLIENT_ID')
+            ?? self::readLegacyConstant('CLIENT_ID');
+        if ($resolvedClientId !== null) {
+            $result['google_client_id'] = $resolvedClientId;
+        }
+
+        $resolvedClientSecret = self::readLegacyString($googleClientSecret)
+            ?? self::readLegacyString($clientSecret)
+            ?? self::readLegacyConstant('GOOGLE_CLIENT_SECRET')
+            ?? self::readLegacyConstant('CLIENT_SECRET');
+        if ($resolvedClientSecret !== null) {
+            $result['google_client_secret'] = $resolvedClientSecret;
+        }
+
+        $resolvedRedirectUri = self::readLegacyString($googleRedirectUri)
+            ?? self::readLegacyString($redirectUri)
+            ?? self::readLegacyConstant('GOOGLE_REDIRECT_URI')
+            ?? self::readLegacyConstant('REDIRECT_URI');
+        if ($resolvedRedirectUri !== null) {
+            $result['google_redirect_uri'] = $resolvedRedirectUri;
+        }
+
+        $resolvedHostedDomain = self::readLegacyString($googleHostedDomain)
+            ?? self::readLegacyString($hostedDomain)
+            ?? self::readLegacyConstant('GOOGLE_HOSTED_DOMAIN')
+            ?? self::readLegacyConstant('HOSTED_DOMAIN');
+        if ($resolvedHostedDomain !== null) {
+            $result['google_hosted_domain'] = $resolvedHostedDomain;
+        }
+
+        $cache[$path] = $result;
+        return $result;
+    }
+
+    private static function readLegacyConstant(string $name): ?string
+    {
+        if (!defined($name)) {
+            return null;
+        }
+
+        return self::readLegacyString(constant($name));
+    }
+
+    private static function readLegacyString(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+        return $trimmed === '' ? null : $trimmed;
     }
 
     private static function env(string $key, string $default): string
