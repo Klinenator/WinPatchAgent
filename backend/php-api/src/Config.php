@@ -11,6 +11,7 @@ final class Config
     public function __construct(
         public readonly string $storageRoot,
         public readonly string $enrollmentKey,
+        public readonly string $adminKey,
         public readonly int $heartbeatSeconds,
         public readonly int $jobsSeconds,
         public readonly int $inventorySeconds
@@ -24,6 +25,7 @@ final class Config
         return new self(
             storageRoot: Path::normalize(self::env('PATCH_API_STORAGE_ROOT', $defaultRoot)),
             enrollmentKey: self::env('PATCH_API_ENROLLMENT_KEY', ''),
+            adminKey: self::env('PATCH_API_ADMIN_KEY', ''),
             heartbeatSeconds: self::envInt('PATCH_API_HEARTBEAT_SECONDS', 300),
             jobsSeconds: self::envInt('PATCH_API_JOBS_SECONDS', 120),
             inventorySeconds: self::envInt('PATCH_API_INVENTORY_SECONDS', 21600)

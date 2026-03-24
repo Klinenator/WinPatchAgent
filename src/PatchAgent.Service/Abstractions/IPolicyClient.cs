@@ -15,6 +15,19 @@ public interface IPolicyClient
 
     Task<JobAssignment?> FetchNextJobAsync(AgentState state, CancellationToken cancellationToken);
 
+    Task AcknowledgeJobAsync(
+        AgentState state,
+        JobExecutionState job,
+        string ack,
+        string? reason,
+        CancellationToken cancellationToken);
+
+    Task CompleteJobAsync(
+        AgentState state,
+        JobExecutionState job,
+        JobCompletionReport report,
+        CancellationToken cancellationToken);
+
     Task<bool> PublishEventsAsync(
         AgentState state,
         IReadOnlyCollection<TelemetryEvent> events,

@@ -23,4 +23,16 @@ public sealed class AgentOptions
     public int InventoryIntervalSeconds { get; set; } = 21600;
 
     public int JobPollIntervalSeconds { get; set; } = 120;
+
+    public bool EnableStubJobExecution { get; set; } = true;
+
+    public int StubJobDurationSeconds { get; set; } = 20;
+
+    public bool EnableAptJobExecution { get; set; } = true;
+
+    public bool AptUseSudoWhenNotRoot { get; set; } = true;
+
+    public bool AptRunUpdateBeforeInstall { get; set; } = true;
+
+    public int AptCommandTimeoutSeconds { get; set; } = 1800;
 }

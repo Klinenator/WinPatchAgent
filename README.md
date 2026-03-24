@@ -72,7 +72,7 @@ sudo bash ./scripts/uninstall_ubuntu_agent.sh --purge-state
 ## Backend (PHP + nginx)
 
 API scaffold is under `backend/php-api/`.
-It now includes a basic admin web view at `/admin` for seeding and listing jobs.
+It now includes a basic admin web view at `/admin` for viewing agents and seeding/listing jobs.
 
 Local dev run:
 

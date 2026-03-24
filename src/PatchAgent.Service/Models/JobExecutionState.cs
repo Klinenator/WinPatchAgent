@@ -4,11 +4,29 @@ public sealed class JobExecutionState
 {
     public string JobId { get; set; } = string.Empty;
 
+    public string JobType { get; set; } = string.Empty;
+
+    public string CorrelationId { get; set; } = string.Empty;
+
     public string State { get; set; } = "Assigned";
 
     public DateTimeOffset StateChangedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
+    public DateTimeOffset? ExecutionStartedAtUtc { get; set; }
+
+    public DateTimeOffset? ExecutionDueAtUtc { get; set; }
+
     public int? PercentComplete { get; set; }
 
     public bool ResumeRequired { get; set; }
+
+    public int StubDurationSeconds { get; set; } = 20;
+
+    public string SimulatedOutcome { get; set; } = "success";
+
+    public bool SimulatedRebootRequired { get; set; }
+
+    public bool AptUpgradeAll { get; set; }
+
+    public List<string> AptPackages { get; set; } = [];
 }

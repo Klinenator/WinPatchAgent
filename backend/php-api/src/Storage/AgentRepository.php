@@ -88,6 +88,47 @@ final class AgentRepository
         }
     }
 
+    public function listAgents(): array
+    {
+        $agents = $this->store->readJson(self::FILE, ['agents' => []]);
+        $records = array_values(is_array($agents['agents'] ?? null) ? $agents['agents'] : []);
+
+        usort($records, static function (array $left, array $right): int {
+            $leftSeen = (string) ($left['last_seen_at'] ?? '');
+            $rightSeen = (string) ($right['last_seen_at'] ?? '');
+
+            if ($leftSeen === $rightSeen) {
+                $leftUpdated = (string) ($left['updated_at'] ?? '');
+                $rightUpdated = (string) ($right['updated_at'] ?? '');
+                return strcmp($rightUpdated, $leftUpdated);
+            }
+
+            return strcmp($rightSeen, $leftSeen);
+        });
+
+        return array_map(static function (array $agent): array {
+            $capabilities = is_array($agent['capabilities'] ?? null) ? $agent['capabilities'] : [];
+            $cleanCapabilities = array_values(array_filter(
+                $capabilities,
+                static fn ($value): bool => is_string($value) && trim($value) !== ''
+            ));
+
+            return [
+                'agent_record_id' => (string) ($agent['agent_record_id'] ?? ''),
+                'device_id' => (string) ($agent['device_id'] ?? ''),
+                'hostname' => (string) ($agent['hostname'] ?? ''),
+                'domain' => (string) ($agent['domain'] ?? ''),
+                'os' => is_array($agent['os'] ?? null) ? $agent['os'] : [],
+                'agent' => is_array($agent['agent'] ?? null) ? $agent['agent'] : [],
+                'capabilities' => $cleanCapabilities,
+                'created_at' => (string) ($agent['created_at'] ?? ''),
+                'updated_at' => (string) ($agent['updated_at'] ?? ''),
+                'last_seen_at' => (string) ($agent['last_seen_at'] ?? ''),
+                'last_heartbeat' => is_array($agent['last_heartbeat'] ?? null) ? $agent['last_heartbeat'] : [],
+            ];
+        }, $records);
+    }
+
     private function newId(string $prefix): string
     {
         return sprintf('%s_%s', $prefix, bin2hex(random_bytes(10)));

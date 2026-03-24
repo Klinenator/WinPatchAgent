@@ -58,6 +58,12 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && $path === '/v1/admin/agents') {
+                $this->requireAdmin($request);
+                $this->handleListAgents();
+                return;
+            }
+
             if ($method === 'POST' && preg_match('#^/v1/agents/jobs/([^/]+)/ack$#', $path, $matches) === 1) {
                 $agent = $this->requireAgent($request);
                 $this->handleAcknowledgeJob($request, $agent, rawurldecode($matches[1]));
@@ -306,6 +312,13 @@ final class App
     {
         JsonResponse::ok([
             'jobs' => $this->jobs->listJobs(),
+        ]);
+    }
+
+    private function handleListAgents(): void
+    {
+        JsonResponse::ok([
+            'agents' => $this->agents->listAgents(),
         ]);
     }
 

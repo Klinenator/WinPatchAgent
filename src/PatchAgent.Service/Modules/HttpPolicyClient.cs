@@ -155,7 +155,16 @@ public sealed class HttpPolicyClient : IPolicyClient
                 Hostname = snapshot.Hostname,
                 DomainOrWorkgroup = snapshot.DomainOrWorkgroup,
                 FreeDiskMb = snapshot.FreeDiskMb
-            }
+            },
+            Linux = OperatingSystem.IsLinux()
+                ? new InventoryUploadLinux
+                {
+                    DistroId = snapshot.LinuxDistroId,
+                    DistroVersionId = snapshot.LinuxDistroVersionId,
+                    KernelVersion = snapshot.LinuxKernelVersion,
+                    AptAvailable = snapshot.AptAvailable
+                }
+                : null
         };
 
         await PostAsync<InventoryUploadRequest, AcceptedResponse>(
@@ -192,8 +201,72 @@ public sealed class HttpPolicyClient : IPolicyClient
             JobType = response.Job.Type,
             CorrelationId = response.Job.CorrelationId,
             MaintenanceWindowStartUtc = response.Job.Policy?.MaintenanceWindow?.Start,
-            MaintenanceWindowEndUtc = response.Job.Policy?.MaintenanceWindow?.End
+            MaintenanceWindowEndUtc = response.Job.Policy?.MaintenanceWindow?.End,
+            StubDurationSeconds = ReadStubDurationSeconds(response.Job.Payload),
+            SimulatedOutcome = ReadSimulatedOutcome(response.Job.Payload),
+            SimulatedRebootRequired = ReadSimulatedRebootRequired(response.Job.Payload),
+            AptUpgradeAll = ReadAptUpgradeAll(response.Job.Payload),
+            AptPackages = ReadAptPackages(response.Job.Payload)
         };
+    }
+
+    public async Task AcknowledgeJobAsync(
+        AgentState state,
+        JobExecutionState job,
+        string ack,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        var request = new JobAckRequest
+        {
+            AgentId = GetAgentId(state),
+            DeviceId = state.DeviceId,
+            Ack = ack,
+            Reason = reason,
+            AcknowledgedAt = DateTimeOffset.UtcNow
+        };
+
+        await PostAsync<JobAckRequest, AcceptedResponse>(
+            $"v1/agents/jobs/{job.JobId}/ack",
+            request,
+            state,
+            cancellationToken);
+    }
+
+    public async Task CompleteJobAsync(
+        AgentState state,
+        JobExecutionState job,
+        JobCompletionReport report,
+        CancellationToken cancellationToken)
+    {
+        var request = new JobCompletionRequest
+        {
+            AgentId = GetAgentId(state),
+            DeviceId = state.DeviceId,
+            CompletedAt = DateTimeOffset.UtcNow,
+            FinalState = report.FinalState,
+            Result = new JobCompletionResult
+            {
+                InstallResult = report.InstallResult,
+                RebootRequired = report.RebootRequired,
+                RebootPerformed = report.RebootPerformed,
+                PostRebootValidation = report.PostRebootValidation
+            },
+            Error = report.ErrorCode is null && report.ErrorMessage is null && report.Retryable is null
+                ? null
+                : new JobCompletionError
+                {
+                    Code = report.ErrorCode,
+                    Message = report.ErrorMessage,
+                    Retryable = report.Retryable
+                }
+        };
+
+        await PostAsync<JobCompletionRequest, AcceptedResponse>(
+            $"v1/agents/jobs/{job.JobId}/complete",
+            request,
+            state,
+            cancellationToken);
     }
 
     public async Task<bool> PublishEventsAsync(
@@ -312,5 +385,126 @@ public sealed class HttpPolicyClient : IPolicyClient
         state.ServerHeartbeatIntervalSeconds = poll.HeartbeatSeconds;
         state.ServerJobPollIntervalSeconds = poll.JobsSeconds;
         state.ServerInventoryIntervalSeconds = poll.InventorySeconds;
+    }
+
+    private static string ReadSimulatedOutcome(JsonElement? payload)
+    {
+        if (TryGetSimulationValue(payload, "result", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var parsed = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(parsed))
+            {
+                return parsed.Trim().ToLowerInvariant();
+            }
+        }
+
+        return "success";
+    }
+
+    private static int? ReadStubDurationSeconds(JsonElement? payload)
+    {
+        if (TryGetSimulationValue(payload, "duration_seconds", out var value) && value is { ValueKind: JsonValueKind.Number })
+        {
+            return value.Value.TryGetInt32(out var seconds) ? seconds : null;
+        }
+
+        return null;
+    }
+
+    private static bool ReadSimulatedRebootRequired(JsonElement? payload)
+    {
+        if (TryGetSimulationValue(payload, "reboot_required", out var value) && value is { ValueKind: JsonValueKind.True or JsonValueKind.False })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return false;
+    }
+
+    private static bool TryGetSimulationValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        if (!payloadObject.TryGetProperty("simulation", out var simulation) || simulation.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!simulation.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool ReadAptUpgradeAll(JsonElement? payload)
+    {
+        if (TryGetAptValue(payload, "upgrade_all", out var value) && value is { ValueKind: JsonValueKind.True or JsonValueKind.False })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return false;
+    }
+
+    private static List<string> ReadAptPackages(JsonElement? payload)
+    {
+        if (!TryGetAptValue(payload, "packages", out var value) || value is not { ValueKind: JsonValueKind.Array })
+        {
+            return [];
+        }
+
+        var packages = new List<string>();
+        foreach (var item in value.Value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var packageName = item.GetString();
+            if (!string.IsNullOrWhiteSpace(packageName))
+            {
+                packages.Add(packageName.Trim());
+            }
+        }
+
+        return packages;
+    }
+
+    private static bool TryGetAptValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        if (!payloadObject.TryGetProperty("apt", out var aptSection) || aptSection.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!aptSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
     }
 }

@@ -15,6 +15,7 @@ Current endpoints:
 - `POST /v1/agents/job-events`
 - `POST /v1/admin/jobs`
 - `GET /v1/admin/jobs`
+- `GET /v1/admin/agents`
 - `GET /healthz`
 
 Storage model:
@@ -46,7 +47,7 @@ Open the admin page in your browser:
 
 `http://127.0.0.1:8080/admin`
 
-The admin page is token-based and uses the same admin bearer token expected by `/v1/admin/jobs`.
+The admin page is token-based and uses the same admin bearer token expected by `/v1/admin/jobs` and `/v1/admin/agents`.
 
 Suggested nginx site:
 

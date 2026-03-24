@@ -16,6 +16,7 @@ public sealed class AgentCoordinator
     private readonly IInventoryCollector _inventoryCollector;
     private readonly IPolicyClient _policyClient;
     private readonly ITelemetryQueue _telemetryQueue;
+    private readonly IJobExecutor _jobExecutor;
 
     public AgentCoordinator(
         ILogger<AgentCoordinator> logger,
@@ -25,7 +26,8 @@ public sealed class AgentCoordinator
         IAgentIdentityManager identityManager,
         IInventoryCollector inventoryCollector,
         IPolicyClient policyClient,
-        ITelemetryQueue telemetryQueue)
+        ITelemetryQueue telemetryQueue,
+        IJobExecutor jobExecutor)
     {
         _logger = logger;
         _options = options.Value;
@@ -35,6 +37,7 @@ public sealed class AgentCoordinator
         _inventoryCollector = inventoryCollector;
         _policyClient = policyClient;
         _telemetryQueue = telemetryQueue;
+        _jobExecutor = jobExecutor;
     }
 
     public async Task RunOnceAsync(CancellationToken cancellationToken)
@@ -62,6 +65,10 @@ public sealed class AgentCoordinator
         await PersistIfChangedAsync(
             state,
             await MaybePollForJobsAsync(state, cancellationToken),
+            cancellationToken);
+        await PersistIfChangedAsync(
+            state,
+            await MaybeAdvanceCurrentJobAsync(state, cancellationToken),
             cancellationToken);
         await FlushTelemetryAsync(state, cancellationToken);
 
@@ -181,9 +188,23 @@ public sealed class AgentCoordinator
         state.CurrentJob = new JobExecutionState
         {
             JobId = job.JobId,
+            JobType = job.JobType,
+            CorrelationId = job.CorrelationId,
             State = "Assigned",
-            StateChangedAtUtc = DateTimeOffset.UtcNow
+            StateChangedAtUtc = DateTimeOffset.UtcNow,
+            StubDurationSeconds = Math.Max(1, job.StubDurationSeconds ?? _options.StubJobDurationSeconds),
+            SimulatedOutcome = string.IsNullOrWhiteSpace(job.SimulatedOutcome) ? "success" : job.SimulatedOutcome,
+            SimulatedRebootRequired = job.SimulatedRebootRequired,
+            AptUpgradeAll = job.AptUpgradeAll,
+            AptPackages = job.AptPackages.ToList()
         };
+
+        await _policyClient.AcknowledgeJobAsync(
+            state,
+            state.CurrentJob,
+            ack: "accepted",
+            reason: null,
+            cancellationToken);
 
         await _telemetryQueue.EnqueueAsync(
             TelemetryEvent.Create(
@@ -197,6 +218,11 @@ public sealed class AgentCoordinator
             cancellationToken);
 
         return true;
+    }
+
+    private async Task<bool> MaybeAdvanceCurrentJobAsync(AgentState state, CancellationToken cancellationToken)
+    {
+        return await _jobExecutor.TryAdvanceAsync(state, cancellationToken);
     }
 
     private async Task FlushTelemetryAsync(AgentState state, CancellationToken cancellationToken)

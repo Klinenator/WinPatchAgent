@@ -19,4 +19,12 @@ public sealed class InventorySnapshot
     public bool PendingReboot { get; set; }
 
     public long? FreeDiskMb { get; set; }
+
+    public string? LinuxDistroId { get; set; }
+
+    public string? LinuxDistroVersionId { get; set; }
+
+    public string? LinuxKernelVersion { get; set; }
+
+    public bool AptAvailable { get; set; }
 }

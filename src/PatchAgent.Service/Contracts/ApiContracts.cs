@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace PatchAgent.Service.Contracts;
 
 public sealed class RegisterAgentRequest
@@ -119,6 +121,8 @@ public sealed class InventoryUploadRequest
     public InventoryHardware Hardware { get; set; } = new();
 
     public List<InventoryApplication> Applications { get; set; } = [];
+
+    public InventoryUploadLinux? Linux { get; set; }
 }
 
 public sealed class InventoryUploadOs
@@ -142,6 +146,17 @@ public sealed class InventoryHardware
     public string DomainOrWorkgroup { get; set; } = string.Empty;
 
     public long? FreeDiskMb { get; set; }
+}
+
+public sealed class InventoryUploadLinux
+{
+    public string? DistroId { get; set; }
+
+    public string? DistroVersionId { get; set; }
+
+    public string? KernelVersion { get; set; }
+
+    public bool AptAvailable { get; set; }
 }
 
 public sealed class InventoryApplication
@@ -178,6 +193,8 @@ public sealed class FetchJobPayload
     public string CorrelationId { get; set; } = string.Empty;
 
     public FetchJobPolicy? Policy { get; set; }
+
+    public JsonElement? Payload { get; set; }
 }
 
 public sealed class FetchJobPolicy
@@ -217,4 +234,52 @@ public sealed class AcceptedResponse
     public bool Accepted { get; set; } = true;
 
     public int? AcceptedCount { get; set; }
+}
+
+public sealed class JobAckRequest
+{
+    public string AgentId { get; set; } = string.Empty;
+
+    public string DeviceId { get; set; } = string.Empty;
+
+    public string Ack { get; set; } = "accepted";
+
+    public string? Reason { get; set; }
+
+    public DateTimeOffset AcknowledgedAt { get; set; }
+}
+
+public sealed class JobCompletionRequest
+{
+    public string AgentId { get; set; } = string.Empty;
+
+    public string DeviceId { get; set; } = string.Empty;
+
+    public DateTimeOffset CompletedAt { get; set; }
+
+    public string FinalState { get; set; } = "Succeeded";
+
+    public JobCompletionResult Result { get; set; } = new();
+
+    public JobCompletionError? Error { get; set; }
+}
+
+public sealed class JobCompletionResult
+{
+    public string InstallResult { get; set; } = "success";
+
+    public bool RebootRequired { get; set; }
+
+    public bool RebootPerformed { get; set; }
+
+    public string PostRebootValidation { get; set; } = "not_run";
+}
+
+public sealed class JobCompletionError
+{
+    public string? Code { get; set; }
+
+    public string? Message { get; set; }
+
+    public bool? Retryable { get; set; }
 }

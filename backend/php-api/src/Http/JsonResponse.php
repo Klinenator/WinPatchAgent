@@ -11,6 +11,11 @@ final class JsonResponse
         self::send(200, $payload);
     }
 
+    public static function created(array $payload): void
+    {
+        self::send(201, $payload);
+    }
+
     public static function error(int $statusCode, string $errorCode, string $message, array $extra = []): void
     {
         self::send($statusCode, array_merge([

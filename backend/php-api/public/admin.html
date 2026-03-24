@@ -167,7 +167,7 @@
 <body>
 <main>
     <h1>PatchAgent Admin</h1>
-    <p>Seed patch jobs and inspect current queue using your admin bearer token.</p>
+    <p>View active agents and job status, then seed new patch jobs using your admin bearer token.</p>
 
     <section class="card">
         <label for="adminToken">Admin Bearer Token</label>
@@ -175,7 +175,7 @@
         <div class="actions">
             <button id="saveTokenBtn" type="button" class="secondary">Save In Browser</button>
             <button id="clearTokenBtn" type="button" class="danger">Clear Saved Token</button>
-            <button id="refreshJobsBtn" type="button">Refresh Jobs</button>
+            <button id="refreshJobsBtn" type="button">Refresh Dashboard</button>
         </div>
         <div id="tokenStatus" class="status"></div>
     </section>
@@ -222,6 +222,26 @@
     </section>
 
     <section class="card">
+        <h2>Agents</h2>
+        <p class="small">Agents are sorted by most recent heartbeat.</p>
+        <table>
+            <thead>
+            <tr>
+                <th>Agent ID</th>
+                <th>Hostname</th>
+                <th>Device ID</th>
+                <th>Last Seen</th>
+                <th>Service State</th>
+                <th>Current Job</th>
+            </tr>
+            </thead>
+            <tbody id="agentsTableBody">
+            <tr><td colspan="6" class="small">No agents loaded.</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
         <h2>Jobs</h2>
         <p class="small">Newest jobs appear first.</p>
         <table>
@@ -247,6 +267,7 @@
     const tokenInput = document.getElementById("adminToken");
     const tokenStatus = document.getElementById("tokenStatus");
     const createStatus = document.getElementById("createStatus");
+    const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
 
     const refreshJobsBtn = document.getElementById("refreshJobsBtn");
@@ -280,7 +301,7 @@
     });
 
     refreshJobsBtn.addEventListener("click", async () => {
-        await loadJobs();
+        await loadDashboard();
     });
 
     createJobBtn.addEventListener("click", async () => {
@@ -325,22 +346,68 @@
             });
             const jobId = response?.job?.job_id || "(unknown)";
             setStatus(createStatus, "Job created: " + jobId, "success");
-            await loadJobs();
+            await loadDashboard();
         } catch (error) {
             setStatus(createStatus, String(error.message || error), "error");
         }
     });
 
-    async function loadJobs() {
+    async function loadDashboard() {
         try {
-            const response = await apiFetch("/v1/admin/jobs", { method: "GET" });
-            const jobs = Array.isArray(response.jobs) ? response.jobs.slice().reverse() : [];
+            const responses = await Promise.all([
+                apiFetch("/v1/admin/jobs", { method: "GET" }),
+                apiFetch("/v1/admin/agents", { method: "GET" })
+            ]);
+
+            const jobsResponse = responses[0];
+            const agentsResponse = responses[1];
+
+            const jobs = Array.isArray(jobsResponse.jobs) ? jobsResponse.jobs.slice().reverse() : [];
+            const agents = Array.isArray(agentsResponse.agents) ? agentsResponse.agents : [];
+
+            renderAgents(agents);
             renderJobs(jobs);
-            setStatus(tokenStatus, "Loaded " + jobs.length + " job(s).", "success");
+            setStatus(
+                tokenStatus,
+                "Loaded " + agents.length + " agent(s) and " + jobs.length + " job(s).",
+                "success"
+            );
         } catch (error) {
+            renderAgents([]);
             renderJobs([]);
             setStatus(tokenStatus, String(error.message || error), "error");
         }
+    }
+
+    function renderAgents(agents) {
+        if (!agents.length) {
+            agentsTableBody.innerHTML = '<tr><td colspan="6" class="small">No agents found.</td></tr>';
+            return;
+        }
+
+        agentsTableBody.innerHTML = agents.map((agent) => {
+            const heartbeat = (typeof agent.last_heartbeat === "object" && agent.last_heartbeat !== null)
+                ? agent.last_heartbeat
+                : {};
+            const currentJob = (typeof heartbeat.current_job === "object" && heartbeat.current_job !== null)
+                ? heartbeat.current_job
+                : {};
+
+            const currentJobId = currentJob.job_id || "";
+            const currentJobState = currentJob.state || "";
+            const currentJobText = currentJobId
+                ? String(currentJobId) + (currentJobState ? " (" + String(currentJobState) + ")" : "")
+                : "";
+
+            return "<tr>" +
+                "<td><code>" + escapeHtml(String(agent.agent_record_id || "")) + "</code></td>" +
+                "<td>" + escapeHtml(String(agent.hostname || "")) + "</td>" +
+                "<td>" + escapeHtml(String(agent.device_id || "")) + "</td>" +
+                "<td>" + escapeHtml(describeLastSeen(String(agent.last_seen_at || ""))) + "</td>" +
+                "<td>" + escapeHtml(String(heartbeat.service_state || "unknown")) + "</td>" +
+                "<td><code>" + escapeHtml(currentJobText) + "</code></td>" +
+                "</tr>";
+        }).join("");
     }
 
     function renderJobs(jobs) {
@@ -432,7 +499,40 @@
             .replaceAll("'", "&#39;");
     }
 
-    loadJobs();
+    function describeLastSeen(lastSeenAt) {
+        if (!lastSeenAt) {
+            return "never";
+        }
+
+        const timestamp = Date.parse(lastSeenAt);
+        if (Number.isNaN(timestamp)) {
+            return lastSeenAt;
+        }
+
+        const ageSeconds = Math.floor((Date.now() - timestamp) / 1000);
+        if (ageSeconds < 0) {
+            return lastSeenAt;
+        }
+
+        const ageMinutes = Math.floor(ageSeconds / 60);
+        if (ageMinutes < 1) {
+            return "just now";
+        }
+
+        if (ageMinutes < 60) {
+            return ageMinutes + "m ago";
+        }
+
+        const ageHours = Math.floor(ageMinutes / 60);
+        if (ageHours < 24) {
+            return ageHours + "h ago";
+        }
+
+        const ageDays = Math.floor(ageHours / 24);
+        return ageDays + "d ago";
+    }
+
+    loadDashboard();
 })();
 </script>
 </body>
