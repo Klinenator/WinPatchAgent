@@ -79,6 +79,11 @@ final class FileStore
         }
     }
 
+    public function exists(string $relativePath): bool
+    {
+        return is_file($this->path($relativePath));
+    }
+
     private function path(string $relativePath): string
     {
         return $this->root . '/' . ltrim($relativePath, '/');

@@ -266,16 +266,67 @@
         <table>
             <thead>
             <tr>
+                <th>Name</th>
                 <th>Agent ID</th>
                 <th>Hostname</th>
                 <th>Device ID</th>
                 <th>Last Seen</th>
                 <th>Service State</th>
+                <th>Patches</th>
                 <th>Current Job</th>
+                <th>Action</th>
             </tr>
             </thead>
             <tbody id="agentsTableBody">
-            <tr><td colspan="6" class="small">No agents loaded.</td></tr>
+            <tr><td colspan="9" class="small">No agents loaded.</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
+        <h2>Selected Agent</h2>
+        <p class="small">Rename an agent, view installed patches, and queue Windows patch install jobs.</p>
+        <div class="row">
+            <div>
+                <label for="selectedAgentId">Agent ID</label>
+                <input id="selectedAgentId" class="mono" type="text" readonly>
+            </div>
+            <div>
+                <label for="selectedAgentDisplayName">Display Name</label>
+                <input id="selectedAgentDisplayName" type="text" placeholder="Production DB Server 01">
+            </div>
+        </div>
+        <div class="actions">
+            <button id="renameAgentBtn" type="button">Save Agent Name</button>
+        </div>
+
+        <div class="row">
+            <div>
+                <label for="patchKbInput">Windows KB IDs (comma-separated)</label>
+                <input id="patchKbInput" type="text" placeholder="KB5035849, KB5035853">
+            </div>
+            <div>
+                <label for="patchCorrelationId">Patch Correlation ID (optional)</label>
+                <input id="patchCorrelationId" type="text" placeholder="windows-rollout-001">
+            </div>
+        </div>
+        <div class="actions">
+            <button id="installPatchBtn" type="button">Install Listed KBs</button>
+            <button id="installAllPatchBtn" type="button" class="secondary">Install All Available Windows Updates</button>
+        </div>
+        <div id="agentActionStatus" class="status"></div>
+
+        <p class="small">Installed patches from latest inventory snapshot.</p>
+        <table>
+            <thead>
+            <tr>
+                <th>KB</th>
+                <th>Title</th>
+                <th>Installed At</th>
+            </tr>
+            </thead>
+            <tbody id="installedPatchesTableBody">
+            <tr><td colspan="3" class="small">Select an agent to view installed patches.</td></tr>
             </tbody>
         </table>
     </section>
@@ -308,8 +359,10 @@
     const tokenStatus = document.getElementById("tokenStatus");
     const newAgentStatus = document.getElementById("newAgentStatus");
     const createStatus = document.getElementById("createStatus");
+    const agentActionStatus = document.getElementById("agentActionStatus");
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
+    const installedPatchesTableBody = document.getElementById("installedPatchesTableBody");
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshJobsBtn = document.getElementById("refreshJobsBtn");
@@ -317,6 +370,9 @@
     const saveTokenBtn = document.getElementById("saveTokenBtn");
     const clearTokenBtn = document.getElementById("clearTokenBtn");
     const createJobBtn = document.getElementById("createJobBtn");
+    const renameAgentBtn = document.getElementById("renameAgentBtn");
+    const installPatchBtn = document.getElementById("installPatchBtn");
+    const installAllPatchBtn = document.getElementById("installAllPatchBtn");
 
     const newAgentPlatformInput = document.getElementById("newAgentPlatform");
     const newAgentTtlSecondsInput = document.getElementById("newAgentTtlSeconds");
@@ -330,6 +386,13 @@
     const correlationIdInput = document.getElementById("correlationId");
     const jobPayloadInput = document.getElementById("jobPayload");
     const jobPolicyInput = document.getElementById("jobPolicy");
+    const selectedAgentIdInput = document.getElementById("selectedAgentId");
+    const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
+    const patchKbInput = document.getElementById("patchKbInput");
+    const patchCorrelationIdInput = document.getElementById("patchCorrelationId");
+
+    let latestAgents = [];
+    let selectedAgentId = "";
 
     const STORAGE_KEY = "patchagent_admin_token";
     const savedToken = localStorage.getItem(STORAGE_KEY);
@@ -444,6 +507,74 @@
         }
     });
 
+    renameAgentBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        const displayName = selectedAgentDisplayNameInput.value.trim();
+        if (!displayName) {
+            setStatus(agentActionStatus, "Display name is required.", "error");
+            return;
+        }
+
+        try {
+            await apiFetch("/v1/admin/agents/" + encodeURIComponent(selectedAgentId) + "/rename", {
+                method: "POST",
+                body: JSON.stringify({ display_name: displayName })
+            });
+            setStatus(agentActionStatus, "Agent name saved.", "success");
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
+        }
+    });
+
+    installPatchBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        const kbList = parseKbList(patchKbInput.value);
+        if (!kbList.length) {
+            setStatus(agentActionStatus, "Provide at least one KB ID.", "error");
+            return;
+        }
+
+        try {
+            const response = await queueWindowsPatchJob(selectedAgentId, {
+                install_all: false,
+                kbs: kbList
+            });
+            const jobId = response?.job?.job_id || "(unknown)";
+            setStatus(agentActionStatus, "Windows patch job queued: " + jobId, "success");
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
+        }
+    });
+
+    installAllPatchBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        try {
+            const response = await queueWindowsPatchJob(selectedAgentId, {
+                install_all: true,
+                kbs: []
+            });
+            const jobId = response?.job?.job_id || "(unknown)";
+            setStatus(agentActionStatus, "Install-all job queued: " + jobId, "success");
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
+        }
+    });
+
     async function loadAuthStatus() {
         try {
             const response = await fetch("/v1/admin/auth/status", {
@@ -487,15 +618,18 @@
 
             const jobs = Array.isArray(jobsResponse.jobs) ? jobsResponse.jobs.slice().reverse() : [];
             const agents = Array.isArray(agentsResponse.agents) ? agentsResponse.agents : [];
+            latestAgents = agents;
 
             renderAgents(agents);
             renderJobs(jobs);
+            syncSelectedAgentFromLatest();
             setStatus(
                 tokenStatus,
                 "Loaded " + agents.length + " agent(s) and " + jobs.length + " job(s).",
                 "success"
             );
         } catch (error) {
+            latestAgents = [];
             renderAgents([]);
             renderJobs([]);
             setStatus(tokenStatus, String(error.message || error), "error");
@@ -504,7 +638,7 @@
 
     function renderAgents(agents) {
         if (!agents.length) {
-            agentsTableBody.innerHTML = '<tr><td colspan="6" class="small">No agents found.</td></tr>';
+            agentsTableBody.innerHTML = '<tr><td colspan="9" class="small">No agents found.</td></tr>';
             return;
         }
 
@@ -521,14 +655,121 @@
             const currentJobText = currentJobId
                 ? String(currentJobId) + (currentJobState ? " (" + String(currentJobState) + ")" : "")
                 : "";
+            const displayName = String(agent.display_name || agent.hostname || "");
+            const patchCount = countInstalledPatches(agent);
+            const agentId = String(agent.agent_record_id || "");
+            const manageButton = '<button type="button" class="secondary manage-agent-btn" data-agent-id="' +
+                escapeHtml(agentId) + '">Manage</button>';
 
             return "<tr>" +
+                "<td>" + escapeHtml(displayName) + "</td>" +
                 "<td><code>" + escapeHtml(String(agent.agent_record_id || "")) + "</code></td>" +
                 "<td>" + escapeHtml(String(agent.hostname || "")) + "</td>" +
                 "<td>" + escapeHtml(String(agent.device_id || "")) + "</td>" +
                 "<td>" + escapeHtml(describeLastSeen(String(agent.last_seen_at || ""))) + "</td>" +
                 "<td>" + escapeHtml(String(heartbeat.service_state || "unknown")) + "</td>" +
+                "<td>" + escapeHtml(String(patchCount)) + "</td>" +
                 "<td><code>" + escapeHtml(currentJobText) + "</code></td>" +
+                "<td>" + manageButton + "</td>" +
+                "</tr>";
+        }).join("");
+
+        agentsTableBody
+            .querySelectorAll(".manage-agent-btn")
+            .forEach((button) => {
+                button.addEventListener("click", () => {
+                    const agentId = button.getAttribute("data-agent-id") || "";
+                    selectAgent(agentId);
+                });
+            });
+    }
+
+    function selectAgent(agentId) {
+        const agent = findAgentById(agentId);
+        if (!agent) {
+            return;
+        }
+
+        selectedAgentId = String(agent.agent_record_id || "");
+        selectedAgentIdInput.value = selectedAgentId;
+        selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
+
+        if (!targetAgentIdInput.value.trim()) {
+            targetAgentIdInput.value = selectedAgentId;
+        }
+
+        renderInstalledPatches(getInstalledPatches(agent));
+        setStatus(agentActionStatus, "Selected " + selectedAgentDisplayNameInput.value + ".", "");
+    }
+
+    function syncSelectedAgentFromLatest() {
+        if (!selectedAgentId) {
+            return;
+        }
+
+        const agent = findAgentById(selectedAgentId);
+        if (!agent) {
+            selectedAgentId = "";
+            selectedAgentIdInput.value = "";
+            selectedAgentDisplayNameInput.value = "";
+            renderInstalledPatches([]);
+            setStatus(agentActionStatus, "Selected agent is no longer present.", "error");
+            return;
+        }
+
+        selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
+        renderInstalledPatches(getInstalledPatches(agent));
+    }
+
+    function findAgentById(agentId) {
+        return latestAgents.find((agent) => String(agent.agent_record_id || "") === String(agentId)) || null;
+    }
+
+    function countInstalledPatches(agent) {
+        const windowsUpdate = getWindowsUpdateSection(agent);
+        const count = Number.parseInt(String(windowsUpdate.installed_patches_count || ""), 10);
+        if (Number.isFinite(count) && count >= 0) {
+            return count;
+        }
+
+        const patches = getInstalledPatches(agent);
+        return patches.length;
+    }
+
+    function getWindowsUpdateSection(agent) {
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        return (typeof inventory.windows_update === "object" && inventory.windows_update !== null)
+            ? inventory.windows_update
+            : {};
+    }
+
+    function getInstalledPatches(agent) {
+        const windowsUpdate = getWindowsUpdateSection(agent);
+        const installed = windowsUpdate.installed_patches;
+        if (!Array.isArray(installed)) {
+            return [];
+        }
+
+        return installed
+            .filter((patch) => typeof patch === "object" && patch !== null)
+            .map((patch) => ({
+                kb: String(patch.kb || ""),
+                title: String(patch.title || ""),
+                installed_at: String(patch.installed_at || "")
+            }));
+    }
+
+    function renderInstalledPatches(patches) {
+        if (!patches.length) {
+            installedPatchesTableBody.innerHTML = '<tr><td colspan="3" class="small">No installed patch data in latest inventory.</td></tr>';
+            return;
+        }
+
+        installedPatchesTableBody.innerHTML = patches.map((patch) => {
+            return "<tr>" +
+                "<td><code>" + escapeHtml(String(patch.kb || "")) + "</code></td>" +
+                "<td>" + escapeHtml(String(patch.title || "")) + "</td>" +
+                "<td>" + escapeHtml(String(patch.installed_at || "")) + "</td>" +
                 "</tr>";
         }).join("");
     }
@@ -592,6 +833,44 @@
         }
 
         return data;
+    }
+
+    async function queueWindowsPatchJob(agentRecordId, windowsUpdatePayload) {
+        const correlationRaw = patchCorrelationIdInput.value.trim();
+        const correlationId = correlationRaw || ("windows-update-" + Date.now());
+
+        return await apiFetch("/v1/admin/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                target_agent_id: agentRecordId,
+                type: "windows_update_install",
+                correlation_id: correlationId,
+                payload: {
+                    windows_update: windowsUpdatePayload
+                },
+                policy: {}
+            })
+        });
+    }
+
+    function parseKbList(rawValue) {
+        const unique = new Set();
+        String(rawValue || "")
+            .split(/[\s,]+/)
+            .map((value) => value.trim())
+            .filter((value) => value !== "")
+            .forEach((value) => {
+                let normalized = value.toUpperCase();
+                if (!normalized.startsWith("KB")) {
+                    normalized = "KB" + normalized;
+                }
+
+                if (/^KB\d{4,10}$/.test(normalized)) {
+                    unique.add(normalized);
+                }
+            });
+
+        return Array.from(unique);
     }
 
     function parseJsonField(value, name) {

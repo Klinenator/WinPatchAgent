@@ -27,4 +27,15 @@ public sealed class InventorySnapshot
     public string? LinuxKernelVersion { get; set; }
 
     public bool AptAvailable { get; set; }
+
+    public List<InstalledPatchSnapshot> InstalledWindowsPatches { get; set; } = [];
+}
+
+public sealed class InstalledPatchSnapshot
+{
+    public string Kb { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
+
+    public string InstalledAt { get; set; } = string.Empty;
 }

@@ -137,6 +137,19 @@ public sealed class InventoryUploadOs
 public sealed class InventoryWindowsUpdate
 {
     public bool PendingReboot { get; set; }
+
+    public List<InventoryInstalledPatch> InstalledPatches { get; set; } = [];
+
+    public int InstalledPatchesCount { get; set; }
+}
+
+public sealed class InventoryInstalledPatch
+{
+    public string Kb { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
+
+    public string InstalledAt { get; set; } = string.Empty;
 }
 
 public sealed class InventoryHardware

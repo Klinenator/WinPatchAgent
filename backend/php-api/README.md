@@ -21,6 +21,8 @@ Current endpoints:
 - `POST /v1/admin/jobs`
 - `GET /v1/admin/jobs`
 - `GET /v1/admin/agents`
+- `GET /v1/admin/agents/{agentRecordId}/inventory`
+- `POST /v1/admin/agents/{agentRecordId}/rename`
 - `POST /v1/admin/enrollments`
 - `GET /install/linux.sh?enrollment_key=...`
 - `GET /install/windows.ps1?enrollment_key=...`
@@ -66,7 +68,7 @@ Admin authentication supports either:
 - `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl/UI optional token input)
 - Google OAuth session login when `PATCH_API_GOOGLE_CLIENT_ID`, `PATCH_API_GOOGLE_CLIENT_SECRET`, and `PATCH_API_GOOGLE_REDIRECT_URI` are set
 
-The admin page can generate one-time enrollment keys and per-platform installer links.
+The admin page can generate one-time enrollment keys, rename agents, show installed patch inventory, and queue Windows patch install jobs.
 
 Suggested nginx site:
 
@@ -111,12 +113,10 @@ curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
       }
     },
     "payload": {
-      "updates": [
-        {
-          "kb": "KB5039999",
-          "title": "2026-03 Cumulative Update for Windows 11 23H2"
-        }
-      ]
+      "windows_update": {
+        "install_all": false,
+        "kbs": ["KB5039999"]
+      }
     }
   }'
 ```

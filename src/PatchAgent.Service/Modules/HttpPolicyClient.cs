@@ -148,7 +148,16 @@ public sealed class HttpPolicyClient : IPolicyClient
             },
             WindowsUpdate = new InventoryWindowsUpdate
             {
-                PendingReboot = snapshot.PendingReboot
+                PendingReboot = snapshot.PendingReboot,
+                InstalledPatches = snapshot.InstalledWindowsPatches
+                    .Select(patch => new InventoryInstalledPatch
+                    {
+                        Kb = patch.Kb,
+                        Title = patch.Title,
+                        InstalledAt = patch.InstalledAt
+                    })
+                    .ToList(),
+                InstalledPatchesCount = snapshot.InstalledWindowsPatches.Count
             },
             Hardware = new InventoryHardware
             {
@@ -206,7 +215,9 @@ public sealed class HttpPolicyClient : IPolicyClient
             SimulatedOutcome = ReadSimulatedOutcome(response.Job.Payload),
             SimulatedRebootRequired = ReadSimulatedRebootRequired(response.Job.Payload),
             AptUpgradeAll = ReadAptUpgradeAll(response.Job.Payload),
-            AptPackages = ReadAptPackages(response.Job.Payload)
+            AptPackages = ReadAptPackages(response.Job.Payload),
+            WindowsInstallAll = ReadWindowsInstallAll(response.Job.Payload),
+            WindowsKbIds = ReadWindowsKbIds(response.Job.Payload)
         };
     }
 
@@ -506,5 +517,139 @@ public sealed class HttpPolicyClient : IPolicyClient
 
         value = child;
         return true;
+    }
+
+    private static bool ReadWindowsInstallAll(JsonElement? payload)
+    {
+        if (TryGetWindowsUpdateValue(payload, "install_all", out var value) && value is { ValueKind: JsonValueKind.True or JsonValueKind.False })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return false;
+    }
+
+    private static List<string> ReadWindowsKbIds(JsonElement? payload)
+    {
+        var kbSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddKbValuesFromArrayValue(payload, "kbs", kbSet);
+        AddKbValuesFromArrayValue(payload, "kb_ids", kbSet);
+        AddKbValuesFromUpdates(payload, kbSet);
+
+        return kbSet
+            .Select(NormalizeKb)
+            .Where(static kb => !string.IsNullOrWhiteSpace(kb))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddKbValuesFromArrayValue(
+        JsonElement? payload,
+        string key,
+        ISet<string> kbSet)
+    {
+        if (!TryGetWindowsUpdateValue(payload, key, out var value) || value is not { ValueKind: JsonValueKind.Array })
+        {
+            return;
+        }
+
+        foreach (var item in value.Value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var kb = item.GetString();
+            if (!string.IsNullOrWhiteSpace(kb))
+            {
+                kbSet.Add(kb.Trim());
+            }
+        }
+    }
+
+    private static void AddKbValuesFromUpdates(JsonElement? payload, ISet<string> kbSet)
+    {
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return;
+        }
+
+        JsonElement updatesValue;
+        if (TryGetWindowsUpdateValue(payload, "updates", out var nestedUpdates)
+            && nestedUpdates is { ValueKind: JsonValueKind.Array })
+        {
+            updatesValue = nestedUpdates.Value;
+        }
+        else if (payloadObject.TryGetProperty("updates", out var topLevelUpdates)
+                 && topLevelUpdates.ValueKind == JsonValueKind.Array)
+        {
+            updatesValue = topLevelUpdates;
+        }
+        else
+        {
+            return;
+        }
+
+        foreach (var update in updatesValue.EnumerateArray())
+        {
+            if (update.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (update.TryGetProperty("kb", out var kbValue) && kbValue.ValueKind == JsonValueKind.String)
+            {
+                var kb = kbValue.GetString();
+                if (!string.IsNullOrWhiteSpace(kb))
+                {
+                    kbSet.Add(kb.Trim());
+                }
+            }
+        }
+    }
+
+    private static bool TryGetWindowsUpdateValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        if (!payloadObject.TryGetProperty("windows_update", out var windowsUpdateSection)
+            || windowsUpdateSection.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!windowsUpdateSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static string NormalizeKb(string kb)
+    {
+        var normalized = kb.Trim().ToUpperInvariant();
+        if (normalized == string.Empty)
+        {
+            return string.Empty;
+        }
+
+        if (!normalized.StartsWith("KB", StringComparison.Ordinal))
+        {
+            normalized = "KB" + normalized;
+        }
+
+        return normalized;
     }
 }

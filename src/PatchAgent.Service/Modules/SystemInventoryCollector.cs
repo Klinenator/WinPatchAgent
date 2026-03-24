@@ -1,7 +1,11 @@
 using Microsoft.Extensions.Logging;
 using PatchAgent.Service.Abstractions;
 using PatchAgent.Service.Models;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Win32;
 
 namespace PatchAgent.Service.Modules;
 
@@ -18,7 +22,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
         _pathProvider = pathProvider;
     }
 
-    public Task<InventorySnapshot> CollectAsync(AgentState state, CancellationToken cancellationToken)
+    public async Task<InventorySnapshot> CollectAsync(AgentState state, CancellationToken cancellationToken)
     {
         var rootPath = Path.GetPathRoot(_pathProvider.RootPath);
         long? freeDiskMb = null;
@@ -38,7 +42,12 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             FreeDiskMb = freeDiskMb
         };
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsWindows())
+        {
+            snapshot.PendingReboot = IsWindowsRebootPending();
+            snapshot.InstalledWindowsPatches = await CollectInstalledWindowsPatchesAsync(cancellationToken);
+        }
+        else if (OperatingSystem.IsLinux())
         {
             snapshot.PendingReboot = File.Exists("/var/run/reboot-required");
             snapshot.AptAvailable = File.Exists("/usr/bin/apt-get") || File.Exists("/usr/bin/apt");
@@ -61,7 +70,190 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             state.DeviceId,
             snapshot.Hostname);
 
-        return Task.FromResult(snapshot);
+        return snapshot;
+    }
+
+    private async Task<List<InstalledPatchSnapshot>> CollectInstalledWindowsPatchesAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return [];
+        }
+
+        var script = @"
+$ErrorActionPreference = 'SilentlyContinue'
+$items = @()
+try {
+  $items = Get-HotFix | Sort-Object -Property InstalledOn -Descending | Select-Object -First 300 HotFixID, Description, InstalledOn
+} catch {
+  $items = @()
+}
+
+$normalized = @(
+  $items | ForEach-Object {
+    $installedAt = ''
+    if ($_.InstalledOn) {
+      try {
+        $installedAt = (Get-Date $_.InstalledOn).ToString('o')
+      } catch {
+        $installedAt = [string]$_.InstalledOn
+      }
+    }
+
+    [PSCustomObject]@{
+      kb = [string]$_.HotFixID
+      title = [string]$_.Description
+      installed_at = $installedAt
+    }
+  }
+)
+
+$normalized | ConvertTo-Json -Depth 4 -Compress
+";
+
+        var result = await RunProcessAsync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
+            ],
+            TimeSpan.FromSeconds(30),
+            cancellationToken);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            _logger.LogDebug(
+                "Windows patch inventory query failed with exit code {ExitCode}: {Error}",
+                result.ExitCode,
+                result.StandardError);
+            return [];
+        }
+
+        return ParsePatchInventoryJson(result.StandardOutput);
+    }
+
+    private static bool IsWindowsRebootPending()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var cbsKey = Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending");
+            if (cbsKey is not null)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            using var wuKey = Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
+            if (wuKey is not null)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static List<InstalledPatchSnapshot> ParsePatchInventoryJson(string rawJson)
+    {
+        var patches = new List<InstalledPatchSnapshot>();
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in root.EnumerateArray())
+                {
+                    AddPatch(item, patches);
+                }
+
+                return patches;
+            }
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                AddPatch(root, patches);
+            }
+        }
+        catch
+        {
+            return [];
+        }
+
+        return patches;
+    }
+
+    private static void AddPatch(JsonElement item, List<InstalledPatchSnapshot> patches)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var kb = ReadString(item, "kb");
+        if (string.IsNullOrWhiteSpace(kb))
+        {
+            kb = ReadString(item, "hotfixid");
+        }
+
+        if (string.IsNullOrWhiteSpace(kb))
+        {
+            return;
+        }
+
+        kb = kb.Trim().ToUpperInvariant();
+        if (!kb.StartsWith("KB", StringComparison.OrdinalIgnoreCase))
+        {
+            kb = "KB" + kb;
+        }
+
+        patches.Add(new InstalledPatchSnapshot
+        {
+            Kb = kb,
+            Title = ReadString(item, "title") ?? ReadString(item, "description") ?? string.Empty,
+            InstalledAt = ReadString(item, "installed_at") ?? ReadString(item, "installedon") ?? string.Empty
+        });
+    }
+
+    private static string? ReadString(JsonElement item, string propertyName)
+    {
+        foreach (var property in item.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                return property.Value.GetString();
+            }
+
+            return property.Value.ToString();
+        }
+
+        return null;
     }
 
     private static string? ReadLinuxKernelVersion()
@@ -120,4 +312,85 @@ public sealed class SystemInventoryCollector : IInventoryCollector
 
         return data;
     }
+
+    private static async Task<ProcessResult> RunProcessAsync(
+        string executable,
+        IReadOnlyList<string> args,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+
+        process.OutputDataReceived += (_, eventArgs) =>
+        {
+            if (eventArgs.Data is not null)
+            {
+                stdout.AppendLine(eventArgs.Data);
+            }
+        };
+        process.ErrorDataReceived += (_, eventArgs) =>
+        {
+            if (eventArgs.Data is not null)
+            {
+                stderr.AppendLine(eventArgs.Data);
+            }
+        };
+
+        if (!process.Start())
+        {
+            return new ProcessResult(-1, stdout.ToString(), stderr.ToString(), TimedOut: false);
+        }
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+            return new ProcessResult(process.ExitCode, stdout.ToString(), stderr.ToString(), TimedOut: false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            return new ProcessResult(-1, stdout.ToString(), stderr.ToString(), TimedOut: true);
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private readonly record struct ProcessResult(
+        int ExitCode,
+        string StandardOutput,
+        string StandardError,
+        bool TimedOut);
 }

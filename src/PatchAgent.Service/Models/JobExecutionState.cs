@@ -29,4 +29,8 @@ public sealed class JobExecutionState
     public bool AptUpgradeAll { get; set; }
 
     public List<string> AptPackages { get; set; } = [];
+
+    public bool WindowsInstallAll { get; set; }
+
+    public List<string> WindowsKbIds { get; set; } = [];
 }

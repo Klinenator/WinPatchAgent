@@ -196,7 +196,9 @@ public sealed class AgentCoordinator
             SimulatedOutcome = string.IsNullOrWhiteSpace(job.SimulatedOutcome) ? "success" : job.SimulatedOutcome,
             SimulatedRebootRequired = job.SimulatedRebootRequired,
             AptUpgradeAll = job.AptUpgradeAll,
-            AptPackages = job.AptPackages.ToList()
+            AptPackages = job.AptPackages.ToList(),
+            WindowsInstallAll = job.WindowsInstallAll,
+            WindowsKbIds = job.WindowsKbIds.ToList()
         };
 
         await _policyClient.AcknowledgeJobAsync(

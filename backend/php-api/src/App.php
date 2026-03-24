@@ -104,6 +104,12 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && preg_match('#^/v1/admin/agents/([^/]+)/inventory$#', $path, $matches) === 1) {
+                $this->requireAdmin($request);
+                $this->handleGetAgentInventory(rawurldecode($matches[1]));
+                return;
+            }
+
             if ($method === 'GET' && $path === '/install/linux.sh') {
                 $this->handleLinuxInstallScript($request);
                 return;
@@ -123,6 +129,12 @@ final class App
             if ($method === 'POST' && preg_match('#^/v1/agents/jobs/([^/]+)/complete$#', $path, $matches) === 1) {
                 $agent = $this->requireAgent($request);
                 $this->handleCompleteJob($request, $agent, rawurldecode($matches[1]));
+                return;
+            }
+
+            if ($method === 'POST' && preg_match('#^/v1/admin/agents/([^/]+)/rename$#', $path, $matches) === 1) {
+                $this->requireAdmin($request);
+                $this->handleRenameAgent($request, rawurldecode($matches[1]));
                 return;
             }
 
@@ -261,6 +273,7 @@ final class App
             'collected_at' => (string) ($body['collected_at'] ?? ''),
             'os' => is_array($body['os'] ?? null) ? $body['os'] : [],
             'windows_update' => is_array($body['windows_update'] ?? null) ? $body['windows_update'] : [],
+            'linux' => is_array($body['linux'] ?? null) ? $body['linux'] : [],
             'hardware' => is_array($body['hardware'] ?? null) ? $body['hardware'] : [],
             'applications' => is_array($body['applications'] ?? null) ? $body['applications'] : [],
         ]);
@@ -411,8 +424,56 @@ final class App
 
     private function handleListAgents(): void
     {
+        $agents = $this->agents->listAgents();
+        foreach ($agents as $index => $agent) {
+            $inventory = $this->inventory->loadSnapshot((string) ($agent['agent_record_id'] ?? ''));
+            if ($inventory !== null) {
+                $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
+                    is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
+                );
+            }
+
+            $agents[$index]['inventory'] = $inventory;
+        }
+
         JsonResponse::ok([
-            'agents' => $this->agents->listAgents(),
+            'agents' => $agents,
+        ]);
+    }
+
+    private function handleGetAgentInventory(string $agentRecordId): void
+    {
+        $inventory = $this->inventory->loadSnapshot($agentRecordId);
+        if ($inventory === null) {
+            throw new ApiException(404, 'inventory_not_found', 'No inventory snapshot was found for that agent.');
+        }
+
+        $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
+            is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
+        );
+
+        JsonResponse::ok([
+            'agent_record_id' => $agentRecordId,
+            'inventory' => $inventory,
+        ]);
+    }
+
+    private function handleRenameAgent(Request $request, string $agentRecordId): void
+    {
+        $body = $request->json();
+        $displayName = $this->requireString($body, 'display_name');
+
+        $updated = $this->agents->updateDisplayName($agentRecordId, $displayName);
+        if ($updated === null) {
+            throw new ApiException(404, 'agent_not_found', 'The requested agent was not found.');
+        }
+
+        JsonResponse::ok([
+            'agent' => [
+                'agent_record_id' => (string) ($updated['agent_record_id'] ?? ''),
+                'display_name' => (string) ($updated['display_name'] ?? ''),
+                'hostname' => (string) ($updated['hostname'] ?? ''),
+            ],
         ]);
     }
 
@@ -760,6 +821,8 @@ dotnet publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$In
         EnableStubJobExecution = \$true
         StubJobDurationSeconds = 20
         EnableAptJobExecution = \$false
+        EnableWindowsUpdateJobExecution = \$true
+        WindowsUpdateCommandTimeoutSeconds = 5400
     }
 }
 \$ConfigObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$ConfigPath -Encoding UTF8
@@ -796,6 +859,39 @@ POWERSHELL;
             "powershell -ExecutionPolicy Bypass -NoProfile -Command \"iwr -UseBasicParsing '%s' | iex\"",
             str_replace("'", "''", $scriptUrl)
         );
+    }
+
+    private function normalizeWindowsUpdateInventory(array $windowsUpdate): array
+    {
+        $installedPatches = is_array($windowsUpdate['installed_patches'] ?? null)
+            ? $windowsUpdate['installed_patches']
+            : [];
+
+        $normalizedPatches = [];
+        foreach ($installedPatches as $patch) {
+            if (!is_array($patch)) {
+                continue;
+            }
+
+            $kb = strtoupper(trim((string) ($patch['kb'] ?? $patch['hotfix_id'] ?? '')));
+            if ($kb !== '' && !str_starts_with($kb, 'KB')) {
+                $kb = 'KB' . $kb;
+            }
+
+            $normalizedPatches[] = [
+                'kb' => $kb,
+                'title' => trim((string) ($patch['title'] ?? $patch['description'] ?? '')),
+                'installed_at' => trim((string) ($patch['installed_at'] ?? $patch['installed_on'] ?? '')),
+            ];
+        }
+
+        usort($normalizedPatches, static function (array $left, array $right): int {
+            return strcmp((string) ($right['installed_at'] ?? ''), (string) ($left['installed_at'] ?? ''));
+        });
+
+        $windowsUpdate['installed_patches'] = array_slice($normalizedPatches, 0, 300);
+        $windowsUpdate['installed_patches_count'] = count($normalizedPatches);
+        return $windowsUpdate;
     }
 
     private function powershellLiteral(string $value): string

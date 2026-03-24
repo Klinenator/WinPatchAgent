@@ -30,6 +30,7 @@ builder.Services.AddSingleton<IAgentIdentityManager, BootstrapIdentityManager>()
 builder.Services.AddSingleton<IInventoryCollector, SystemInventoryCollector>();
 builder.Services.AddSingleton<StubJobExecutor>();
 builder.Services.AddSingleton<LinuxAptJobExecutor>();
+builder.Services.AddSingleton<WindowsUpdateJobExecutor>();
 builder.Services.AddSingleton<IJobExecutor, DispatchingJobExecutor>();
 builder.Services.AddHttpClient<IPolicyClient, HttpPolicyClient>((serviceProvider, client) =>
 {

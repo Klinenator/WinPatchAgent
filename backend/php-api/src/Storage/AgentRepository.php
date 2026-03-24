@@ -32,6 +32,7 @@ final class AgentRepository
             'agent_record_id' => $agentRecordId,
             'device_id' => $registration['device_id'],
             'hostname' => $registration['hostname'],
+            'display_name' => (string) ($existing['display_name'] ?? $registration['hostname']),
             'domain' => $registration['domain'],
             'os' => $registration['os'],
             'agent' => $registration['agent'],
@@ -88,6 +89,26 @@ final class AgentRepository
         }
     }
 
+    public function updateDisplayName(string $agentRecordId, string $displayName): ?array
+    {
+        $agents = $this->store->readJson(self::FILE, ['agents' => []]);
+
+        foreach ($agents['agents'] as $index => $agent) {
+            if (($agent['agent_record_id'] ?? null) !== $agentRecordId) {
+                continue;
+            }
+
+            $agent['display_name'] = $displayName;
+            $agent['updated_at'] = gmdate(DATE_ATOM);
+            $agents['agents'][$index] = $agent;
+
+            $this->store->writeJson(self::FILE, $agents);
+            return $agent;
+        }
+
+        return null;
+    }
+
     public function listAgents(): array
     {
         $agents = $this->store->readJson(self::FILE, ['agents' => []]);
@@ -117,6 +138,7 @@ final class AgentRepository
                 'agent_record_id' => (string) ($agent['agent_record_id'] ?? ''),
                 'device_id' => (string) ($agent['device_id'] ?? ''),
                 'hostname' => (string) ($agent['hostname'] ?? ''),
+                'display_name' => (string) ($agent['display_name'] ?? ($agent['hostname'] ?? '')),
                 'domain' => (string) ($agent['domain'] ?? ''),
                 'os' => is_array($agent['os'] ?? null) ? $agent['os'] : [],
                 'agent' => is_array($agent['agent'] ?? null) ? $agent['agent'] : [],

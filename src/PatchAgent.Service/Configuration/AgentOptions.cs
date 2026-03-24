@@ -30,6 +30,10 @@ public sealed class AgentOptions
 
     public bool EnableAptJobExecution { get; set; } = true;
 
+    public bool EnableWindowsUpdateJobExecution { get; set; } = true;
+
+    public int WindowsUpdateCommandTimeoutSeconds { get; set; } = 5400;
+
     public bool AptUseSudoWhenNotRoot { get; set; } = true;
 
     public bool AptRunUpdateBeforeInstall { get; set; } = true;
