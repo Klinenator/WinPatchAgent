@@ -446,6 +446,7 @@ final class App
             'user' => $user,
             'login_url' => '/v1/admin/auth/google/start',
             'logout_url' => '/v1/admin/auth/logout',
+            'redirect_uri' => $this->googleRedirectUri(),
             'hosted_domain' => $this->config->googleHostedDomain,
         ]);
     }
@@ -467,7 +468,7 @@ final class App
 
         $query = [
             'client_id' => $this->config->googleClientId,
-            'redirect_uri' => $this->config->googleRedirectUri,
+            'redirect_uri' => $this->googleRedirectUri(),
             'response_type' => 'code',
             'scope' => 'openid email profile',
             'state' => $state,
@@ -844,8 +845,36 @@ POWERSHELL;
     private function isGoogleOAuthEnabled(): bool
     {
         return $this->config->googleClientId !== ''
-            && $this->config->googleClientSecret !== ''
-            && $this->config->googleRedirectUri !== '';
+            && $this->config->googleClientSecret !== '';
+    }
+
+    private function googleRedirectUri(): string
+    {
+        if ($this->config->googleRedirectUri !== '') {
+            return $this->config->googleRedirectUri;
+        }
+
+        return $this->baseUrlFromServer() . '/v1/admin/auth/google/callback';
+    }
+
+    private function baseUrlFromServer(): string
+    {
+        $forwardedProto = (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '');
+        $scheme = strtolower(trim(explode(',', $forwardedProto)[0]));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            $scheme = $this->isHttpsRequest() ? 'https' : 'http';
+        }
+
+        $forwardedHost = (string) ($_SERVER['HTTP_X_FORWARDED_HOST'] ?? '');
+        $host = trim(explode(',', $forwardedHost)[0]);
+        if ($host === '') {
+            $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        }
+        if ($host === '') {
+            $host = 'localhost';
+        }
+
+        return sprintf('%s://%s', $scheme, $host);
     }
 
     private function startAdminSession(): void
@@ -926,7 +955,7 @@ POWERSHELL;
             'code' => $code,
             'client_id' => $this->config->googleClientId,
             'client_secret' => $this->config->googleClientSecret,
-            'redirect_uri' => $this->config->googleRedirectUri,
+            'redirect_uri' => $this->googleRedirectUri(),
             'grant_type' => 'authorization_code',
         ], '', '&', PHP_QUERY_RFC3986);
 
