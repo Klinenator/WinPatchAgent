@@ -2077,7 +2077,11 @@ Require-Command "dotnet" "Install .NET SDK 8+ and rerun."
 function Normalize-RepoHttpUrl {
     param([string]\$RawUrl)
 
-    \$url = [string](\$RawUrl ?? "")
+    if (\$null -eq \$RawUrl) {
+        \$url = ""
+    } else {
+        \$url = [string]\$RawUrl
+    }
     \$url = \$url.Trim()
     if ([string]::IsNullOrWhiteSpace(\$url)) {
         throw "Repo URL is empty."
