@@ -449,6 +449,139 @@
             overflow: hidden;
         }
 
+        .security-baseline {
+            margin-top: 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            padding: 10px 12px;
+        }
+
+        .security-baseline-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .security-baseline-head h3 {
+            margin: 0;
+            font-size: 16px;
+            letter-spacing: 0.01em;
+            text-transform: none;
+            color: #22384e;
+        }
+
+        .security-overall {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+
+        .security-overall.pass {
+            color: #0f6b44;
+            background: #d9f6e8;
+            border-color: #9fdfc2;
+        }
+
+        .security-overall.warn {
+            color: #8b5200;
+            background: #fff1db;
+            border-color: #f2d5a8;
+        }
+
+        .security-overall.fail {
+            color: #8b1f2d;
+            background: #ffe5e8;
+            border-color: #f4b9c1;
+        }
+
+        .security-overall.unknown {
+            color: #394a5d;
+            background: #e7edf2;
+            border-color: #cfd9e3;
+        }
+
+        .security-check-list {
+            margin-top: 8px;
+            display: grid;
+            gap: 6px;
+        }
+
+        .security-check {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            padding: 7px 8px;
+            border: 1px solid #d9e7f0;
+            border-radius: 9px;
+            background: #fff;
+        }
+
+        .security-check-name {
+            display: inline-flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .security-check-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1f3448;
+        }
+
+        .security-check-detail {
+            margin-top: 2px;
+            font-size: 12px;
+            color: #5b6f85;
+            word-break: break-word;
+        }
+
+        .security-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            border: 1px solid transparent;
+            white-space: nowrap;
+            text-transform: uppercase;
+        }
+
+        .security-pill.pass {
+            color: #0f6b44;
+            background: #d9f6e8;
+            border-color: #9fdfc2;
+        }
+
+        .security-pill.warn {
+            color: #8b5200;
+            background: #fff1db;
+            border-color: #f2d5a8;
+        }
+
+        .security-pill.fail {
+            color: #8b1f2d;
+            background: #ffe5e8;
+            border-color: #f4b9c1;
+        }
+
+        .security-pill.na {
+            color: #394a5d;
+            background: #e7edf2;
+            border-color: #cfd9e3;
+        }
+
         .patch-browser-head {
             padding: 12px 12px 6px;
             border-bottom: 1px solid #d9e7f0;
@@ -897,6 +1030,23 @@
                     </div>
                 </div>
 
+                <div class="security-baseline">
+                    <div class="security-baseline-head">
+                        <h3>Security Baseline (SOC2)</h3>
+                        <span id="securityBaselineOverall" class="security-overall unknown">Not evaluated</span>
+                    </div>
+                    <p id="securityBaselineMeta" class="hint">Select a Windows agent to evaluate baseline controls.</p>
+                    <div id="securityBaselineChecks" class="security-check-list">
+                        <div class="security-check">
+                            <span class="security-check-name">
+                                <span class="security-check-title">No data yet</span>
+                                <span class="security-check-detail">Select an agent to evaluate controls.</span>
+                            </span>
+                            <span class="security-pill na">N/A</span>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="patch-browser">
                     <div class="patch-browser-head">
                         <h3>Patch Management</h3>
@@ -1022,6 +1172,9 @@
     const agentActionStatus = document.getElementById("agentActionStatus");
     const selectedAgentHint = document.getElementById("selectedAgentHint");
     const agentsSummary = document.getElementById("agentsSummary");
+    const securityBaselineOverall = document.getElementById("securityBaselineOverall");
+    const securityBaselineMeta = document.getElementById("securityBaselineMeta");
+    const securityBaselineChecks = document.getElementById("securityBaselineChecks");
 
     const metricTotalAgents = document.getElementById("metricTotalAgents");
     const metricOnlineAgents = document.getElementById("metricOnlineAgents");
@@ -1610,6 +1763,201 @@
             : {};
     }
 
+    function getWindowsSecuritySection(agent) {
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        return (typeof inventory.windows_security === "object" && inventory.windows_security !== null)
+            ? inventory.windows_security
+            : {};
+    }
+
+    function normalizeBooleanValue(value) {
+        if (value === true) {
+            return true;
+        }
+        if (value === false) {
+            return false;
+        }
+        return null;
+    }
+
+    function stringifyBooleanState(value) {
+        if (value === true) {
+            return "on";
+        }
+        if (value === false) {
+            return "off";
+        }
+        return "unknown";
+    }
+
+    function renderSecurityBaselineForSelectedAgent(agent) {
+        if (!agent) {
+            securityBaselineOverall.className = "security-overall unknown";
+            securityBaselineOverall.textContent = "Not evaluated";
+            securityBaselineMeta.textContent = "Select a Windows agent to evaluate baseline controls.";
+            securityBaselineChecks.innerHTML = "<div class=\"security-check\">" +
+                "<span class=\"security-check-name\">" +
+                "<span class=\"security-check-title\">No data yet</span>" +
+                "<span class=\"security-check-detail\">Select an agent to evaluate controls.</span>" +
+                "</span>" +
+                "<span class=\"security-pill na\">N/A</span>" +
+                "</div>";
+            return;
+        }
+
+        if (getDeviceType(agent).value !== "windows") {
+            securityBaselineOverall.className = "security-overall unknown";
+            securityBaselineOverall.textContent = "Not applicable";
+            securityBaselineMeta.textContent = "SOC2 baseline checks are currently implemented for Windows agents.";
+            securityBaselineChecks.innerHTML = "<div class=\"security-check\">" +
+                "<span class=\"security-check-name\">" +
+                "<span class=\"security-check-title\">Windows baseline</span>" +
+                "<span class=\"security-check-detail\">Select a Windows endpoint to score Defender, firewall, removable storage, and BitLocker posture.</span>" +
+                "</span>" +
+                "<span class=\"security-pill na\">N/A</span>" +
+                "</div>";
+            return;
+        }
+
+        const security = getWindowsSecuritySection(agent);
+        const edition = String(security.edition || "").trim();
+        const defenderPresent = security.defender_service_present === true;
+        const defenderServiceState = String(security.defender_service_state || "unknown").trim().toLowerCase();
+        const defenderRealtime = normalizeBooleanValue(security.defender_realtime_enabled);
+        const firewallDomain = normalizeBooleanValue(security.firewall_domain_enabled);
+        const firewallPrivate = normalizeBooleanValue(security.firewall_private_enabled);
+        const firewallPublic = normalizeBooleanValue(security.firewall_public_enabled);
+        const removableDenyAll = security.removable_storage_deny_all === true;
+        const bitlockerSupport = String(security.bitlocker_support || "unknown").trim().toLowerCase();
+        const bitlockerProtection = String(security.bitlocker_os_volume_protection || "unknown").trim().toLowerCase();
+
+        const checks = [];
+
+        const defenderServicePass = defenderPresent && defenderServiceState === "running";
+        checks.push({
+            title: "Windows Defender service",
+            detail: "Service state: " + (defenderPresent ? defenderServiceState : "not_found"),
+            status: defenderServicePass ? "pass" : "fail"
+        });
+
+        if (defenderRealtime === true) {
+            checks.push({
+                title: "Defender real-time protection",
+                detail: "Real-time protection is enabled.",
+                status: "pass"
+            });
+        } else if (defenderRealtime === false) {
+            checks.push({
+                title: "Defender real-time protection",
+                detail: "Real-time protection is disabled.",
+                status: "fail"
+            });
+        } else {
+            checks.push({
+                title: "Defender real-time protection",
+                detail: "Real-time protection state could not be determined.",
+                status: "warn"
+            });
+        }
+
+        if (firewallDomain === false || firewallPrivate === false || firewallPublic === false) {
+            checks.push({
+                title: "Windows Firewall profiles",
+                detail: "Domain=" + stringifyBooleanState(firewallDomain)
+                    + ", Private=" + stringifyBooleanState(firewallPrivate)
+                    + ", Public=" + stringifyBooleanState(firewallPublic),
+                status: "fail"
+            });
+        } else if (firewallDomain === true && firewallPrivate === true && firewallPublic === true) {
+            checks.push({
+                title: "Windows Firewall profiles",
+                detail: "Domain, Private, and Public profiles are enabled.",
+                status: "pass"
+            });
+        } else {
+            checks.push({
+                title: "Windows Firewall profiles",
+                detail: "One or more firewall profiles could not be evaluated.",
+                status: "warn"
+            });
+        }
+
+        checks.push({
+            title: "Removable storage policy",
+            detail: removableDenyAll
+                ? "Policy denies removable storage access (Deny_All=1)."
+                : "Deny_All policy is not set.",
+            status: removableDenyAll ? "pass" : "fail"
+        });
+
+        if (bitlockerSupport === "not_supported" || bitlockerProtection === "not_supported") {
+            checks.push({
+                title: "BitLocker (OS volume)",
+                detail: (edition ? (edition + " does not support BitLocker policy enforcement.") : "BitLocker support is not available on this endpoint."),
+                status: "na"
+            });
+        } else if (bitlockerProtection === "on") {
+            checks.push({
+                title: "BitLocker (OS volume)",
+                detail: "OS volume protection is ON.",
+                status: "pass"
+            });
+        } else if (bitlockerProtection === "off") {
+            checks.push({
+                title: "BitLocker (OS volume)",
+                detail: "OS volume protection is OFF.",
+                status: "fail"
+            });
+        } else if (bitlockerProtection === "suspended") {
+            checks.push({
+                title: "BitLocker (OS volume)",
+                detail: "OS volume encryption is present but currently suspended.",
+                status: "warn"
+            });
+        } else {
+            checks.push({
+                title: "BitLocker (OS volume)",
+                detail: "Protection status could not be determined.",
+                status: "warn"
+            });
+        }
+
+        const actionable = checks.filter((check) => check.status !== "na");
+        let overall = "unknown";
+        if (actionable.some((check) => check.status === "fail")) {
+            overall = "fail";
+        } else if (actionable.some((check) => check.status === "warn")) {
+            overall = "warn";
+        } else if (actionable.length > 0) {
+            overall = "pass";
+        }
+
+        const overallLabel = overall === "pass"
+            ? "Compliant"
+            : (overall === "fail" ? "Action Needed" : "Review Needed");
+
+        securityBaselineOverall.className = "security-overall " + overall;
+        securityBaselineOverall.textContent = overallLabel;
+
+        const hostname = String(agent.display_name || agent.hostname || "selected endpoint");
+        securityBaselineMeta.textContent = "Evaluating baseline controls for " + hostname
+            + (edition ? (" (" + edition + ")") : "") + ".";
+
+        securityBaselineChecks.innerHTML = checks.map((check) => {
+            const statusLabel = check.status === "pass"
+                ? "Pass"
+                : (check.status === "fail" ? "Fail" : (check.status === "warn" ? "Warn" : "N/A"));
+
+            return "<div class=\"security-check\">" +
+                "<span class=\"security-check-name\">" +
+                "<span class=\"security-check-title\">" + escapeHtml(check.title) + "</span>" +
+                "<span class=\"security-check-detail\">" + escapeHtml(check.detail) + "</span>" +
+                "</span>" +
+                "<span class=\"security-pill " + escapeHtml(check.status) + "\">" + escapeHtml(statusLabel) + "</span>" +
+                "</div>";
+        }).join("");
+    }
+
     function getLinuxSection(agent) {
         const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
         return (typeof inventory.linux === "object" && inventory.linux !== null)
@@ -2186,8 +2534,11 @@
             installAllUpdatesBtn.disabled = true;
             selectAllVisiblePatches.disabled = true;
             selectAllVisiblePatches.checked = false;
+            renderSecurityBaselineForSelectedAgent(null);
             return;
         }
+
+        renderSecurityBaselineForSelectedAgent(agent);
 
         const availableCount = countAvailablePackages(agent);
         const installedCount = countInstalledUpdates(agent);

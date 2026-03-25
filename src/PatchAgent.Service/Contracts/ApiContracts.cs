@@ -118,6 +118,8 @@ public sealed class InventoryUploadRequest
 
     public InventoryWindowsUpdate WindowsUpdate { get; set; } = new();
 
+    public InventoryWindowsSecurity? WindowsSecurity { get; set; }
+
     public InventoryHardware Hardware { get; set; } = new();
 
     public List<InventoryApplication> Applications { get; set; } = [];
@@ -125,6 +127,29 @@ public sealed class InventoryUploadRequest
     public InventoryUploadLinux? Linux { get; set; }
 
     public InventoryUploadMacOs? MacOs { get; set; }
+}
+
+public sealed class InventoryWindowsSecurity
+{
+    public string Edition { get; set; } = string.Empty;
+
+    public bool DefenderServicePresent { get; set; }
+
+    public string DefenderServiceState { get; set; } = "unknown";
+
+    public bool? DefenderRealtimeEnabled { get; set; }
+
+    public bool? FirewallDomainEnabled { get; set; }
+
+    public bool? FirewallPrivateEnabled { get; set; }
+
+    public bool? FirewallPublicEnabled { get; set; }
+
+    public bool RemovableStorageDenyAll { get; set; }
+
+    public string BitlockerSupport { get; set; } = "unknown";
+
+    public string BitlockerOsVolumeProtection { get; set; } = "unknown";
 }
 
 public sealed class InventoryUploadOs

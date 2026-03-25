@@ -167,6 +167,21 @@ public sealed class HttpPolicyClient : IPolicyClient
                     .ToList(),
                 AvailablePatchesCount = snapshot.AvailableWindowsPatches.Count
             },
+            WindowsSecurity = OperatingSystem.IsWindows()
+                ? new InventoryWindowsSecurity
+                {
+                    Edition = snapshot.WindowsSecurity.Edition,
+                    DefenderServicePresent = snapshot.WindowsSecurity.DefenderServicePresent,
+                    DefenderServiceState = snapshot.WindowsSecurity.DefenderServiceState,
+                    DefenderRealtimeEnabled = snapshot.WindowsSecurity.DefenderRealtimeEnabled,
+                    FirewallDomainEnabled = snapshot.WindowsSecurity.FirewallDomainEnabled,
+                    FirewallPrivateEnabled = snapshot.WindowsSecurity.FirewallPrivateEnabled,
+                    FirewallPublicEnabled = snapshot.WindowsSecurity.FirewallPublicEnabled,
+                    RemovableStorageDenyAll = snapshot.WindowsSecurity.RemovableStorageDenyAll,
+                    BitlockerSupport = snapshot.WindowsSecurity.BitlockerSupport,
+                    BitlockerOsVolumeProtection = snapshot.WindowsSecurity.BitlockerOsVolumeProtection
+                }
+                : null,
             Hardware = new InventoryHardware
             {
                 Hostname = snapshot.Hostname,

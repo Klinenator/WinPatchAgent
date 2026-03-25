@@ -49,6 +49,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             snapshot.PendingReboot = IsWindowsRebootPending();
             snapshot.InstalledWindowsPatches = await CollectInstalledWindowsPatchesAsync(cancellationToken);
             snapshot.AvailableWindowsPatches = await CollectAvailableWindowsPatchesAsync(cancellationToken);
+            snapshot.WindowsSecurity = await CollectWindowsSecuritySnapshotAsync(cancellationToken);
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -228,6 +229,169 @@ $items | ConvertTo-Json -Depth 5 -Compress
         return ParseAvailablePatchInventoryJson(result.StandardOutput);
     }
 
+    private async Task<WindowsSecuritySnapshot> CollectWindowsSecuritySnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new WindowsSecuritySnapshot();
+        }
+
+        var script = @"
+$ErrorActionPreference = 'SilentlyContinue'
+
+$result = [ordered]@{
+  edition = ''
+  defender_service_present = $false
+  defender_service_state = 'not_found'
+  defender_realtime_enabled = $null
+  firewall_domain_enabled = $null
+  firewall_private_enabled = $null
+  firewall_public_enabled = $null
+  removable_storage_deny_all = $false
+  bitlocker_support = 'unknown'
+  bitlocker_os_volume_protection = 'unknown'
+}
+
+try {
+  $product = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name ProductName -ErrorAction SilentlyContinue
+  if ($null -ne $product -and $null -ne $product.ProductName) {
+    $result.edition = [string]$product.ProductName
+    if ($result.edition -match 'Home') {
+      $result.bitlocker_support = 'not_supported'
+      $result.bitlocker_os_volume_protection = 'not_supported'
+    }
+  }
+} catch {
+}
+
+try {
+  $svc = Get-Service -Name 'WinDefend' -ErrorAction SilentlyContinue
+  if ($null -ne $svc) {
+    $result.defender_service_present = $true
+    $state = [string]$svc.Status
+    if ($state -match 'Running') {
+      $result.defender_service_state = 'running'
+    } elseif ($state -match 'Stopped') {
+      $result.defender_service_state = 'stopped'
+    } else {
+      $result.defender_service_state = 'unknown'
+    }
+  }
+} catch {
+}
+
+try {
+  if (Get-Command -Name Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+    $mp = Get-MpComputerStatus -ErrorAction SilentlyContinue
+    if ($null -ne $mp -and $null -ne $mp.RealTimeProtectionEnabled) {
+      $result.defender_realtime_enabled = [bool]$mp.RealTimeProtectionEnabled
+    }
+  }
+} catch {
+}
+
+try {
+  if (Get-Command -Name Get-NetFirewallProfile -ErrorAction SilentlyContinue) {
+    $profiles = Get-NetFirewallProfile -ErrorAction SilentlyContinue
+    foreach ($profile in $profiles) {
+      $name = [string]$profile.Name
+      $enabled = [bool]$profile.Enabled
+      if ($name -eq 'Domain') {
+        $result.firewall_domain_enabled = $enabled
+      } elseif ($name -eq 'Private') {
+        $result.firewall_private_enabled = $enabled
+      } elseif ($name -eq 'Public') {
+        $result.firewall_public_enabled = $enabled
+      }
+    }
+  }
+} catch {
+}
+
+try {
+  $policy = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices' -Name 'Deny_All' -ErrorAction SilentlyContinue
+  if ($null -ne $policy -and $null -ne $policy.Deny_All) {
+    $result.removable_storage_deny_all = ([int]$policy.Deny_All) -eq 1
+  }
+} catch {
+}
+
+$systemDrive = $env:SystemDrive
+if ([string]::IsNullOrWhiteSpace($systemDrive)) {
+  $systemDrive = 'C:'
+}
+
+try {
+  if ((Get-Command -Name Get-BitLockerVolume -ErrorAction SilentlyContinue) -and $result.bitlocker_support -ne 'not_supported') {
+    $volume = Get-BitLockerVolume -MountPoint $systemDrive -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $volume) {
+      $result.bitlocker_support = 'supported'
+      $protection = [string]$volume.ProtectionStatus
+      if ($protection -eq 'On' -or $protection -eq '1') {
+        $result.bitlocker_os_volume_protection = 'on'
+      } elseif ($protection -eq 'Off' -or $protection -eq '0') {
+        if ([string]$volume.VolumeStatus -eq 'FullyDecrypted') {
+          $result.bitlocker_os_volume_protection = 'off'
+        } else {
+          $result.bitlocker_os_volume_protection = 'suspended'
+        }
+      }
+    }
+  }
+} catch {
+}
+
+try {
+  if ($result.bitlocker_os_volume_protection -eq 'unknown' -and $result.bitlocker_support -ne 'not_supported') {
+    $manageBde = Get-Command -Name 'manage-bde.exe' -ErrorAction SilentlyContinue
+    if ($null -ne $manageBde) {
+      $statusOutput = & $manageBde.Source -status $systemDrive 2>$null | Out-String
+      if (-not [string]::IsNullOrWhiteSpace($statusOutput)) {
+        $result.bitlocker_support = 'supported'
+        if ($statusOutput -match 'Protection Status:\s*Protection On') {
+          $result.bitlocker_os_volume_protection = 'on'
+        } elseif ($statusOutput -match 'Protection Status:\s*Protection Off') {
+          $result.bitlocker_os_volume_protection = 'off'
+        } elseif ($statusOutput -match 'Protection Status:\s*Protection Suspended') {
+          $result.bitlocker_os_volume_protection = 'suspended'
+        }
+      }
+    } elseif ($result.bitlocker_support -eq 'unknown') {
+      $result.bitlocker_support = 'not_supported'
+      $result.bitlocker_os_volume_protection = 'not_supported'
+    }
+  }
+} catch {
+}
+
+$result | ConvertTo-Json -Depth 4 -Compress
+";
+
+        var result = await RunProcessAsync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
+            ],
+            TimeSpan.FromSeconds(45),
+            cancellationToken);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            _logger.LogDebug(
+                "Windows security inventory query failed with exit code {ExitCode}: {Error}",
+                result.ExitCode,
+                result.StandardError);
+            return new WindowsSecuritySnapshot();
+        }
+
+        return ParseWindowsSecurityInventoryJson(result.StandardOutput);
+    }
+
     private static bool IsWindowsRebootPending()
     {
         if (!OperatingSystem.IsWindows())
@@ -326,6 +490,38 @@ $items | ConvertTo-Json -Depth 5 -Compress
         }
 
         return patches;
+    }
+
+    private static WindowsSecuritySnapshot ParseWindowsSecurityInventoryJson(string rawJson)
+    {
+        var snapshot = new WindowsSecuritySnapshot();
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return snapshot;
+            }
+
+            snapshot.Edition = (ReadString(root, "edition") ?? string.Empty).Trim();
+            snapshot.DefenderServicePresent = ReadBoolean(root, "defender_service_present") ?? false;
+            snapshot.DefenderServiceState = NormalizeDefenderServiceState(ReadString(root, "defender_service_state"));
+            snapshot.DefenderRealtimeEnabled = ReadBoolean(root, "defender_realtime_enabled");
+            snapshot.FirewallDomainEnabled = ReadBoolean(root, "firewall_domain_enabled");
+            snapshot.FirewallPrivateEnabled = ReadBoolean(root, "firewall_private_enabled");
+            snapshot.FirewallPublicEnabled = ReadBoolean(root, "firewall_public_enabled");
+            snapshot.RemovableStorageDenyAll = ReadBoolean(root, "removable_storage_deny_all") ?? false;
+            snapshot.BitlockerSupport = NormalizeBitlockerSupport(ReadString(root, "bitlocker_support"));
+            snapshot.BitlockerOsVolumeProtection = NormalizeBitlockerProtection(ReadString(root, "bitlocker_os_volume_protection"));
+        }
+        catch
+        {
+            return new WindowsSecuritySnapshot();
+        }
+
+        return snapshot;
     }
 
     private static void AddPatch(JsonElement item, List<InstalledPatchSnapshot> patches)
@@ -432,6 +628,80 @@ $items | ConvertTo-Json -Depth 5 -Compress
         }
 
         return null;
+    }
+
+    private static bool? ReadBoolean(JsonElement item, string propertyName)
+    {
+        foreach (var property in item.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return property.Value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.String => ParseBoolean(property.Value.GetString()),
+                JsonValueKind.Number => property.Value.TryGetInt32(out var intValue) ? intValue != 0 : null,
+                _ => null
+            };
+        }
+
+        return null;
+    }
+
+    private static bool? ParseBoolean(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => null
+        };
+    }
+
+    private static string NormalizeDefenderServiceState(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "running" => "running",
+            "stopped" => "stopped",
+            "not_found" => "not_found",
+            _ => "unknown"
+        };
+    }
+
+    private static string NormalizeBitlockerSupport(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "supported" => "supported",
+            "not_supported" => "not_supported",
+            _ => "unknown"
+        };
+    }
+
+    private static string NormalizeBitlockerProtection(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "on" => "on",
+            "off" => "off",
+            "suspended" => "suspended",
+            "not_supported" => "not_supported",
+            _ => "unknown"
+        };
     }
 
     private static string? ReadLinuxKernelVersion()

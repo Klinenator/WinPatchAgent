@@ -130,6 +130,7 @@ It also includes an agent-row `Connect` button that launches the Splashtop Busin
 If you set `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` on the API server, Windows agent installs from `/install/windows.ps1` will auto-install Splashtop during provisioning. The URL can point to either an Easy Deployment `.exe` installer or a deployable `.msi`.
 Set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server to your published Windows agent zip (default points to GitHub Releases latest asset `winpatchagent-windows-x64.zip`).
 Windows installs can enforce SOC2 baseline controls by default (`PATCH_API_WINDOWS_DISABLE_REMOVABLE_STORAGE_ON_INSTALL=true`, `PATCH_API_WINDOWS_ENSURE_DEFENDER_ON_INSTALL=true`), with env toggles to opt out per environment.
+The admin main page now surfaces a Windows SOC2 baseline status card (Defender service/realtime, firewall profiles, removable storage policy, and BitLocker state). BitLocker is marked not-supported on editions where it is unavailable.
 Windows install links from `/install/windows.ps1` support `mode=prebuilt` (default, no endpoint compile) or `mode=source` (compile on endpoint after downloading source).
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 

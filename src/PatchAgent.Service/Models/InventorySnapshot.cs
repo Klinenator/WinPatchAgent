@@ -49,6 +49,8 @@ public sealed class InventorySnapshot
     public List<InstalledPatchSnapshot> InstalledWindowsPatches { get; set; } = [];
 
     public List<AvailablePatchSnapshot> AvailableWindowsPatches { get; set; } = [];
+
+    public WindowsSecuritySnapshot WindowsSecurity { get; set; } = new();
 }
 
 public sealed class InstalledPatchSnapshot
@@ -80,4 +82,27 @@ public sealed class LinuxAvailablePackageSnapshot
     public string Source { get; set; } = string.Empty;
 
     public string RawLine { get; set; } = string.Empty;
+}
+
+public sealed class WindowsSecuritySnapshot
+{
+    public string Edition { get; set; } = string.Empty;
+
+    public bool DefenderServicePresent { get; set; }
+
+    public string DefenderServiceState { get; set; } = "unknown";
+
+    public bool? DefenderRealtimeEnabled { get; set; }
+
+    public bool? FirewallDomainEnabled { get; set; }
+
+    public bool? FirewallPrivateEnabled { get; set; }
+
+    public bool? FirewallPublicEnabled { get; set; }
+
+    public bool RemovableStorageDenyAll { get; set; }
+
+    public string BitlockerSupport { get; set; } = "unknown";
+
+    public string BitlockerOsVolumeProtection { get; set; } = "unknown";
 }

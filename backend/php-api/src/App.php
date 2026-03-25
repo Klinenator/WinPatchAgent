@@ -387,6 +387,7 @@ final class App
             'collected_at' => (string) ($body['collected_at'] ?? ''),
             'os' => is_array($body['os'] ?? null) ? $body['os'] : [],
             'windows_update' => is_array($body['windows_update'] ?? null) ? $body['windows_update'] : [],
+            'windows_security' => is_array($body['windows_security'] ?? null) ? $body['windows_security'] : [],
             'linux' => is_array($body['linux'] ?? null) ? $body['linux'] : [],
             'mac_os' => is_array($body['mac_os'] ?? null)
                 ? $body['mac_os']
@@ -909,6 +910,9 @@ final class App
                 $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
                     is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
                 );
+                $inventory['windows_security'] = $this->normalizeWindowsSecurityInventory(
+                    is_array($inventory['windows_security'] ?? null) ? $inventory['windows_security'] : []
+                );
                 $inventory['linux'] = $this->normalizeLinuxInventory(
                     is_array($inventory['linux'] ?? null) ? $inventory['linux'] : []
                 );
@@ -936,6 +940,9 @@ final class App
 
         $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
             is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
+        );
+        $inventory['windows_security'] = $this->normalizeWindowsSecurityInventory(
+            is_array($inventory['windows_security'] ?? null) ? $inventory['windows_security'] : []
         );
         $inventory['linux'] = $this->normalizeLinuxInventory(
             is_array($inventory['linux'] ?? null) ? $inventory['linux'] : []
@@ -2753,6 +2760,132 @@ BASH;
         $windowsUpdate['available_patches'] = array_slice($normalizedAvailable, 0, 300);
         $windowsUpdate['available_patches_count'] = count($normalizedAvailable);
         return $windowsUpdate;
+    }
+
+    private function normalizeWindowsSecurityInventory(array $windowsSecurity): array
+    {
+        $edition = trim((string) (
+            $windowsSecurity['edition']
+            ?? $windowsSecurity['Edition']
+            ?? ''
+        ));
+
+        $defenderServiceState = strtolower(trim((string) (
+            $windowsSecurity['defender_service_state']
+            ?? $windowsSecurity['defenderServiceState']
+            ?? $windowsSecurity['DefenderServiceState']
+            ?? ''
+        )));
+        if (!in_array($defenderServiceState, ['running', 'stopped', 'not_found'], true)) {
+            $defenderServiceState = 'unknown';
+        }
+
+        $bitlockerSupport = strtolower(trim((string) (
+            $windowsSecurity['bitlocker_support']
+            ?? $windowsSecurity['bitlockerSupport']
+            ?? $windowsSecurity['BitlockerSupport']
+            ?? ''
+        )));
+        if (!in_array($bitlockerSupport, ['supported', 'not_supported'], true)) {
+            $bitlockerSupport = 'unknown';
+        }
+
+        $bitlockerOsVolumeProtection = strtolower(trim((string) (
+            $windowsSecurity['bitlocker_os_volume_protection']
+            ?? $windowsSecurity['bitlockerOsVolumeProtection']
+            ?? $windowsSecurity['BitlockerOsVolumeProtection']
+            ?? ''
+        )));
+        if (!in_array($bitlockerOsVolumeProtection, ['on', 'off', 'suspended', 'not_supported'], true)) {
+            $bitlockerOsVolumeProtection = 'unknown';
+        }
+
+        $defenderRealtimeEnabled = null;
+        foreach (['defender_realtime_enabled', 'defenderRealtimeEnabled', 'DefenderRealtimeEnabled'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $defenderRealtimeEnabled = null;
+                break;
+            }
+
+            $defenderRealtimeEnabled = $this->toBool($value);
+            break;
+        }
+
+        $firewallDomainEnabled = null;
+        foreach (['firewall_domain_enabled', 'firewallDomainEnabled', 'FirewallDomainEnabled'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $firewallDomainEnabled = null;
+                break;
+            }
+
+            $firewallDomainEnabled = $this->toBool($value);
+            break;
+        }
+
+        $firewallPrivateEnabled = null;
+        foreach (['firewall_private_enabled', 'firewallPrivateEnabled', 'FirewallPrivateEnabled'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $firewallPrivateEnabled = null;
+                break;
+            }
+
+            $firewallPrivateEnabled = $this->toBool($value);
+            break;
+        }
+
+        $firewallPublicEnabled = null;
+        foreach (['firewall_public_enabled', 'firewallPublicEnabled', 'FirewallPublicEnabled'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $firewallPublicEnabled = null;
+                break;
+            }
+
+            $firewallPublicEnabled = $this->toBool($value);
+            break;
+        }
+
+        return [
+            'edition' => $edition,
+            'defender_service_present' => $this->toBool(
+                $windowsSecurity['defender_service_present']
+                ?? $windowsSecurity['defenderServicePresent']
+                ?? $windowsSecurity['DefenderServicePresent']
+                ?? false
+            ),
+            'defender_service_state' => $defenderServiceState,
+            'defender_realtime_enabled' => $defenderRealtimeEnabled,
+            'firewall_domain_enabled' => $firewallDomainEnabled,
+            'firewall_private_enabled' => $firewallPrivateEnabled,
+            'firewall_public_enabled' => $firewallPublicEnabled,
+            'removable_storage_deny_all' => $this->toBool(
+                $windowsSecurity['removable_storage_deny_all']
+                ?? $windowsSecurity['removableStorageDenyAll']
+                ?? $windowsSecurity['RemovableStorageDenyAll']
+                ?? false
+            ),
+            'bitlocker_support' => $bitlockerSupport,
+            'bitlocker_os_volume_protection' => $bitlockerOsVolumeProtection,
+        ];
     }
 
     private function normalizeLinuxInventory(array $linux): array

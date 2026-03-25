@@ -109,6 +109,7 @@ Admin pages:
 - `/admin/settings` admin token storage and auth diagnostics
 
 The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution. Linux package rows for Ubuntu/Debian agents include CVE matches from OSV. Windows installer generation now supports both prebuilt mode (default) and source-build mode.
+The main admin page also shows a Windows SOC2 baseline card using reported endpoint posture (Defender, firewall, removable-storage policy, and BitLocker status). Endpoints that do not support BitLocker report `not_supported` instead of failing the baseline outright.
 
 Suggested nginx site:
 
