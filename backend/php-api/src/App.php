@@ -2390,28 +2390,52 @@ function Install-Splashtop {
         throw "Splashtop auto-install URL must start with http:// or https://. Current value: \$SplashtopMsiUrl"
     }
 
-    \$splashtopMsiPath = Join-Path \$env:TEMP ("splashtop-streamer-" + [guid]::NewGuid().ToString("N") + ".msi")
+    \$splashtopExtension = ".msi"
+    try {
+        \$splashtopUri = [System.Uri]\$SplashtopMsiUrl
+        \$candidateExtension = [System.IO.Path]::GetExtension(\$splashtopUri.AbsolutePath)
+        if (-not [string]::IsNullOrWhiteSpace(\$candidateExtension)) {
+            \$splashtopExtension = \$candidateExtension.ToLowerInvariant()
+        }
+    } catch {
+        \$splashtopExtension = ".msi"
+    }
+
+    if (\$splashtopExtension -ne ".msi" -and \$splashtopExtension -ne ".exe") {
+        Write-Host "Splashtop auto-install: unknown extension '\$splashtopExtension', defaulting to MSI mode."
+        \$splashtopExtension = ".msi"
+    }
+
+    \$splashtopInstallerPath = Join-Path \$env:TEMP ("splashtop-streamer-" + [guid]::NewGuid().ToString("N") + \$splashtopExtension)
     Write-Host "Splashtop auto-install: downloading installer..."
-    Invoke-WebRequest -Uri \$SplashtopMsiUrl -OutFile \$splashtopMsiPath
+    Invoke-WebRequest -Uri \$SplashtopMsiUrl -OutFile \$splashtopInstallerPath
 
     try {
         \$splashtopUserInfoParts = @("hidewindow=1", "confirm_d=0")
         if (-not [string]::IsNullOrWhiteSpace(\$SplashtopDeploymentCode)) {
             \$splashtopUserInfoParts = @("dcode=\$SplashtopDeploymentCode") + \$splashtopUserInfoParts
         } else {
-            Write-Host "Splashtop auto-install: no deploy code configured, assuming MSI has embedded code."
+            Write-Host "Splashtop auto-install: no deploy code configured, assuming installer has embedded code."
         }
 
         \$splashtopUserInfo = [string]::Join(",", \$splashtopUserInfoParts)
-        \$splashtopInstallArgs = "/i `"\$splashtopMsiPath`" /qn /norestart USERINFO=`"\$splashtopUserInfo`""
-        \$splashtopProc = Start-Process -FilePath "msiexec.exe" -ArgumentList \$splashtopInstallArgs -Wait -PassThru
-        if (\$splashtopProc.ExitCode -ne 0) {
-            throw ("Splashtop auto-install failed with exit code {0}." -f \$splashtopProc.ExitCode)
+        if (\$splashtopExtension -eq ".exe") {
+            \$splashtopInstallArgs = "prevercheck /s /i \$splashtopUserInfo"
+            \$splashtopProc = Start-Process -FilePath \$splashtopInstallerPath -ArgumentList \$splashtopInstallArgs -Wait -PassThru
+            if (\$splashtopProc.ExitCode -ne 0) {
+                throw ("Splashtop EXE auto-install failed with exit code {0}." -f \$splashtopProc.ExitCode)
+            }
+        } else {
+            \$splashtopInstallArgs = "/i `"\$splashtopInstallerPath`" /qn /norestart USERINFO=`"\$splashtopUserInfo`""
+            \$splashtopProc = Start-Process -FilePath "msiexec.exe" -ArgumentList \$splashtopInstallArgs -Wait -PassThru
+            if (\$splashtopProc.ExitCode -ne 0) {
+                throw ("Splashtop MSI auto-install failed with exit code {0}." -f \$splashtopProc.ExitCode)
+            }
         }
 
         Write-Host "Splashtop auto-install: complete."
     } finally {
-        Remove-Item -Path \$splashtopMsiPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path \$splashtopInstallerPath -Force -ErrorAction SilentlyContinue
     }
 }
 

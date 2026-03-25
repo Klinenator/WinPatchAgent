@@ -69,8 +69,8 @@ Environment variables:
 - `PATCH_API_ADMIN_TOTP_ISSUER`: optional TOTP issuer label (default `PatchAgent Admin`)
 - `PATCH_API_ADMIN_TOTP_WINDOW`: optional clock-drift window in 30-second steps (default `1`)
 - `PATCH_API_ADMIN_TOTP_CHALLENGE_TTL_SECONDS`: optional pending TOTP challenge lifetime in seconds (default `300`)
-- `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL`: optional Splashtop Windows deploy MSI URL; when set, `/install/windows.ps1` auto-installs Splashtop during agent install
-- `PATCH_API_WINDOWS_SPLASHTOP_DEPLOY_CODE`: optional Splashtop deployment code used with `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` (leave empty if MSI embeds deployment code)
+- `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL`: optional Splashtop Windows deploy installer URL; supports Easy Deployment `.exe` and deployable `.msi`. When set, `/install/windows.ps1` auto-installs Splashtop during agent install.
+- `PATCH_API_WINDOWS_SPLASHTOP_DEPLOY_CODE`: optional Splashtop deployment code used with `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` (leave empty if the installer embeds deployment settings)
 - `PATCH_API_WINDOWS_AGENT_PACKAGE_URL`: prebuilt Windows agent zip URL used by `/install/windows.ps1` and Windows self-update jobs (default `https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip`)
 - `PATCH_API_LINUX_CVE_LOOKUP_ENABLED`: enable/disable Linux CVE enrichment on inventory views (default `true`)
 - `PATCH_API_LINUX_CVE_CACHE_TTL_SECONDS`: freshness window for cached OSV CVE results (default `21600`)
