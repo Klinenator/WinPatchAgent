@@ -936,6 +936,8 @@
             </div>
             <div class="command-actions">
                 <button id="refreshBtn" type="button" class="btn primary">Refresh</button>
+                <button id="downloadSoc2EvidenceCsvBtn" type="button" class="btn subtle">SOC2 Evidence CSV</button>
+                <button id="downloadSoc2EvidenceJsonBtn" type="button" class="btn subtle">SOC2 Evidence JSON</button>
                 <a href="/admin/install-agent" class="btn light-link">Install Agent</a>
                 <a href="/admin/settings" class="btn subtle">Admin Settings</a>
             </div>
@@ -1185,6 +1187,8 @@
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshBtn = document.getElementById("refreshBtn");
+    const downloadSoc2EvidenceCsvBtn = document.getElementById("downloadSoc2EvidenceCsvBtn");
+    const downloadSoc2EvidenceJsonBtn = document.getElementById("downloadSoc2EvidenceJsonBtn");
     const renameAgentBtn = document.getElementById("renameAgentBtn");
     const queueSelfUpdateBtn = document.getElementById("queueSelfUpdateBtn");
     const installListedUpdatesBtn = document.getElementById("installListedUpdatesBtn");
@@ -1227,6 +1231,14 @@
 
     refreshBtn.addEventListener("click", async () => {
         await loadDashboard();
+    });
+
+    downloadSoc2EvidenceCsvBtn.addEventListener("click", async () => {
+        await downloadSoc2Evidence("csv");
+    });
+
+    downloadSoc2EvidenceJsonBtn.addEventListener("click", async () => {
+        await downloadSoc2Evidence("json");
     });
 
     agentSearchInput.addEventListener("input", () => {
@@ -1515,6 +1527,74 @@
             setStatus(agentActionStatus, String(error.message || error), "error");
         }
     });
+
+    async function downloadSoc2Evidence(format) {
+        const normalizedFormat = String(format || "").toLowerCase() === "csv" ? "csv" : "json";
+        const path = normalizedFormat === "csv"
+            ? "/v1/admin/evidence/soc2.csv"
+            : "/v1/admin/evidence/soc2";
+
+        try {
+            const headers = new Headers();
+            headers.set("Accept", normalizedFormat === "csv" ? "text/csv" : "application/json");
+
+            const token = getStoredToken();
+            if (token) {
+                headers.set("Authorization", "Bearer " + token);
+            }
+
+            const response = await fetch(path, {
+                method: "GET",
+                headers: headers
+            });
+
+            if (!response.ok) {
+                const raw = await response.text();
+                let message = "Request failed with status " + response.status;
+                if (raw.trim() !== "") {
+                    try {
+                        const data = JSON.parse(raw);
+                        if (response.status === 401 && data?.error?.code === "admin_auth_required") {
+                            window.location.href = "/admin/login";
+                            return;
+                        }
+                        message = data?.error?.message || message;
+                    } catch {
+                    }
+                }
+
+                throw new Error(message);
+            }
+
+            const blob = await response.blob();
+            const disposition = String(response.headers.get("Content-Disposition") || "");
+            let filename = normalizedFormat === "csv" ? "soc2_evidence.csv" : "soc2_evidence.json";
+            const filenameMatch = disposition.match(/filename="?([^\";]+)"?/i);
+            if (filenameMatch && filenameMatch[1]) {
+                filename = filenameMatch[1];
+            } else if (normalizedFormat === "json") {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+                filename = "soc2_evidence_" + timestamp + ".json";
+            }
+
+            if (normalizedFormat === "json" && !filename.toLowerCase().endsWith(".json")) {
+                filename += ".json";
+            }
+
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = objectUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(objectUrl);
+
+            setStatus(tokenStatus, "Downloaded SOC2 evidence " + normalizedFormat.toUpperCase() + ".", "success");
+        } catch (error) {
+            setStatus(tokenStatus, String(error.message || error), "error");
+        }
+    }
 
     async function loadAuthStatus() {
         try {

@@ -131,6 +131,7 @@ If you set `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` on the API server, Windows agen
 Set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server to your published Windows agent zip (default points to GitHub Releases latest asset `winpatchagent-windows-x64.zip`).
 Windows installs can enforce SOC2 baseline controls by default (`PATCH_API_WINDOWS_DISABLE_REMOVABLE_STORAGE_ON_INSTALL=true`, `PATCH_API_WINDOWS_ENSURE_DEFENDER_ON_INSTALL=true`), with env toggles to opt out per environment.
 The admin main page now surfaces a Windows SOC2 baseline status card (Defender service/realtime, firewall profiles, removable storage policy, and BitLocker state). BitLocker is marked not-supported on editions where it is unavailable.
+The admin main page also provides one-click SOC2 evidence exports (JSON/CSV) suitable for audit packages.
 Windows install links from `/install/windows.ps1` support `mode=prebuilt` (default, no endpoint compile) or `mode=source` (compile on endpoint after downloading source).
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 

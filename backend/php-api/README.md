@@ -38,6 +38,8 @@ Current endpoints:
 - `POST /v1/admin/automations/{profileId}/delete`
 - `GET /v1/admin/agents`
 - `GET /v1/admin/agents/{agentRecordId}/inventory`
+- `GET /v1/admin/evidence/soc2`
+- `GET /v1/admin/evidence/soc2.csv`
 - `POST /v1/admin/agents/{agentRecordId}/rename`
 - `POST /v1/admin/enrollments`
 - `GET /install/linux.sh?enrollment_key=...`
@@ -110,6 +112,7 @@ Admin pages:
 
 The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution. Linux package rows for Ubuntu/Debian agents include CVE matches from OSV. Windows installer generation now supports both prebuilt mode (default) and source-build mode.
 The main admin page also shows a Windows SOC2 baseline card using reported endpoint posture (Defender, firewall, removable-storage policy, and BitLocker status). Endpoints that do not support BitLocker report `not_supported` instead of failing the baseline outright.
+For audit handoff, the main admin page can download point-in-time SOC2 evidence exports (`JSON` and `CSV`) from `/v1/admin/evidence/soc2` and `/v1/admin/evidence/soc2.csv` with per-agent control outcomes and a report SHA-256 fingerprint.
 
 Suggested nginx site:
 

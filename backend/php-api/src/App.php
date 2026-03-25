@@ -149,6 +149,18 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && $path === '/v1/admin/evidence/soc2') {
+                $this->requireAdmin($request);
+                $this->handleSoc2EvidenceJson();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/evidence/soc2.csv') {
+                $this->requireAdmin($request);
+                $this->handleSoc2EvidenceCsv();
+                return;
+            }
+
             if ($method === 'GET' && preg_match('#^/v1/admin/agents/([^/]+)/inventory$#', $path, $matches) === 1) {
                 $this->requireAdmin($request);
                 $this->handleGetAgentInventory(rawurldecode($matches[1]));
@@ -957,6 +969,399 @@ final class App
             'agent_record_id' => $agentRecordId,
             'inventory' => $inventory,
         ]);
+    }
+
+    private function handleSoc2EvidenceJson(): void
+    {
+        JsonResponse::ok([
+            'evidence' => $this->buildSoc2EvidenceReport(),
+        ]);
+    }
+
+    private function handleSoc2EvidenceCsv(): void
+    {
+        $report = $this->buildSoc2EvidenceReport();
+        $csv = $this->buildSoc2EvidenceCsv($report);
+        $filename = 'soc2_evidence_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string) ($report['evidence_id'] ?? 'snapshot')) . '.csv';
+
+        http_response_code(200);
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        echo $csv;
+    }
+
+    private function buildSoc2EvidenceReport(): array
+    {
+        $generatedAt = gmdate(DATE_ATOM);
+        $evidenceId = 'soc2_' . gmdate('Ymd\THis\Z');
+        $adminUser = $this->currentAdminUser();
+        $generatedBy = is_array($adminUser) ? trim((string) ($adminUser['email'] ?? '')) : '';
+        if ($generatedBy === '') {
+            $generatedBy = 'authenticated_admin';
+        }
+
+        $agents = $this->agents->listAgents();
+        $rows = [];
+        $counts = [
+            'total_agents' => count($agents),
+            'windows_agents' => 0,
+            'evaluated_windows_agents' => 0,
+            'compliant' => 0,
+            'warning' => 0,
+            'failing' => 0,
+            'not_applicable' => 0,
+        ];
+
+        foreach ($agents as $agent) {
+            $agentRecordId = (string) ($agent['agent_record_id'] ?? '');
+            $inventory = $this->inventory->loadSnapshot($agentRecordId);
+            $inventoryStoredAt = '';
+            if (is_array($inventory)) {
+                $inventory['windows_security'] = $this->normalizeWindowsSecurityInventory(
+                    is_array($inventory['windows_security'] ?? null) ? $inventory['windows_security'] : []
+                );
+                $inventoryStoredAt = (string) ($inventory['stored_at'] ?? '');
+            }
+
+            $os = is_array($agent['os'] ?? null) ? $agent['os'] : [];
+            $osFamily = $this->detectOsFamily($os);
+            $base = [
+                'agent_record_id' => $agentRecordId,
+                'device_id' => (string) ($agent['device_id'] ?? ''),
+                'display_name' => (string) ($agent['display_name'] ?? ''),
+                'hostname' => (string) ($agent['hostname'] ?? ''),
+                'domain' => (string) ($agent['domain'] ?? ''),
+                'os_family' => $osFamily,
+                'os_description' => trim((string) ($os['description'] ?? $os['Description'] ?? '')),
+                'last_seen_at' => (string) ($agent['last_seen_at'] ?? ''),
+                'inventory_stored_at' => $inventoryStoredAt,
+            ];
+
+            if ($osFamily !== 'windows') {
+                $counts['not_applicable']++;
+                $rows[] = array_merge($base, [
+                    'baseline_status' => 'na',
+                    'edition' => '',
+                    'defender_service_present' => null,
+                    'defender_service_state' => 'unknown',
+                    'defender_realtime_enabled' => null,
+                    'firewall_domain_enabled' => null,
+                    'firewall_private_enabled' => null,
+                    'firewall_public_enabled' => null,
+                    'removable_storage_deny_all' => null,
+                    'bitlocker_support' => 'not_supported',
+                    'bitlocker_os_volume_protection' => 'not_supported',
+                    'controls' => [
+                        'defender_service' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'defender_realtime' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'firewall_profiles' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'removable_storage_policy' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'bitlocker_os_volume' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                    ],
+                ]);
+                continue;
+            }
+
+            $counts['windows_agents']++;
+            if ($inventoryStoredAt !== '') {
+                $counts['evaluated_windows_agents']++;
+            }
+
+            $security = is_array($inventory['windows_security'] ?? null)
+                ? $inventory['windows_security']
+                : $this->normalizeWindowsSecurityInventory([]);
+
+            $evaluation = $this->evaluateWindowsSoc2Baseline($security);
+            $baselineStatus = (string) ($evaluation['overall_status'] ?? 'unknown');
+
+            if ($baselineStatus === 'fail') {
+                $counts['failing']++;
+            } elseif ($baselineStatus === 'warn') {
+                $counts['warning']++;
+            } elseif ($baselineStatus === 'pass') {
+                $counts['compliant']++;
+            } else {
+                $counts['not_applicable']++;
+            }
+
+            $rows[] = array_merge($base, [
+                'baseline_status' => $baselineStatus,
+                'edition' => (string) ($security['edition'] ?? ''),
+                'defender_service_present' => $security['defender_service_present'] ?? null,
+                'defender_service_state' => (string) ($security['defender_service_state'] ?? 'unknown'),
+                'defender_realtime_enabled' => $security['defender_realtime_enabled'] ?? null,
+                'firewall_domain_enabled' => $security['firewall_domain_enabled'] ?? null,
+                'firewall_private_enabled' => $security['firewall_private_enabled'] ?? null,
+                'firewall_public_enabled' => $security['firewall_public_enabled'] ?? null,
+                'removable_storage_deny_all' => $security['removable_storage_deny_all'] ?? null,
+                'bitlocker_support' => (string) ($security['bitlocker_support'] ?? 'unknown'),
+                'bitlocker_os_volume_protection' => (string) ($security['bitlocker_os_volume_protection'] ?? 'unknown'),
+                'controls' => is_array($evaluation['controls'] ?? null) ? $evaluation['controls'] : [],
+            ]);
+        }
+
+        $overallStatus = 'unknown';
+        if ($counts['failing'] > 0) {
+            $overallStatus = 'fail';
+        } elseif ($counts['warning'] > 0) {
+            $overallStatus = 'warn';
+        } elseif ($counts['compliant'] > 0) {
+            $overallStatus = 'pass';
+        }
+
+        $report = [
+            'evidence_id' => $evidenceId,
+            'schema_version' => 1,
+            'generated_at' => $generatedAt,
+            'generated_by' => $generatedBy,
+            'overall_status' => $overallStatus,
+            'counts' => $counts,
+            'controls_catalog' => [
+                ['id' => 'defender_service', 'description' => 'Windows Defender service present and running'],
+                ['id' => 'defender_realtime', 'description' => 'Defender real-time protection enabled'],
+                ['id' => 'firewall_profiles', 'description' => 'Windows firewall enabled on Domain/Private/Public'],
+                ['id' => 'removable_storage_policy', 'description' => 'Removable storage deny policy enforced'],
+                ['id' => 'bitlocker_os_volume', 'description' => 'BitLocker OS volume protection status'],
+            ],
+            'agents' => $rows,
+        ];
+
+        $report['sha256'] = hash('sha256', (string) json_encode($report, JSON_UNESCAPED_SLASHES));
+        return $report;
+    }
+
+    private function evaluateWindowsSoc2Baseline(array $security): array
+    {
+        $defenderServicePresent = $this->toBool($security['defender_service_present'] ?? false);
+        $defenderServiceState = strtolower(trim((string) ($security['defender_service_state'] ?? 'unknown')));
+        if (!in_array($defenderServiceState, ['running', 'stopped', 'not_found'], true)) {
+            $defenderServiceState = 'unknown';
+        }
+
+        $defenderRealtimeEnabled = array_key_exists('defender_realtime_enabled', $security) && is_bool($security['defender_realtime_enabled'])
+            ? $security['defender_realtime_enabled']
+            : null;
+        $firewallDomainEnabled = array_key_exists('firewall_domain_enabled', $security) && is_bool($security['firewall_domain_enabled'])
+            ? $security['firewall_domain_enabled']
+            : null;
+        $firewallPrivateEnabled = array_key_exists('firewall_private_enabled', $security) && is_bool($security['firewall_private_enabled'])
+            ? $security['firewall_private_enabled']
+            : null;
+        $firewallPublicEnabled = array_key_exists('firewall_public_enabled', $security) && is_bool($security['firewall_public_enabled'])
+            ? $security['firewall_public_enabled']
+            : null;
+
+        $removableStorageDenyAll = $this->toBool($security['removable_storage_deny_all'] ?? false);
+        $bitlockerSupport = strtolower(trim((string) ($security['bitlocker_support'] ?? 'unknown')));
+        if (!in_array($bitlockerSupport, ['supported', 'not_supported'], true)) {
+            $bitlockerSupport = 'unknown';
+        }
+
+        $bitlockerProtection = strtolower(trim((string) ($security['bitlocker_os_volume_protection'] ?? 'unknown')));
+        if (!in_array($bitlockerProtection, ['on', 'off', 'suspended', 'not_supported'], true)) {
+            $bitlockerProtection = 'unknown';
+        }
+
+        $controls = [];
+        $controls['defender_service'] = [
+            'status' => $defenderServicePresent && $defenderServiceState === 'running' ? 'pass' : 'fail',
+            'detail' => $defenderServicePresent
+                ? ('Service state: ' . $defenderServiceState)
+                : 'WinDefend service not found.',
+        ];
+
+        if ($defenderRealtimeEnabled === true) {
+            $controls['defender_realtime'] = ['status' => 'pass', 'detail' => 'Real-time protection is enabled.'];
+        } elseif ($defenderRealtimeEnabled === false) {
+            $controls['defender_realtime'] = ['status' => 'fail', 'detail' => 'Real-time protection is disabled.'];
+        } else {
+            $controls['defender_realtime'] = ['status' => 'warn', 'detail' => 'Real-time protection status is unknown.'];
+        }
+
+        if ($firewallDomainEnabled === false || $firewallPrivateEnabled === false || $firewallPublicEnabled === false) {
+            $controls['firewall_profiles'] = [
+                'status' => 'fail',
+                'detail' => sprintf(
+                    'Domain=%s, Private=%s, Public=%s',
+                    $this->formatNullableBool($firewallDomainEnabled),
+                    $this->formatNullableBool($firewallPrivateEnabled),
+                    $this->formatNullableBool($firewallPublicEnabled)
+                ),
+            ];
+        } elseif ($firewallDomainEnabled === true && $firewallPrivateEnabled === true && $firewallPublicEnabled === true) {
+            $controls['firewall_profiles'] = ['status' => 'pass', 'detail' => 'All firewall profiles are enabled.'];
+        } else {
+            $controls['firewall_profiles'] = ['status' => 'warn', 'detail' => 'One or more firewall profile states are unknown.'];
+        }
+
+        $controls['removable_storage_policy'] = [
+            'status' => $removableStorageDenyAll ? 'pass' : 'fail',
+            'detail' => $removableStorageDenyAll
+                ? 'Deny_All removable storage policy is enabled.'
+                : 'Deny_All removable storage policy is not enabled.',
+        ];
+
+        if ($bitlockerSupport === 'not_supported' || $bitlockerProtection === 'not_supported') {
+            $controls['bitlocker_os_volume'] = ['status' => 'na', 'detail' => 'BitLocker not supported on this endpoint edition.'];
+        } elseif ($bitlockerProtection === 'on') {
+            $controls['bitlocker_os_volume'] = ['status' => 'pass', 'detail' => 'OS volume BitLocker protection is ON.'];
+        } elseif ($bitlockerProtection === 'off') {
+            $controls['bitlocker_os_volume'] = ['status' => 'fail', 'detail' => 'OS volume BitLocker protection is OFF.'];
+        } elseif ($bitlockerProtection === 'suspended') {
+            $controls['bitlocker_os_volume'] = ['status' => 'warn', 'detail' => 'OS volume BitLocker protection is suspended.'];
+        } else {
+            $controls['bitlocker_os_volume'] = ['status' => 'warn', 'detail' => 'OS volume BitLocker protection status is unknown.'];
+        }
+
+        $overallStatus = 'unknown';
+        $actionableStatuses = array_values(array_filter(
+            array_map(
+                static fn (array $control): string => (string) ($control['status'] ?? 'unknown'),
+                $controls
+            ),
+            static fn (string $status): bool => $status !== 'na'
+        ));
+
+        if (in_array('fail', $actionableStatuses, true)) {
+            $overallStatus = 'fail';
+        } elseif (in_array('warn', $actionableStatuses, true)) {
+            $overallStatus = 'warn';
+        } elseif (in_array('pass', $actionableStatuses, true)) {
+            $overallStatus = 'pass';
+        }
+
+        return [
+            'overall_status' => $overallStatus,
+            'controls' => $controls,
+        ];
+    }
+
+    private function buildSoc2EvidenceCsv(array $report): string
+    {
+        $handle = fopen('php://temp', 'w+');
+        if ($handle === false) {
+            return '';
+        }
+
+        fputcsv($handle, [
+            'evidence_id',
+            'generated_at',
+            'overall_status',
+            'agent_record_id',
+            'device_id',
+            'display_name',
+            'hostname',
+            'domain',
+            'os_family',
+            'last_seen_at',
+            'inventory_stored_at',
+            'baseline_status',
+            'edition',
+            'defender_service_present',
+            'defender_service_state',
+            'defender_realtime_enabled',
+            'firewall_domain_enabled',
+            'firewall_private_enabled',
+            'firewall_public_enabled',
+            'removable_storage_deny_all',
+            'bitlocker_support',
+            'bitlocker_os_volume_protection',
+            'control_defender_service_status',
+            'control_defender_service_detail',
+            'control_defender_realtime_status',
+            'control_defender_realtime_detail',
+            'control_firewall_profiles_status',
+            'control_firewall_profiles_detail',
+            'control_removable_storage_policy_status',
+            'control_removable_storage_policy_detail',
+            'control_bitlocker_os_volume_status',
+            'control_bitlocker_os_volume_detail',
+        ]);
+
+        $evidenceId = (string) ($report['evidence_id'] ?? '');
+        $generatedAt = (string) ($report['generated_at'] ?? '');
+        $overallStatus = (string) ($report['overall_status'] ?? '');
+        $agents = is_array($report['agents'] ?? null) ? $report['agents'] : [];
+
+        foreach ($agents as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $controls = is_array($row['controls'] ?? null) ? $row['controls'] : [];
+            $defenderServiceControl = is_array($controls['defender_service'] ?? null) ? $controls['defender_service'] : [];
+            $defenderRealtimeControl = is_array($controls['defender_realtime'] ?? null) ? $controls['defender_realtime'] : [];
+            $firewallControl = is_array($controls['firewall_profiles'] ?? null) ? $controls['firewall_profiles'] : [];
+            $removableControl = is_array($controls['removable_storage_policy'] ?? null) ? $controls['removable_storage_policy'] : [];
+            $bitlockerControl = is_array($controls['bitlocker_os_volume'] ?? null) ? $controls['bitlocker_os_volume'] : [];
+
+            fputcsv($handle, [
+                $evidenceId,
+                $generatedAt,
+                $overallStatus,
+                (string) ($row['agent_record_id'] ?? ''),
+                (string) ($row['device_id'] ?? ''),
+                (string) ($row['display_name'] ?? ''),
+                (string) ($row['hostname'] ?? ''),
+                (string) ($row['domain'] ?? ''),
+                (string) ($row['os_family'] ?? ''),
+                (string) ($row['last_seen_at'] ?? ''),
+                (string) ($row['inventory_stored_at'] ?? ''),
+                (string) ($row['baseline_status'] ?? ''),
+                (string) ($row['edition'] ?? ''),
+                $this->formatCsvBool($row['defender_service_present'] ?? null),
+                (string) ($row['defender_service_state'] ?? ''),
+                $this->formatCsvBool($row['defender_realtime_enabled'] ?? null),
+                $this->formatCsvBool($row['firewall_domain_enabled'] ?? null),
+                $this->formatCsvBool($row['firewall_private_enabled'] ?? null),
+                $this->formatCsvBool($row['firewall_public_enabled'] ?? null),
+                $this->formatCsvBool($row['removable_storage_deny_all'] ?? null),
+                (string) ($row['bitlocker_support'] ?? ''),
+                (string) ($row['bitlocker_os_volume_protection'] ?? ''),
+                (string) ($defenderServiceControl['status'] ?? ''),
+                (string) ($defenderServiceControl['detail'] ?? ''),
+                (string) ($defenderRealtimeControl['status'] ?? ''),
+                (string) ($defenderRealtimeControl['detail'] ?? ''),
+                (string) ($firewallControl['status'] ?? ''),
+                (string) ($firewallControl['detail'] ?? ''),
+                (string) ($removableControl['status'] ?? ''),
+                (string) ($removableControl['detail'] ?? ''),
+                (string) ($bitlockerControl['status'] ?? ''),
+                (string) ($bitlockerControl['detail'] ?? ''),
+            ]);
+        }
+
+        rewind($handle);
+        $csv = stream_get_contents($handle);
+        fclose($handle);
+
+        return is_string($csv) ? $csv : '';
+    }
+
+    private function formatNullableBool(?bool $value): string
+    {
+        if ($value === true) {
+            return 'true';
+        }
+
+        if ($value === false) {
+            return 'false';
+        }
+
+        return 'unknown';
+    }
+
+    private function formatCsvBool(mixed $value): string
+    {
+        if ($value === true) {
+            return 'true';
+        }
+
+        if ($value === false) {
+            return 'false';
+        }
+
+        return '';
     }
 
     private function handleRenameAgent(Request $request, string $agentRecordId): void
