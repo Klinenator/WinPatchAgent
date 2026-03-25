@@ -1993,6 +1993,8 @@ BASH;
         $enrollmentKeyLiteral = $this->powershellLiteral($enrollmentKey);
         $repoUrlLiteral = $this->powershellLiteral(self::AGENT_REPO_URL);
         $repoRefLiteral = $this->powershellLiteral(self::AGENT_REPO_REF);
+        $splashtopMsiUrlLiteral = $this->powershellLiteral($this->config->windowsSplashtopMsiUrl);
+        $splashtopDeploymentCodeLiteral = $this->powershellLiteral($this->config->windowsSplashtopDeploymentCode);
 
         return <<<POWERSHELL
 \$ErrorActionPreference = "Stop"
@@ -2001,6 +2003,8 @@ BASH;
 \$EnrollmentKey = {$enrollmentKeyLiteral}
 \$RepoUrl = {$repoUrlLiteral}
 \$RepoRef = {$repoRefLiteral}
+\$SplashtopMsiUrl = {$splashtopMsiUrlLiteral}
+\$SplashtopDeploymentCode = {$splashtopDeploymentCodeLiteral}
 \$WorkDir = "C:\\ProgramData\\WinPatchAgent\\src"
 \$InstallDir = "C:\\Program Files\\WinPatchAgent"
 \$ServiceName = "PatchAgentSvc"
@@ -2055,6 +2059,38 @@ dotnet publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$In
     }
 }
 \$ConfigObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$ConfigPath -Encoding UTF8
+
+if ([string]::IsNullOrWhiteSpace(\$SplashtopMsiUrl)) {
+    Write-Host "Splashtop auto-install: skipped (PATCH_API_WINDOWS_SPLASHTOP_MSI_URL is not set on server)."
+} else {
+    if (\$SplashtopMsiUrl -notmatch "^https?://") {
+        throw "Splashtop auto-install URL must start with http:// or https://. Current value: \$SplashtopMsiUrl"
+    }
+
+    \$splashtopMsiPath = Join-Path \$env:TEMP ("splashtop-streamer-" + [guid]::NewGuid().ToString("N") + ".msi")
+    Write-Host "Splashtop auto-install: downloading installer..."
+    Invoke-WebRequest -Uri \$SplashtopMsiUrl -OutFile \$splashtopMsiPath
+
+    try {
+        \$splashtopUserInfoParts = @("hidewindow=1", "confirm_d=0")
+        if (-not [string]::IsNullOrWhiteSpace(\$SplashtopDeploymentCode)) {
+            \$splashtopUserInfoParts = @("dcode=\$SplashtopDeploymentCode") + \$splashtopUserInfoParts
+        } else {
+            Write-Host "Splashtop auto-install: no deploy code configured, assuming MSI has embedded code."
+        }
+
+        \$splashtopUserInfo = [string]::Join(",", \$splashtopUserInfoParts)
+        \$splashtopInstallArgs = "/i `"\$splashtopMsiPath`" /qn /norestart USERINFO=`"\$splashtopUserInfo`""
+        \$splashtopProc = Start-Process -FilePath "msiexec.exe" -ArgumentList \$splashtopInstallArgs -Wait -PassThru
+        if (\$splashtopProc.ExitCode -ne 0) {
+            throw ("Splashtop auto-install failed with exit code {0}." -f \$splashtopProc.ExitCode)
+        }
+
+        Write-Host "Splashtop auto-install: complete."
+    } finally {
+        Remove-Item -Path \$splashtopMsiPath -Force -ErrorAction SilentlyContinue
+    }
+}
 
 if (Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue) {
     Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
