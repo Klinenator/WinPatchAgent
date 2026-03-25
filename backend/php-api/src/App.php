@@ -105,6 +105,11 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && ($path === '/admin/evidence' || $path === '/admin/evidence/')) {
+                $this->handleAdminEvidenceView();
+                return;
+            }
+
             if ($method === 'GET' && ($path === '/admin/login' || $path === '/admin/login/')) {
                 $this->handleAdminLoginView();
                 return;
@@ -158,6 +163,12 @@ final class App
             if ($method === 'GET' && $path === '/v1/admin/evidence/soc2.csv') {
                 $this->requireAdmin($request);
                 $this->handleSoc2EvidenceCsv();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/evidence/soc2.html') {
+                $this->requireAdmin($request);
+                $this->handleSoc2EvidenceHtml();
                 return;
             }
 
@@ -990,6 +1001,18 @@ final class App
         echo $csv;
     }
 
+    private function handleSoc2EvidenceHtml(): void
+    {
+        $report = $this->buildSoc2EvidenceReport();
+        $html = $this->buildSoc2EvidenceHtml($report);
+        $filename = 'soc2_evidence_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string) ($report['evidence_id'] ?? 'snapshot')) . '.html';
+
+        http_response_code(200);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Content-Disposition: inline; filename="' . $filename . '"');
+        echo $html;
+    }
+
     private function buildSoc2EvidenceReport(): array
     {
         $generatedAt = gmdate(DATE_ATOM);
@@ -1338,6 +1361,152 @@ final class App
         return is_string($csv) ? $csv : '';
     }
 
+    private function buildSoc2EvidenceHtml(array $report): string
+    {
+        $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $statusClass = static fn (string $status): string => match ($status) {
+            'pass' => 'status-pass',
+            'fail' => 'status-fail',
+            'warn' => 'status-warn',
+            'na' => 'status-na',
+            default => 'status-unknown',
+        };
+        $statusLabel = static fn (string $status): string => strtoupper($status !== '' ? $status : 'unknown');
+
+        $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
+        $agents = is_array($report['agents'] ?? null) ? $report['agents'] : [];
+        $controlColumns = [
+            'defender_service' => 'Defender Service',
+            'defender_realtime' => 'Realtime',
+            'firewall_profiles' => 'Firewall',
+            'removable_storage_policy' => 'Removable Storage',
+            'bitlocker_os_volume' => 'BitLocker',
+        ];
+
+        $rowsHtml = '';
+        foreach ($agents as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $controls = is_array($row['controls'] ?? null) ? $row['controls'] : [];
+            $baselineStatus = strtolower(trim((string) ($row['baseline_status'] ?? 'unknown')));
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $hostname = trim((string) ($row['hostname'] ?? ''));
+            $agentLabel = $displayName !== '' ? $displayName : ($hostname !== '' ? $hostname : (string) ($row['agent_record_id'] ?? ''));
+
+            $controlCells = '';
+            foreach ($controlColumns as $controlId => $label) {
+                $control = is_array($controls[$controlId] ?? null) ? $controls[$controlId] : [];
+                $controlStatus = strtolower(trim((string) ($control['status'] ?? 'unknown')));
+                $controlDetail = (string) ($control['detail'] ?? '');
+                $controlCells .= '<td><span class="badge ' . $escape($statusClass($controlStatus)) . '" title="'
+                    . $escape($controlDetail) . '">' . $escape($statusLabel($controlStatus)) . '</span></td>';
+            }
+
+            $rowsHtml .= '<tr>'
+                . '<td>' . $escape($agentLabel) . '</td>'
+                . '<td>' . $escape((string) ($row['agent_record_id'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($row['hostname'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($row['os_family'] ?? '')) . '</td>'
+                . '<td><span class="badge ' . $escape($statusClass($baselineStatus)) . '">'
+                . $escape($statusLabel($baselineStatus)) . '</span></td>'
+                . '<td>' . $escape((string) ($row['last_seen_at'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($row['inventory_stored_at'] ?? '')) . '</td>'
+                . $controlCells
+                . '</tr>';
+        }
+
+        if ($rowsHtml === '') {
+            $rowsHtml = '<tr><td colspan="12">No agents found in the evidence snapshot.</td></tr>';
+        }
+
+        $overallStatus = strtolower(trim((string) ($report['overall_status'] ?? 'unknown')));
+        $evidenceId = (string) ($report['evidence_id'] ?? '');
+        $generatedAt = (string) ($report['generated_at'] ?? '');
+        $generatedBy = (string) ($report['generated_by'] ?? '');
+        $sha256 = (string) ($report['sha256'] ?? '');
+
+        $totalAgents = (int) ($counts['total_agents'] ?? 0);
+        $windowsAgents = (int) ($counts['windows_agents'] ?? 0);
+        $evaluatedWindowsAgents = (int) ($counts['evaluated_windows_agents'] ?? 0);
+        $compliant = (int) ($counts['compliant'] ?? 0);
+        $warning = (int) ($counts['warning'] ?? 0);
+        $failing = (int) ($counts['failing'] ?? 0);
+        $notApplicable = (int) ($counts['not_applicable'] ?? 0);
+
+        return '<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SOC2 Evidence Report</title>
+    <style>
+        :root { color-scheme: light; }
+        body { margin: 18px; font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; color: #132236; background: #f4f8fb; }
+        h1 { margin: 0 0 8px; font-size: 30px; font-weight: 700; color: #11375f; }
+        p { margin: 0; }
+        .meta { margin-bottom: 14px; color: #415472; font-size: 14px; }
+        .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0 16px; }
+        .card { background: #fff; border: 1px solid #d6e5f2; border-radius: 12px; padding: 10px; }
+        .card-label { font-size: 12px; color: #60758f; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+        .card-value { font-size: 22px; font-weight: 700; color: #15324f; }
+        .table-wrap { background: #fff; border: 1px solid #d6e5f2; border-radius: 12px; overflow: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 1200px; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #e3edf6; text-align: left; vertical-align: top; font-size: 13px; }
+        th { background: #eef5fb; color: #334e6b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+        .status-pass { background: #dff8eb; color: #0c6b3d; }
+        .status-fail { background: #fde2e5; color: #9c1c2d; }
+        .status-warn { background: #fff1d6; color: #8b5600; }
+        .status-na { background: #eceef3; color: #526178; }
+        .status-unknown { background: #e8eef7; color: #2d4a6d; }
+        .hash { margin-top: 12px; font-family: Menlo, Consolas, monospace; font-size: 12px; color: #3a4d66; word-break: break-all; }
+        @media (max-width: 1000px) {
+            .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+    <h1>SOC2 Evidence Report</h1>
+    <p class="meta">Evidence ID: ' . $escape($evidenceId) . ' | Generated at: ' . $escape($generatedAt) . ' | Generated by: ' . $escape($generatedBy) . '</p>
+    <p class="meta">Overall status: <span class="badge ' . $escape($statusClass($overallStatus)) . '">' . $escape($statusLabel($overallStatus)) . '</span></p>
+    <div class="cards">
+        <div class="card"><p class="card-label">Total Agents</p><p class="card-value">' . $escape((string) $totalAgents) . '</p></div>
+        <div class="card"><p class="card-label">Windows Agents</p><p class="card-value">' . $escape((string) $windowsAgents) . '</p></div>
+        <div class="card"><p class="card-label">Evaluated Windows</p><p class="card-value">' . $escape((string) $evaluatedWindowsAgents) . '</p></div>
+        <div class="card"><p class="card-label">Compliant</p><p class="card-value">' . $escape((string) $compliant) . '</p></div>
+        <div class="card"><p class="card-label">Warning</p><p class="card-value">' . $escape((string) $warning) . '</p></div>
+        <div class="card"><p class="card-label">Failing</p><p class="card-value">' . $escape((string) $failing) . '</p></div>
+        <div class="card"><p class="card-label">Not Applicable</p><p class="card-value">' . $escape((string) $notApplicable) . '</p></div>
+        <div class="card"><p class="card-label">Snapshot Hash</p><p class="card-value" style="font-size:16px;">SHA-256</p></div>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Device</th>
+                    <th>Agent ID</th>
+                    <th>Hostname</th>
+                    <th>OS</th>
+                    <th>Baseline</th>
+                    <th>Last Seen</th>
+                    <th>Inventory At</th>
+                    <th>Defender Service</th>
+                    <th>Realtime</th>
+                    <th>Firewall</th>
+                    <th>Removable Storage</th>
+                    <th>BitLocker</th>
+                </tr>
+            </thead>
+            <tbody>' . $rowsHtml . '</tbody>
+        </table>
+    </div>
+    <p class="hash">sha256: ' . $escape($sha256) . '</p>
+</body>
+</html>';
+    }
+
     private function formatNullableBool(?bool $value): string
     {
         if ($value === true) {
@@ -1406,6 +1575,11 @@ final class App
     private function handleAdminSettingsView(): void
     {
         $this->handleAdminProtectedView('admin-settings.html', 'Admin settings page is missing.');
+    }
+
+    private function handleAdminEvidenceView(): void
+    {
+        $this->handleAdminProtectedView('admin-evidence.html', 'Admin evidence page is missing.');
     }
 
     private function handleAdminProtectedView(string $filename, string $missingMessage): void

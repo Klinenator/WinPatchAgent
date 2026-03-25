@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PatchAgent Admin - Install Agent</title>
+    <title>PatchAgent Admin - SOC2 Evidence</title>
     <style>
         @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
 
@@ -173,28 +173,33 @@
             flex-wrap: wrap;
         }
 
-        input, textarea, select, button {
-            font: inherit;
-        }
-
-        input, textarea, select {
-            width: 100%;
+        .panel {
+            margin-top: 12px;
+            background: var(--panel);
             border: 1px solid var(--line);
-            border-radius: var(--radius-sm);
-            background: #fff;
-            color: var(--ink);
-            padding: 10px 11px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
         }
 
-        input:focus, textarea:focus, select:focus {
-            outline: none;
-            border-color: #74b8f3;
-            box-shadow: 0 0 0 3px rgba(46, 130, 218, 0.15);
+        .panel h2 {
+            margin: 0 0 6px;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 20px;
+            letter-spacing: -0.01em;
         }
 
-        textarea {
-            min-height: 96px;
-            resize: vertical;
+        .hint {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
         }
 
         .btn {
@@ -226,29 +231,22 @@
         }
 
         .btn.subtle {
-            background: #eaf1f6;
-            color: #294259;
-            border-color: #c5d5e2;
-        }
-
-        .btn.danger {
-            background: #fff0f1;
-            color: var(--red);
-            border-color: #f5c4ca;
+            background: #fff;
+            color: #1f3658;
+            border-color: #c5d8ea;
         }
 
         .btn.ghost {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.12);
-            color: #fff;
-            border-color: rgba(255, 255, 255, 0.22);
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #ffffff;
         }
 
         .status-line {
-            margin: 9px 2px 2px;
             min-height: 20px;
-            font-size: 13px;
+            margin-top: 8px;
             color: var(--muted);
+            font-size: 13px;
         }
 
         .status-line.success {
@@ -259,73 +257,21 @@
             color: var(--red);
         }
 
-        .panel-wrap {
-            margin-top: 12px;
-        }
-
-        .panel {
-            background: var(--panel);
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            padding: 13px;
-            animation: rise 0.58s ease;
-        }
-
-        .panel h2 {
-            margin: 0;
-            font-size: 18px;
-            font-family: "Space Grotesk", "Gill Sans", sans-serif;
-        }
-
-        .hint {
-            margin: 4px 0 10px;
-            font-size: 13px;
-            color: var(--muted);
-        }
-
-        .row {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-
-        .field-block label {
-            display: block;
-            margin-bottom: 4px;
-            font-size: 12px;
-            color: #3d5770;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            font-weight: 600;
-        }
-
-        .actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 8px;
-        }
-
-        .mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
-        }
-
-        .output-grid {
+        .preview-frame {
+            width: 100%;
+            min-height: 620px;
             margin-top: 10px;
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
+            border: 1px solid #d6e1e7;
+            border-radius: 10px;
+            background: #fff;
         }
 
         @keyframes rise {
-            0% {
+            from {
                 opacity: 0;
                 transform: translateY(8px);
             }
-            100% {
+            to {
                 opacity: 1;
                 transform: translateY(0);
             }
@@ -350,13 +296,6 @@
                 width: 100%;
             }
         }
-
-        @media (max-width: 760px) {
-            .row,
-            .output-grid {
-                grid-template-columns: 1fr;
-            }
-        }
     </style>
 </head>
 <body>
@@ -370,8 +309,8 @@
             <a href="/admin" class="side-link">Main</a>
             <a href="/admin/automation" class="side-link">Automation</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
-            <a href="/admin/install-agent" class="side-link active">Install Agent</a>
-            <a href="/admin/evidence" class="side-link">SOC2 Evidence</a>
+            <a href="/admin/install-agent" class="side-link">Install Agent</a>
+            <a href="/admin/evidence" class="side-link active">SOC2 Evidence</a>
             <a href="/admin/settings" class="side-link">Admin</a>
         </nav>
         <div class="side-foot">
@@ -384,176 +323,146 @@
     <main class="workspace">
         <section class="top-command">
             <div class="top-copy">
-                <h1>Install Agent</h1>
-                <p>Generate one-time enrollment keys and copy platform-specific installer commands.</p>
+                <h1>SOC2 Evidence</h1>
+                <p>Generate downloadable evidence snapshots and review the HTML report inline.</p>
             </div>
             <div class="command-actions">
-                <a href="/admin/settings" class="btn subtle">Admin Settings</a>
+                <button id="refreshStatusBtn" type="button" class="btn subtle">Refresh Status</button>
+                <button id="openHtmlBtn" type="button" class="btn subtle">Open HTML in New Tab</button>
+                <button id="downloadCsvBtn" type="button" class="btn primary">Download CSV</button>
             </div>
         </section>
-        <div id="tokenStatus" class="status-line"></div>
+        <div id="pageStatus" class="status-line"></div>
 
-        <section class="panel-wrap">
-            <section class="panel">
-                <h2>Generate Installer</h2>
-                <p class="hint">Each generated enrollment key is one-time use and expires automatically.</p>
-                <div class="row">
-                    <div class="field-block">
-                        <label for="newAgentPlatform">Platform</label>
-                        <select id="newAgentPlatform">
-                            <option value="linux">Linux (Ubuntu)</option>
-                            <option value="mac">macOS (launchd)</option>
-                            <option value="windows">Windows (PowerShell)</option>
-                        </select>
-                    </div>
-                    <div class="field-block">
-                        <label for="newAgentTtlSeconds">Key TTL Seconds</label>
-                        <input id="newAgentTtlSeconds" type="number" min="300" max="2592000" value="604800">
-                    </div>
-                </div>
-                <div class="row">
-                    <div id="windowsInstallModeBlock" class="field-block">
-                        <label for="newAgentWindowsInstallMode">Windows Install Mode</label>
-                        <select id="newAgentWindowsInstallMode">
-                            <option value="prebuilt">Prebuilt Binary (no endpoint compile)</option>
-                            <option value="source">Compile from Source on Endpoint</option>
-                        </select>
-                        <p class="hint">Used only when platform is Windows.</p>
-                    </div>
-                </div>
-
-                <div class="actions">
-                    <button id="generateAgentBtn" type="button" class="btn primary">Generate Installer</button>
-                </div>
-                <div id="installStatus" class="status-line"></div>
-
-                <div class="output-grid">
-                    <div class="field-block">
-                        <label for="newAgentEnrollmentKey">Enrollment Key</label>
-                        <input id="newAgentEnrollmentKey" class="mono" type="text" readonly>
-                    </div>
-                    <div class="field-block">
-                        <label for="newAgentScriptUrl">Install Script URL</label>
-                        <input id="newAgentScriptUrl" class="mono" type="text" readonly>
-                    </div>
-                </div>
-                <div class="field-block">
-                    <label for="newAgentInstallCommand">Install Command</label>
-                    <textarea id="newAgentInstallCommand" class="mono" readonly></textarea>
-                </div>
-            </section>
+        <section class="panel">
+            <h2>HTML Evidence Report</h2>
+            <p class="hint">This replaces the old JSON evidence export in the dashboard actions.</p>
+            <div class="actions">
+                <button id="loadHtmlBtn" type="button" class="btn subtle">Load HTML Report</button>
+            </div>
+            <div id="exportStatus" class="status-line"></div>
+            <iframe id="htmlPreview" class="preview-frame" title="SOC2 evidence preview"></iframe>
         </section>
     </main>
 </div>
 
 <script>
 (() => {
+    const STORAGE_KEY = "patchagent_admin_token";
+
     const authUser = document.getElementById("authUser");
-    const tokenStatus = document.getElementById("tokenStatus");
-    const installStatus = document.getElementById("installStatus");
+    const pageStatus = document.getElementById("pageStatus");
+    const exportStatus = document.getElementById("exportStatus");
+    const htmlPreview = document.getElementById("htmlPreview");
 
     const logoutBtn = document.getElementById("logoutBtn");
-    const generateAgentBtn = document.getElementById("generateAgentBtn");
+    const refreshStatusBtn = document.getElementById("refreshStatusBtn");
+    const loadHtmlBtn = document.getElementById("loadHtmlBtn");
+    const openHtmlBtn = document.getElementById("openHtmlBtn");
+    const downloadCsvBtn = document.getElementById("downloadCsvBtn");
 
-    const newAgentPlatformInput = document.getElementById("newAgentPlatform");
-    const newAgentTtlSecondsInput = document.getElementById("newAgentTtlSeconds");
-    const windowsInstallModeBlock = document.getElementById("windowsInstallModeBlock");
-    const newAgentWindowsInstallModeInput = document.getElementById("newAgentWindowsInstallMode");
-    const newAgentEnrollmentKeyInput = document.getElementById("newAgentEnrollmentKey");
-    const newAgentScriptUrlInput = document.getElementById("newAgentScriptUrl");
-    const newAgentInstallCommandInput = document.getElementById("newAgentInstallCommand");
+    let latestHtml = "";
 
-    const STORAGE_KEY = "patchagent_admin_token";
     logoutBtn.addEventListener("click", async () => {
         try {
-            await apiFetch("/v1/admin/auth/logout", { method: "POST" });
+            await apiFetchJson("/v1/admin/auth/logout", { method: "POST" });
         } catch {
         }
 
         window.location.href = "/admin/login";
     });
 
-    generateAgentBtn.addEventListener("click", async () => {
-        const platform = newAgentPlatformInput.value;
-        const ttlRaw = newAgentTtlSecondsInput.value.trim();
-        const ttlSeconds = Number.parseInt(ttlRaw, 10);
+    refreshStatusBtn.addEventListener("click", async () => {
+        await loadAuthStatus();
+    });
 
-        if (!Number.isFinite(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 2592000) {
-            setStatus(installStatus, "TTL must be between 300 and 2592000 seconds.", "error");
+    loadHtmlBtn.addEventListener("click", async () => {
+        await loadEvidenceHtml();
+    });
+
+    openHtmlBtn.addEventListener("click", async () => {
+        if (!latestHtml) {
+            await loadEvidenceHtml();
+        }
+
+        if (!latestHtml) {
             return;
         }
 
+        const blob = new Blob([latestHtml], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const popup = window.open(url, "_blank", "noopener");
+        if (!popup) {
+            setStatus(exportStatus, "Popup blocked by browser. Allow popups and try again.", "error");
+        } else {
+            setStatus(exportStatus, "Opened HTML report in a new tab.", "success");
+        }
+
+        window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+    });
+
+    downloadCsvBtn.addEventListener("click", async () => {
         try {
-            const requestBody = {
-                platform: platform,
-                ttl_seconds: ttlSeconds
-            };
-            if (platform === "windows") {
-                requestBody.windows_install_mode = String(newAgentWindowsInstallModeInput.value || "prebuilt");
+            const response = await fetchWithAuth("/v1/admin/evidence/soc2.csv", "text/csv");
+            const blob = await response.blob();
+            const disposition = String(response.headers.get("Content-Disposition") || "");
+            let filename = "soc2_evidence.csv";
+            const filenameMatch = disposition.match(/filename="?([^\";]+)"?/i);
+            if (filenameMatch && filenameMatch[1]) {
+                filename = filenameMatch[1];
             }
 
-            const response = await apiFetch("/v1/admin/enrollments", {
-                method: "POST",
-                body: JSON.stringify(requestBody)
-            });
-
-            const enrollment = response.enrollment || {};
-            const install = response.install || {};
-
-            newAgentEnrollmentKeyInput.value = String(enrollment.enrollment_key || "");
-            newAgentScriptUrlInput.value = String(install.script_url || "");
-            newAgentInstallCommandInput.value = String(install.command || "");
-
-            const expiresAt = String(enrollment.expires_at || "");
-            const expiryText = expiresAt ? (" Expires: " + expiresAt) : "";
-            setStatus(installStatus, "Enrollment key generated." + expiryText, "success");
+            triggerDownload(blob, filename);
+            setStatus(exportStatus, "Downloaded SOC2 CSV evidence.", "success");
         } catch (error) {
-            setStatus(installStatus, String(error.message || error), "error");
+            setStatus(exportStatus, String(error.message || error), "error");
         }
     });
 
-    function updateWindowsInstallModeVisibility() {
-        windowsInstallModeBlock.style.display = newAgentPlatformInput.value === "windows" ? "" : "none";
+    async function loadEvidenceHtml() {
+        try {
+            const response = await fetchWithAuth("/v1/admin/evidence/soc2.html", "text/html");
+            latestHtml = await response.text();
+            htmlPreview.srcdoc = latestHtml;
+            setStatus(exportStatus, "Loaded SOC2 HTML report.", "success");
+        } catch (error) {
+            latestHtml = "";
+            htmlPreview.srcdoc = "";
+            setStatus(exportStatus, String(error.message || error), "error");
+        }
     }
-
-    newAgentPlatformInput.addEventListener("change", updateWindowsInstallModeVisibility);
 
     async function loadAuthStatus() {
         try {
-            const response = await fetch("/v1/admin/auth/status", {
-                method: "GET",
-                headers: { "Accept": "application/json" }
-            });
-            const data = await response.json();
-
+            const data = await apiFetchJson("/v1/admin/auth/status", { method: "GET" });
             const user = data && typeof data.user === "object" ? data.user : null;
             if (data.logged_in === true && user) {
                 const email = String(user.email || "").trim();
                 const name = String(user.name || "").trim();
                 authUser.textContent = name ? (name + " <" + email + ">") : email;
-                setStatus(tokenStatus, "Authenticated session is active.", "success");
+                setStatus(pageStatus, "Authenticated session is active.", "success");
                 return;
             }
 
             if (data.oauth_enabled === true) {
                 authUser.textContent = "Not signed in";
-                setStatus(tokenStatus, "Use Google login, or manage bearer token in the Admin tab.", "");
+                setStatus(pageStatus, "Sign in via Google OAuth or rely on bearer token.", "");
                 return;
             }
 
             authUser.textContent = "OAuth not configured";
-            setStatus(tokenStatus, "Google OAuth is not configured on this server.", "");
+            setStatus(pageStatus, "Bearer token auth can still be used for API requests.", "");
         } catch {
             authUser.textContent = "Unknown";
-            setStatus(tokenStatus, "Could not load auth status.", "error");
+            setStatus(pageStatus, "Could not load auth status.", "error");
         }
     }
 
-    async function apiFetch(path, options) {
+    async function apiFetchJson(path, options) {
         const headers = new Headers(options?.headers || {});
         headers.set("Accept", "application/json");
 
-        const token = getStoredToken();
+        const token = String(localStorage.getItem(STORAGE_KEY) || "").trim();
         if (token) {
             headers.set("Authorization", "Bearer " + token);
         }
@@ -570,7 +479,6 @@
 
         const raw = await response.text();
         let data = {};
-
         if (raw.trim() !== "") {
             try {
                 data = JSON.parse(raw);
@@ -582,9 +490,8 @@
         if (!response.ok) {
             if (response.status === 401 && data?.error?.code === "admin_auth_required") {
                 window.location.href = "/admin/login";
-                throw new Error("Redirecting to login.");
+                throw new Error("Admin authentication required.");
             }
-
             const message = data?.error?.message || ("Request failed with status " + response.status);
             throw new Error(message);
         }
@@ -592,21 +499,59 @@
         return data;
     }
 
+    async function fetchWithAuth(path, accept) {
+        const headers = new Headers();
+        headers.set("Accept", accept);
+
+        const token = String(localStorage.getItem(STORAGE_KEY) || "").trim();
+        if (token) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+
+        const response = await fetch(path, {
+            method: "GET",
+            headers: headers
+        });
+
+        if (!response.ok) {
+            const raw = await response.text();
+            let message = "Request failed with status " + response.status;
+            if (raw.trim() !== "") {
+                try {
+                    const data = JSON.parse(raw);
+                    if (response.status === 401 && data?.error?.code === "admin_auth_required") {
+                        window.location.href = "/admin/login";
+                        throw new Error("Admin authentication required.");
+                    }
+                    message = data?.error?.message || message;
+                } catch {
+                    message = raw;
+                }
+            }
+            throw new Error(message);
+        }
+
+        return response;
+    }
+
+    function triggerDownload(blob, filename) {
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+    }
+
     function setStatus(element, message, kind) {
         element.textContent = message;
         element.className = "status-line" + (kind ? " " + kind : "");
     }
 
-    function getStoredToken() {
-        return String(localStorage.getItem(STORAGE_KEY) || "").trim();
-    }
-
-    async function initialize() {
-        await loadAuthStatus();
-        updateWindowsInstallModeVisibility();
-    }
-
-    initialize();
+    loadAuthStatus().catch(() => {});
+    loadEvidenceHtml().catch(() => {});
 })();
 </script>
 </body>
