@@ -34,6 +34,10 @@ public sealed class AgentOptions
 
     public int WindowsUpdateCommandTimeoutSeconds { get; set; } = 5400;
 
+    public bool EnableWindowsPowerShellScriptExecution { get; set; } = true;
+
+    public int WindowsPowerShellScriptCommandTimeoutSeconds { get; set; } = 3600;
+
     public bool EnableMacSoftwareUpdateJobExecution { get; set; } = true;
 
     public int MacSoftwareUpdateCommandTimeoutSeconds { get; set; } = 5400;

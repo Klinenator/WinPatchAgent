@@ -78,7 +78,7 @@ Admin pages:
 - `/admin/install-agent` enrollment key + installer generation
 - `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, and queue package install jobs by platform (Windows, Linux, macOS).
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), and queue Windows PowerShell script jobs for Windows agents.
 
 Suggested nginx site:
 
@@ -130,6 +130,28 @@ curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
     }
   }'
 ```
+
+Windows PowerShell script job seeding example:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
+  -H 'Authorization: Bearer change-me-admin-key' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "target_device_id": "win-node-001",
+    "type": "windows_powershell_script",
+    "correlation_id": "windows-provision-gcpw-001",
+    "payload": {
+      "windows_script": {
+        "script_url": "https://patch.rrsaccess.com/scripts/provision.ps1"
+      }
+    }
+  }'
+```
+
+Inline PowerShell script payload is also supported with:
+- `payload.windows_script.script` (inline script content)
+- `payload.windows_script.script_url` (download and execute script URL)
 
 Ubuntu apt job seeding example:
 

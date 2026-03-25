@@ -466,6 +466,23 @@
                 <p class="hint">Use either device ID or agent ID as the target. Job payload and policy must be JSON objects.</p>
                 <div class="row">
                     <div class="field-block">
+                        <label for="jobTemplate">Template</label>
+                        <select id="jobTemplate">
+                            <option value="ubuntu_apt_upgrade">Ubuntu apt upgrade</option>
+                            <option value="windows_update_install">Windows package install (KB/package IDs)</option>
+                            <option value="windows_powershell_script">Windows PowerShell script</option>
+                            <option value="windows_powershell_script_url">Windows PowerShell script URL</option>
+                            <option value="windows_powershell_script_gcpw">Windows GCPW install script</option>
+                            <option value="macos_software_update">macOS software update</option>
+                        </select>
+                    </div>
+                    <div class="field-block">
+                        <label for="applyTemplateBtn">Apply</label>
+                        <button id="applyTemplateBtn" type="button" class="btn subtle">Apply Template</button>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field-block">
                         <label for="targetDeviceId">Target Device ID</label>
                         <input id="targetDeviceId" type="text" placeholder="ubuntu-node-001">
                     </div>
@@ -542,7 +559,9 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshJobsBtn = document.getElementById("refreshJobsBtn");
     const createJobBtn = document.getElementById("createJobBtn");
+    const applyTemplateBtn = document.getElementById("applyTemplateBtn");
 
+    const jobTemplateInput = document.getElementById("jobTemplate");
     const targetDeviceIdInput = document.getElementById("targetDeviceId");
     const targetAgentIdInput = document.getElementById("targetAgentId");
     const jobTypeInput = document.getElementById("jobType");
@@ -551,6 +570,65 @@
     const jobPolicyInput = document.getElementById("jobPolicy");
 
     const STORAGE_KEY = "patchagent_admin_token";
+    const JOB_TEMPLATES = {
+        ubuntu_apt_upgrade: {
+            type: "ubuntu_apt_upgrade",
+            payload: {
+                apt: {
+                    upgrade_all: true,
+                    packages: []
+                }
+            },
+            policy: defaultPolicy()
+        },
+        windows_update_install: {
+            type: "windows_update_install",
+            payload: {
+                windows_update: {
+                    install_all: false,
+                    kbs: ["KB5035853"]
+                }
+            },
+            policy: defaultPolicy()
+        },
+        windows_powershell_script: {
+            type: "windows_powershell_script",
+            payload: {
+                windows_script: {
+                    script: "$ErrorActionPreference = 'Stop'\nWrite-Host 'hello from patch agent script'"
+                }
+            },
+            policy: defaultPolicy()
+        },
+        windows_powershell_script_url: {
+            type: "windows_powershell_script",
+            payload: {
+                windows_script: {
+                    script_url: "https://patch.rrsaccess.com/scripts/provision.ps1"
+                }
+            },
+            policy: defaultPolicy()
+        },
+        windows_powershell_script_gcpw: {
+            type: "windows_powershell_script",
+            payload: {
+                windows_script: {
+                    script: gcpwInstallTemplate()
+                }
+            },
+            policy: defaultPolicy()
+        },
+        macos_software_update: {
+            type: "macos_software_update",
+            payload: {
+                macos_update: {
+                    install_all: false,
+                    labels: []
+                }
+            },
+            policy: defaultPolicy()
+        }
+    };
     logoutBtn.addEventListener("click", async () => {
         try {
             await apiFetch("/v1/admin/auth/logout", { method: "POST" });
@@ -562,6 +640,14 @@
 
     refreshJobsBtn.addEventListener("click", async () => {
         await loadJobs();
+    });
+
+    applyTemplateBtn.addEventListener("click", () => {
+        applyTemplate(jobTemplateInput.value);
+    });
+
+    jobTemplateInput.addEventListener("change", () => {
+        applyTemplate(jobTemplateInput.value);
     });
 
     createJobBtn.addEventListener("click", async () => {
@@ -612,6 +698,48 @@
             setStatus(createStatus, String(error.message || error), "error");
         }
     });
+
+    function applyTemplate(templateKey) {
+        const template = JOB_TEMPLATES[String(templateKey || "")];
+        if (!template) {
+            setStatus(createStatus, "Template is not recognized.", "error");
+            return;
+        }
+
+        jobTypeInput.value = String(template.type || "");
+        jobPayloadInput.value = JSON.stringify(template.payload || {}, null, 2);
+        jobPolicyInput.value = JSON.stringify(template.policy || {}, null, 2);
+        setStatus(createStatus, "Template loaded: " + String(jobTemplateInput.options[jobTemplateInput.selectedIndex]?.text || template.type), "");
+    }
+
+    function defaultPolicy() {
+        return {
+            maintenance_window: {
+                start: null,
+                end: null
+            }
+        };
+    }
+
+    function gcpwInstallTemplate() {
+        return [
+            "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
+            "",
+            "$msiUrl = 'https://dl.google.com/credentialprovider/gcpwstandaloneenterprise64.msi'",
+            "$msiPath = Join-Path $env:TEMP 'gcpwstandaloneenterprise64.msi'",
+            "Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath",
+            "$installArgs = \"/i `\"$msiPath`\" /qn /norestart\"",
+            "$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $installArgs -Wait -PassThru",
+            "if ($proc.ExitCode -ne 0) { throw \"GCPW install failed with exit code $($proc.ExitCode).\" }",
+            "",
+            "# Set your Google Workspace login domain(s).",
+            "$allowedDomains = 'accessrrs.com'",
+            "New-Item -Path 'HKLM:\\Software\\Google\\GCPW' -Force | Out-Null",
+            "New-ItemProperty -Path 'HKLM:\\Software\\Google\\GCPW' -Name 'domains_allowed_to_login' -Value $allowedDomains -PropertyType String -Force | Out-Null",
+            "Write-Host 'GCPW installation complete.'"
+        ].join("\n");
+    }
 
     async function loadAuthStatus() {
         try {
@@ -770,6 +898,7 @@
     }
 
     async function initialize() {
+        applyTemplate(jobTemplateInput.value);
         await loadAuthStatus();
         await loadJobs();
     }

@@ -885,6 +885,10 @@ dotnet publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$In
         EnableAptJobExecution = \$false
         EnableWindowsUpdateJobExecution = \$true
         WindowsUpdateCommandTimeoutSeconds = 5400
+        EnableWindowsPowerShellScriptExecution = \$true
+        WindowsPowerShellScriptCommandTimeoutSeconds = 3600
+        EnableMacSoftwareUpdateJobExecution = \$false
+        MacSoftwareUpdateCommandTimeoutSeconds = 5400
     }
 }
 \$ConfigObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$ConfigPath -Encoding UTF8

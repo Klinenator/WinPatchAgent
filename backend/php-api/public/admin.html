@@ -196,6 +196,13 @@
             box-shadow: 0 0 0 3px rgba(46, 130, 218, 0.15);
         }
 
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+
         .btn {
             border: 1px solid transparent;
             border-radius: 999px;
@@ -696,7 +703,7 @@
 
             <section class="panel">
                 <h2>Selected Agent</h2>
-                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename and queue installs.</p>
+                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue packages, or run scripts.</p>
 
                 <div class="field-grid">
                     <div class="field-block">
@@ -726,6 +733,25 @@
                 <div class="button-row">
                     <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Listed Packages</button>
                     <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                </div>
+
+                <div class="field-grid">
+                    <div class="field-block">
+                        <label for="windowsScriptCorrelationId">Script Correlation ID (optional)</label>
+                        <input id="windowsScriptCorrelationId" type="text" placeholder="windows-provision-001">
+                    </div>
+                    <div class="field-block">
+                        <label for="windowsScriptUrlInput">PowerShell Script URL (optional)</label>
+                        <input id="windowsScriptUrlInput" type="url" placeholder="https://example.com/provision.ps1">
+                    </div>
+                </div>
+                <div class="field-block">
+                    <label for="windowsScriptInput">PowerShell Script (Windows agents)</label>
+                    <textarea id="windowsScriptInput" placeholder="$ErrorActionPreference = 'Stop'"></textarea>
+                </div>
+                <div class="button-row">
+                    <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue PowerShell Script</button>
+                    <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
                 </div>
                 <div id="agentActionStatus" class="status-line"></div>
 
@@ -796,11 +822,16 @@
     const renameAgentBtn = document.getElementById("renameAgentBtn");
     const installListedUpdatesBtn = document.getElementById("installListedUpdatesBtn");
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
+    const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
+    const loadGcpwTemplateBtn = document.getElementById("loadGcpwTemplateBtn");
 
     const selectedAgentIdInput = document.getElementById("selectedAgentId");
     const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
     const updateIdsInput = document.getElementById("updateIdsInput");
     const updateCorrelationIdInput = document.getElementById("updateCorrelationId");
+    const windowsScriptCorrelationIdInput = document.getElementById("windowsScriptCorrelationId");
+    const windowsScriptUrlInput = document.getElementById("windowsScriptUrlInput");
+    const windowsScriptInput = document.getElementById("windowsScriptInput");
     const agentSearchInput = document.getElementById("agentSearchInput");
     const availabilityFilterInput = document.getElementById("availabilityFilter");
 
@@ -905,6 +936,60 @@
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
         }
+    });
+
+    queueWindowsScriptBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        const selectedAgent = findAgent(selectedAgentId);
+        if (!selectedAgent) {
+            setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+            return;
+        }
+
+        const deviceType = getDeviceType(selectedAgent).value;
+        if (deviceType !== "windows") {
+            setStatus(agentActionStatus, "PowerShell script jobs are supported only for Windows agents.", "error");
+            return;
+        }
+
+        const scriptBody = windowsScriptInput.value.trim();
+        const scriptUrl = windowsScriptUrlInput.value.trim();
+        if (!scriptBody && !scriptUrl) {
+            setStatus(agentActionStatus, "Provide either a script body or a script URL.", "error");
+            return;
+        }
+
+        if (scriptBody && scriptUrl) {
+            setStatus(agentActionStatus, "Use either script body or script URL, not both.", "error");
+            return;
+        }
+
+        if (scriptUrl && !/^https?:\/\//i.test(scriptUrl)) {
+            setStatus(agentActionStatus, "Script URL must start with http:// or https://.", "error");
+            return;
+        }
+
+        try {
+            const queued = await queueWindowsScriptJob(selectedAgent, scriptBody, scriptUrl);
+            const jobId = queued.response?.job?.job_id || "(unknown)";
+            setStatus(agentActionStatus, "PowerShell script job queued (" + queued.type + "): " + jobId, "success");
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
+        }
+    });
+
+    loadGcpwTemplateBtn.addEventListener("click", () => {
+        windowsScriptUrlInput.value = "";
+        windowsScriptInput.value = buildGcpwInstallTemplate();
+        if (!windowsScriptCorrelationIdInput.value.trim()) {
+            windowsScriptCorrelationIdInput.value = "windows-gcpw-" + Date.now();
+        }
+        setStatus(agentActionStatus, "Loaded GCPW install template. Review domain settings before queueing.", "");
     });
 
     async function loadAuthStatus() {
@@ -1090,7 +1175,7 @@
 
     function syncSelectedAgent() {
         if (!selectedAgentId) {
-            selectedAgentHint.textContent = "Choose an agent from the list to rename and queue installs.";
+            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, or run scripts.";
             return;
         }
 
@@ -1238,6 +1323,36 @@
         return { response: response, type: type };
     }
 
+    async function queueWindowsScriptJob(agent, scriptBody, scriptUrl) {
+        const agentRecordId = String(agent.agent_record_id || "");
+        const correlationRaw = windowsScriptCorrelationIdInput.value.trim();
+        const correlationId = correlationRaw || ("windows-script-" + Date.now());
+        const windowsScriptPayload = {};
+
+        if (scriptBody) {
+            windowsScriptPayload.script = scriptBody;
+        }
+
+        if (scriptUrl) {
+            windowsScriptPayload.script_url = scriptUrl;
+        }
+
+        const response = await apiFetch("/v1/admin/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                target_agent_id: agentRecordId,
+                type: "windows_powershell_script",
+                correlation_id: correlationId,
+                payload: {
+                    windows_script: windowsScriptPayload
+                },
+                policy: {}
+            })
+        });
+
+        return { response: response, type: "windows_powershell_script" };
+    }
+
     function parsePackageIds(rawValue, normalizeKbStyle) {
         const seen = new Set();
         const result = [];
@@ -1265,6 +1380,26 @@
             });
 
         return result;
+    }
+
+    function buildGcpwInstallTemplate() {
+        return [
+            "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
+            "",
+            "$msiUrl = 'https://dl.google.com/credentialprovider/gcpwstandaloneenterprise64.msi'",
+            "$msiPath = Join-Path $env:TEMP 'gcpwstandaloneenterprise64.msi'",
+            "Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath",
+            "$installArgs = \"/i `\"$msiPath`\" /qn /norestart\"",
+            "$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $installArgs -Wait -PassThru",
+            "if ($proc.ExitCode -ne 0) { throw \"GCPW install failed with exit code $($proc.ExitCode).\" }",
+            "",
+            "# Set your Google Workspace login domain(s).",
+            "$allowedDomains = 'accessrrs.com'",
+            "New-Item -Path 'HKLM:\\Software\\Google\\GCPW' -Force | Out-Null",
+            "New-ItemProperty -Path 'HKLM:\\Software\\Google\\GCPW' -Name 'domains_allowed_to_login' -Value $allowedDomains -PropertyType String -Force | Out-Null",
+            "Write-Host 'GCPW installation complete.'"
+        ].join("\n");
     }
 
     function availabilityState(agent) {

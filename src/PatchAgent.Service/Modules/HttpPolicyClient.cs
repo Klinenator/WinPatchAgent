@@ -228,7 +228,9 @@ public sealed class HttpPolicyClient : IPolicyClient
             WindowsInstallAll = ReadWindowsInstallAll(response.Job.Payload),
             WindowsKbIds = ReadWindowsKbIds(response.Job.Payload),
             MacOsInstallAll = ReadMacOsInstallAll(response.Job.Payload),
-            MacOsUpdateLabels = ReadMacOsUpdateLabels(response.Job.Payload)
+            MacOsUpdateLabels = ReadMacOsUpdateLabels(response.Job.Payload),
+            WindowsPowerShellScript = ReadWindowsPowerShellScript(response.Job.Payload),
+            WindowsPowerShellScriptUrl = ReadWindowsPowerShellScriptUrl(response.Job.Payload)
         };
     }
 
@@ -560,6 +562,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         return false;
     }
 
+    private static string ReadWindowsPowerShellScript(JsonElement? payload)
+    {
+        if (TryGetWindowsScriptValue(payload, "script", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var script = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(script))
+            {
+                return script.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ReadWindowsPowerShellScriptUrl(JsonElement? payload)
+    {
+        if (TryGetWindowsScriptValue(payload, "script_url", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var scriptUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(scriptUrl))
+            {
+                return scriptUrl.Trim();
+            }
+        }
+
+        if (TryGetWindowsScriptValue(payload, "url", out value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var scriptUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(scriptUrl))
+            {
+                return scriptUrl.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static List<string> ReadWindowsKbIds(JsonElement? payload)
     {
         var kbSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -757,6 +796,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!windowsUpdateSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetWindowsScriptValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement scriptSection;
+        if (payloadObject.TryGetProperty("windows_script", out var windowsScriptSection)
+            && windowsScriptSection.ValueKind == JsonValueKind.Object)
+        {
+            scriptSection = windowsScriptSection;
+        }
+        else if (payloadObject.TryGetProperty("powershell", out var powershellSection)
+                 && powershellSection.ValueKind == JsonValueKind.Object)
+        {
+            scriptSection = powershellSection;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!scriptSection.TryGetProperty(key, out var child))
         {
             return false;
         }

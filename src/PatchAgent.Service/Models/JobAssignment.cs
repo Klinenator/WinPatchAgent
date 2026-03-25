@@ -29,4 +29,8 @@ public sealed class JobAssignment
     public bool MacOsInstallAll { get; set; }
 
     public List<string> MacOsUpdateLabels { get; set; } = [];
+
+    public string WindowsPowerShellScript { get; set; } = string.Empty;
+
+    public string WindowsPowerShellScriptUrl { get; set; } = string.Empty;
 }
