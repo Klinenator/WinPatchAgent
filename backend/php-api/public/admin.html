@@ -753,6 +753,7 @@
                 <div class="button-row">
                     <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue PowerShell Script</button>
                     <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
+                    <button id="refreshSelectedInventoryBtn" type="button" class="btn subtle">Refresh Inventory Snapshot</button>
                 </div>
                 <div id="agentActionStatus" class="status-line"></div>
 
@@ -768,6 +769,23 @@
                         </thead>
                         <tbody id="installedUpdatesTableBody">
                         <tr><td colspan="3" class="hint">Select an agent to view installed packages.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3>Available Packages</h3>
+                <p id="availablePackagesSummary" class="hint">Select an agent to view available packages.</p>
+                <div class="table-wrap compact">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Package ID</th>
+                            <th>Title / Label</th>
+                            <th>Source</th>
+                        </tr>
+                        </thead>
+                        <tbody id="availablePackagesTableBody">
+                        <tr><td colspan="3" class="hint">Select an agent to view available packages.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -807,6 +825,8 @@
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
     const installedUpdatesTableBody = document.getElementById("installedUpdatesTableBody");
+    const availablePackagesTableBody = document.getElementById("availablePackagesTableBody");
+    const availablePackagesSummary = document.getElementById("availablePackagesSummary");
     const agentActionStatus = document.getElementById("agentActionStatus");
     const selectedAgentHint = document.getElementById("selectedAgentHint");
     const agentsSummary = document.getElementById("agentsSummary");
@@ -825,6 +845,7 @@
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
     const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
     const loadGcpwTemplateBtn = document.getElementById("loadGcpwTemplateBtn");
+    const refreshSelectedInventoryBtn = document.getElementById("refreshSelectedInventoryBtn");
 
     const selectedAgentIdInput = document.getElementById("selectedAgentId");
     const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
@@ -991,6 +1012,31 @@
             windowsScriptCorrelationIdInput.value = "windows-gcpw-" + Date.now();
         }
         setStatus(agentActionStatus, "Loaded GCPW install template. Review domain settings before queueing.", "");
+    });
+
+    refreshSelectedInventoryBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        try {
+            const response = await apiFetch("/v1/admin/agents/" + encodeURIComponent(selectedAgentId) + "/inventory", {
+                method: "GET"
+            });
+
+            const selectedAgent = findAgent(selectedAgentId);
+            if (selectedAgent) {
+                selectedAgent.inventory = (typeof response.inventory === "object" && response.inventory !== null)
+                    ? response.inventory
+                    : {};
+            }
+
+            syncSelectedAgent();
+            setStatus(agentActionStatus, "Pulled latest inventory snapshot for selected agent.", "success");
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
+        }
     });
 
     async function loadAuthStatus() {
@@ -1169,6 +1215,7 @@
         selectedAgentIdInput.value = selectedAgentId;
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
         renderInstalledUpdates(getInstalledUpdates(agent));
+        renderAvailablePackages(agent);
         selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         setStatus(agentActionStatus, "Selected " + selectedAgentDisplayNameInput.value + ".", "");
         renderAgents(latestAgents);
@@ -1186,6 +1233,7 @@
             selectedAgentIdInput.value = "";
             selectedAgentDisplayNameInput.value = "";
             renderInstalledUpdates([]);
+            renderAvailablePackages(null);
             selectedAgentHint.textContent = "Selected agent is no longer present.";
             setStatus(agentActionStatus, "Selected agent is no longer present.", "error");
             renderAgents(latestAgents);
@@ -1194,6 +1242,7 @@
 
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
         renderInstalledUpdates(getInstalledUpdates(agent));
+        renderAvailablePackages(agent);
         selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         renderAgents(latestAgents);
     }
@@ -1362,6 +1411,105 @@
                 "<td><code class=\"mono\">" + escapeHtml(String(update.update_id || "")) + "</code></td>" +
                 "<td>" + escapeHtml(String(update.title || "")) + "</td>" +
                 "<td>" + escapeHtml(String(update.installed_at || "")) + "</td>" +
+                "</tr>";
+        }).join("");
+    }
+
+    function getAvailablePackageEntries(agent) {
+        if (!agent) {
+            return [];
+        }
+
+        const deviceType = getDeviceType(agent).value;
+        if (deviceType === "windows") {
+            const windowsUpdate = getWindowsUpdateSection(agent);
+            const available = Array.isArray(windowsUpdate.available_patches) ? windowsUpdate.available_patches : [];
+            return available
+                .filter((update) => typeof update === "object" && update !== null)
+                .map((update) => ({
+                    package_id: String(update.update_id || update.kb || ""),
+                    title: String(update.title || ""),
+                    source: "Windows Update"
+                }))
+                .filter((entry) => entry.package_id !== "" || entry.title !== "");
+        }
+
+        if (deviceType === "linux") {
+            const linux = getLinuxSection(agent);
+            const available = Array.isArray(linux.available_packages)
+                ? linux.available_packages
+                : (Array.isArray(linux.availablePackages) ? linux.availablePackages : []);
+            return available
+                .filter((pkg) => typeof pkg === "string")
+                .map((pkg) => pkg.trim())
+                .filter((pkg) => pkg !== "")
+                .map((pkg) => ({
+                    package_id: pkg,
+                    title: "",
+                    source: "APT"
+                }));
+        }
+
+        if (deviceType === "mac") {
+            const macOs = getMacOsSection(agent);
+            const labels = Array.isArray(macOs.available_update_labels)
+                ? macOs.available_update_labels
+                : (Array.isArray(macOs.availableUpdateLabels) ? macOs.availableUpdateLabels : []);
+            return labels
+                .filter((label) => typeof label === "string")
+                .map((label) => label.trim())
+                .filter((label) => label !== "")
+                .map((label) => ({
+                    package_id: label,
+                    title: "",
+                    source: "softwareupdate"
+                }));
+        }
+
+        return [];
+    }
+
+    function inventorySnapshotCopy(agent) {
+        if (!agent) {
+            return "";
+        }
+
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        const snapshotTime = String(inventory.stored_at || inventory.collected_at || "").trim();
+        if (!snapshotTime) {
+            return "Snapshot time unavailable";
+        }
+
+        return "Snapshot " + describeLastSeen(snapshotTime) + " (" + snapshotTime + ")";
+    }
+
+    function renderAvailablePackages(agent) {
+        if (!agent) {
+            availablePackagesSummary.textContent = "Select an agent to view available packages.";
+            availablePackagesTableBody.innerHTML = '<tr><td colspan="3" class="hint">Select an agent to view available packages.</td></tr>';
+            return;
+        }
+
+        const entries = getAvailablePackageEntries(agent);
+        const count = countAvailablePackages(agent);
+        const snapshot = inventorySnapshotCopy(agent);
+        availablePackagesSummary.textContent = count + " available package(s). " + snapshot + ".";
+
+        if (!entries.length) {
+            if (count > 0) {
+                availablePackagesTableBody.innerHTML = '<tr><td colspan="3" class="hint">Inventory reports available packages, but this snapshot did not include package names.</td></tr>';
+                return;
+            }
+
+            availablePackagesTableBody.innerHTML = '<tr><td colspan="3" class="hint">No available packages reported in latest inventory.</td></tr>';
+            return;
+        }
+
+        availablePackagesTableBody.innerHTML = entries.map((entry) => {
+            return "<tr>" +
+                "<td><code class=\"mono\">" + escapeHtml(String(entry.package_id || "")) + "</code></td>" +
+                "<td>" + escapeHtml(String(entry.title || "")) + "</td>" +
+                "<td>" + escapeHtml(String(entry.source || "")) + "</td>" +
                 "</tr>";
         }).join("");
     }
