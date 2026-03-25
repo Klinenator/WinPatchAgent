@@ -150,6 +150,10 @@ public sealed class LinuxAptJobExecutor : IJobExecutor
             job.JobId,
             report.FinalState);
 
+        // Force an inventory refresh on the next loop so available package counts
+        // reflect the latest apt install/upgrade result without waiting for
+        // the full inventory interval.
+        state.LastInventoryAtUtc = null;
         state.CurrentJob = null;
         return true;
     }

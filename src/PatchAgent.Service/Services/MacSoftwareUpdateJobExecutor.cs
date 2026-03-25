@@ -152,6 +152,9 @@ public sealed class MacSoftwareUpdateJobExecutor : IJobExecutor
             job.JobId,
             report.FinalState);
 
+        // Force an inventory refresh on the next loop so available update counts
+        // reflect recent softwareupdate activity immediately.
+        state.LastInventoryAtUtc = null;
         state.CurrentJob = null;
         return true;
     }

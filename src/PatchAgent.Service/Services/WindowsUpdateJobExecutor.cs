@@ -152,6 +152,9 @@ public sealed class WindowsUpdateJobExecutor : IJobExecutor
             job.JobId,
             report.FinalState);
 
+        // Force an inventory refresh on the next loop so Windows available/installed
+        // update data is refreshed right after a patch job completes.
+        state.LastInventoryAtUtc = null;
         state.CurrentJob = null;
         return true;
     }
