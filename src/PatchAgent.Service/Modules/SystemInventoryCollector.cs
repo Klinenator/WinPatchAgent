@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using PatchAgent.Service.Abstractions;
 using PatchAgent.Service.Models;
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -39,6 +40,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
         var snapshot = new InventorySnapshot
         {
             CollectedAtUtc = DateTimeOffset.UtcNow,
+            PrimaryMacAddress = ReadPrimaryMacAddress(),
             FreeDiskMb = freeDiskMb
         };
 
@@ -445,6 +447,31 @@ $items | ConvertTo-Json -Depth 5 -Compress
         catch
         {
             return null;
+        }
+    }
+
+    private static string ReadPrimaryMacAddress()
+    {
+        try
+        {
+            var candidates = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(static nic =>
+                    nic.OperationalStatus == OperationalStatus.Up
+                    && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback
+                    && nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                .Select(static nic => nic.GetPhysicalAddress())
+                .Where(static address => address is not null && address.GetAddressBytes().Length >= 6)
+                .Select(static address => address!.ToString().Trim().ToUpperInvariant())
+                .Where(static mac => mac.Length >= 12 && mac != "000000000000")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static mac => mac, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return candidates.Count > 0 ? candidates[0] : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 

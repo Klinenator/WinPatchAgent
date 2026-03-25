@@ -10,6 +10,8 @@ public sealed class InventorySnapshot
 
     public string DomainOrWorkgroup { get; set; } = Environment.UserDomainName;
 
+    public string PrimaryMacAddress { get; set; } = string.Empty;
+
     public string OsDescription { get; set; } = RuntimeInformation.OSDescription;
 
     public string OsArchitecture { get; set; } = RuntimeInformation.OSArchitecture.ToString();

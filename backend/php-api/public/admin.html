@@ -273,6 +273,12 @@
             border-color: #bedff7;
         }
 
+        .agent-actions {
+            display: inline-flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
         .status-line {
             margin: 9px 2px 2px;
             min-height: 20px;
@@ -863,7 +869,7 @@
 
             <section class="panel">
                 <h2>Selected Agent</h2>
-                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue packages, or run scripts.</p>
+                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue packages, run scripts, or connect.</p>
 
                 <div class="field-grid">
                     <div class="field-block">
@@ -1041,12 +1047,15 @@
     const availabilityFilterInput = document.getElementById("availabilityFilter");
 
     const STORAGE_KEY = "patchagent_admin_token";
+    const SPLASHTOP_ACCOUNT_STORAGE_KEY = "patchagent_splashtop_account_email";
+    const SPLASHTOP_MAC_OVERRIDES_STORAGE_KEY = "patchagent_splashtop_mac_overrides";
     let latestAgents = [];
     let latestJobs = [];
     let selectedAgentId = "";
     let selectedAvailablePackageIds = new Set();
     let activePatchTab = "available";
     let installActionInFlight = false;
+    let signedInUserEmail = "";
 
     logoutBtn.addEventListener("click", async () => {
         try {
@@ -1327,20 +1336,24 @@
             if (data.logged_in === true && user) {
                 const email = String(user.email || "").trim();
                 const name = String(user.name || "").trim();
+                signedInUserEmail = email;
                 authUser.textContent = name ? (name + " <" + email + ">") : email;
                 setStatus(tokenStatus, "Authenticated session is active.", "success");
                 return;
             }
 
             if (data.oauth_enabled === true) {
+                signedInUserEmail = "";
                 authUser.textContent = "Not signed in";
                 setStatus(tokenStatus, "Use Google login, or manage bearer token in the Admin tab.", "");
                 return;
             }
 
+            signedInUserEmail = "";
             authUser.textContent = "OAuth not configured";
             setStatus(tokenStatus, "Google OAuth is not configured on this server.", "");
         } catch {
+            signedInUserEmail = "";
             authUser.textContent = "Unknown";
             setStatus(tokenStatus, "Could not load auth status.", "error");
         }
@@ -1436,6 +1449,7 @@
             const status = availabilityState(agent);
             const serviceState = String(heartbeat.service_state || "unknown");
             const deviceType = getDeviceType(agent);
+            const canConnect = deviceType.value === "windows" || deviceType.value === "mac";
 
             return "<tr class=\"" + selectedClass.trim() + "\">" +
                 "<td>" +
@@ -1449,7 +1463,10 @@
                 "<td>" + escapeHtml(serviceState) + "</td>" +
                 "<td>" + escapeHtml(String(availableCount)) + "</td>" +
                 "<td><code class=\"mono\">" + escapeHtml(currentJobText) + "</code></td>" +
-                "<td><button type=\"button\" class=\"btn tiny manage-agent-btn\" data-agent-id=\"" + escapeHtml(agentId) + "\">Manage</button></td>" +
+                "<td><div class=\"agent-actions\">" +
+                "<button type=\"button\" class=\"btn tiny manage-agent-btn\" data-agent-id=\"" + escapeHtml(agentId) + "\">Manage</button>" +
+                "<button type=\"button\" class=\"btn tiny connect-agent-btn\" data-agent-id=\"" + escapeHtml(agentId) + "\"" + (canConnect ? "" : " disabled") + ">Connect</button>" +
+                "</div></td>" +
                 "</tr>";
         }).join("");
 
@@ -1457,6 +1474,19 @@
             button.addEventListener("click", () => {
                 const agentId = button.getAttribute("data-agent-id") || "";
                 selectAgent(agentId);
+            });
+        });
+
+        agentsTableBody.querySelectorAll(".connect-agent-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+                const agentId = button.getAttribute("data-agent-id") || "";
+                const agent = findAgent(agentId);
+                if (!agent) {
+                    setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+                    return;
+                }
+
+                openSplashtopConnection(agent);
             });
         });
     }
@@ -1506,7 +1536,7 @@
 
     function syncSelectedAgent() {
         if (!selectedAgentId) {
-            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, or run scripts.";
+            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, run scripts, or connect.";
             renderPatchTableForSelectedAgent();
             return;
         }
@@ -1699,6 +1729,165 @@
         }
 
         return { value: "unknown", label: "Unknown" };
+    }
+
+    function openSplashtopConnection(agent) {
+        const deviceType = getDeviceType(agent).value;
+        if (deviceType !== "windows" && deviceType !== "mac") {
+            setStatus(agentActionStatus, "Splashtop Connect is available for Windows and macOS agents only.", "error");
+            return;
+        }
+
+        const agentName = String(agent.display_name || agent.hostname || agent.agent_record_id || "selected agent");
+        let accountEmail = getStoredSplashtopAccountEmail();
+        if (!accountEmail) {
+            const suggested = signedInUserEmail || "";
+            const entered = window.prompt("Enter your Splashtop account email for one-click connection:", suggested);
+            if (entered === null) {
+                setStatus(agentActionStatus, "Splashtop connect canceled.", "");
+                return;
+            }
+
+            accountEmail = String(entered || "").trim();
+            if (!accountEmail) {
+                setStatus(agentActionStatus, "Splashtop account email is required to launch a connection.", "error");
+                return;
+            }
+
+            saveStoredSplashtopAccountEmail(accountEmail);
+        }
+
+        let targetMac = getSplashtopTargetMac(agent);
+        if (!targetMac) {
+            const enteredMac = window.prompt(
+                "Enter the remote computer MAC address for " + agentName + " (example: C04A001C72EC):",
+                ""
+            );
+            if (enteredMac === null) {
+                setStatus(agentActionStatus, "Splashtop connect canceled.", "");
+                return;
+            }
+
+            targetMac = normalizeSplashtopMac(enteredMac);
+            if (!targetMac) {
+                setStatus(agentActionStatus, "A valid 12-digit MAC address is required for Splashtop connect.", "error");
+                return;
+            }
+
+            saveSplashtopMacOverride(agent, targetMac);
+        }
+
+        const uri = "st-business://com.splashtop.business?account="
+            + encodeURIComponent(accountEmail)
+            + "&mac="
+            + encodeURIComponent(targetMac);
+
+        setStatus(agentActionStatus, "Opening Splashtop for " + agentName + "...", "success");
+        window.location.href = uri;
+    }
+
+    function getStoredSplashtopAccountEmail() {
+        return String(localStorage.getItem(SPLASHTOP_ACCOUNT_STORAGE_KEY) || "").trim();
+    }
+
+    function saveStoredSplashtopAccountEmail(email) {
+        const value = String(email || "").trim();
+        if (!value) {
+            localStorage.removeItem(SPLASHTOP_ACCOUNT_STORAGE_KEY);
+            return;
+        }
+
+        localStorage.setItem(SPLASHTOP_ACCOUNT_STORAGE_KEY, value);
+    }
+
+    function getSplashtopTargetMac(agent) {
+        const automatic = getAgentPrimaryMacAddress(agent);
+        if (automatic) {
+            return automatic;
+        }
+
+        return getSplashtopMacOverride(agent);
+    }
+
+    function getAgentPrimaryMacAddress(agent) {
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        const hardware = (typeof inventory.hardware === "object" && inventory.hardware !== null) ? inventory.hardware : {};
+        const candidates = [
+            hardware.primary_mac_address,
+            hardware.primaryMacAddress,
+            hardware.mac_address,
+            hardware.macAddress
+        ];
+
+        for (const candidate of candidates) {
+            const normalized = normalizeSplashtopMac(candidate);
+            if (normalized) {
+                return normalized;
+            }
+        }
+
+        return "";
+    }
+
+    function normalizeSplashtopMac(value) {
+        const normalized = String(value || "").trim().toUpperCase().replace(/[^0-9A-F]/g, "");
+        return normalized.length === 12 ? normalized : "";
+    }
+
+    function loadSplashtopMacOverrides() {
+        const raw = String(localStorage.getItem(SPLASHTOP_MAC_OVERRIDES_STORAGE_KEY) || "").trim();
+        if (!raw) {
+            return {};
+        }
+
+        try {
+            const parsed = JSON.parse(raw);
+            return (typeof parsed === "object" && parsed !== null) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+
+    function saveSplashtopMacOverrides(overrides) {
+        localStorage.setItem(SPLASHTOP_MAC_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides || {}));
+    }
+
+    function getSplashtopMacOverride(agent) {
+        const overrides = loadSplashtopMacOverrides();
+        const agentId = String(agent.agent_record_id || "").trim();
+        const deviceId = String(agent.device_id || "").trim();
+        const candidates = [
+            agentId ? overrides["agent:" + agentId] : "",
+            deviceId ? overrides["device:" + deviceId] : ""
+        ];
+
+        for (const candidate of candidates) {
+            const normalized = normalizeSplashtopMac(candidate);
+            if (normalized) {
+                return normalized;
+            }
+        }
+
+        return "";
+    }
+
+    function saveSplashtopMacOverride(agent, macAddress) {
+        const normalized = normalizeSplashtopMac(macAddress);
+        if (!normalized) {
+            return;
+        }
+
+        const overrides = loadSplashtopMacOverrides();
+        const agentId = String(agent.agent_record_id || "").trim();
+        const deviceId = String(agent.device_id || "").trim();
+        if (agentId) {
+            overrides["agent:" + agentId] = normalized;
+        }
+        if (deviceId) {
+            overrides["device:" + deviceId] = normalized;
+        }
+
+        saveSplashtopMacOverrides(overrides);
     }
 
     function getAvailablePatchRows(agent) {

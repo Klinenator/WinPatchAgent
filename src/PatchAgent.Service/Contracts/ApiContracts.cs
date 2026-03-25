@@ -171,6 +171,8 @@ public sealed class InventoryHardware
 
     public string DomainOrWorkgroup { get; set; } = string.Empty;
 
+    public string? PrimaryMacAddress { get; set; }
+
     public long? FreeDiskMb { get; set; }
 }
 

@@ -110,6 +110,7 @@ It now includes a basic admin web view at `/admin` for viewing agents, generatin
 Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth, with optional TOTP second factor and optional Touch ID/passkey (WebAuthn) as an MFA alternative.
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
 It now also supports queueing script jobs for Windows and macOS (inline script or script URL), including built-in GCPW and Splashtop install templates.
+It also includes an agent-row `Connect` button that launches the Splashtop Business app URI for Windows/macOS agents.
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 
 Local dev run:

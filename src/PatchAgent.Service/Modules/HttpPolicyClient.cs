@@ -171,6 +171,7 @@ public sealed class HttpPolicyClient : IPolicyClient
             {
                 Hostname = snapshot.Hostname,
                 DomainOrWorkgroup = snapshot.DomainOrWorkgroup,
+                PrimaryMacAddress = snapshot.PrimaryMacAddress,
                 FreeDiskMb = snapshot.FreeDiskMb
             },
             Linux = OperatingSystem.IsLinux()
