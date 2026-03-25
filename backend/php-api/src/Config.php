@@ -24,6 +24,7 @@ final class Config
         public readonly int $adminTotpChallengeTtlSeconds,
         public readonly string $windowsSplashtopMsiUrl,
         public readonly string $windowsSplashtopDeploymentCode,
+        public readonly string $windowsAgentPackageUrl,
         public readonly int $heartbeatSeconds,
         public readonly int $jobsSeconds,
         public readonly int $inventorySeconds
@@ -53,6 +54,10 @@ final class Config
             adminTotpChallengeTtlSeconds: max(60, self::envInt('PATCH_API_ADMIN_TOTP_CHALLENGE_TTL_SECONDS', 300)),
             windowsSplashtopMsiUrl: self::env('PATCH_API_WINDOWS_SPLASHTOP_MSI_URL', ''),
             windowsSplashtopDeploymentCode: self::env('PATCH_API_WINDOWS_SPLASHTOP_DEPLOY_CODE', ''),
+            windowsAgentPackageUrl: self::env(
+                'PATCH_API_WINDOWS_AGENT_PACKAGE_URL',
+                'https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip'
+            ),
             heartbeatSeconds: self::envInt('PATCH_API_HEARTBEAT_SECONDS', 300),
             jobsSeconds: self::envInt('PATCH_API_JOBS_SECONDS', 120),
             inventorySeconds: self::envInt('PATCH_API_INVENTORY_SECONDS', 21600)

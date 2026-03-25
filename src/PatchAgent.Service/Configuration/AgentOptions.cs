@@ -3,6 +3,7 @@ namespace PatchAgent.Service.Configuration;
 public sealed class AgentOptions
 {
     public const string SectionName = "Agent";
+    public const string DefaultWindowsPackageUrl = "https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip";
 
     public string ServiceName { get; set; } = "PatchAgentSvc";
 
@@ -41,6 +42,8 @@ public sealed class AgentOptions
     public bool EnableMacSoftwareUpdateJobExecution { get; set; } = true;
 
     public int MacSoftwareUpdateCommandTimeoutSeconds { get; set; } = 5400;
+
+    public string WindowsSelfUpdatePackageUrl { get; set; } = DefaultWindowsPackageUrl;
 
     public bool EnableMacShellScriptExecution { get; set; } = true;
 

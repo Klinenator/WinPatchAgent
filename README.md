@@ -103,6 +103,19 @@ To also delete persisted agent state:
 sudo bash ./scripts/uninstall_macos_agent.sh --purge-state
 ```
 
+## Build Windows Prebuilt Package
+
+Use this from a Windows machine with .NET 8 SDK:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package_windows_agent.ps1
+```
+
+Default output:
+- `artifacts/winpatchagent-windows-x64.zip`
+
+Publish that zip as your GitHub Release asset (same filename), or host it at your own HTTPS URL and set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server.
+
 ## Backend (PHP + nginx)
 
 API scaffold is under `backend/php-api/`.
@@ -111,9 +124,10 @@ Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer to
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
 It now also supports queueing script jobs for Windows and macOS (inline script or script URL), including built-in GCPW and Splashtop install templates.
 It now also supports per-agent self-update jobs (`agent_self_update`) from the main admin page.
-Server-generated endpoint installers and self-update workflows now pull source archives over HTTPS (curl/wget/Invoke-WebRequest), so Git is not required on endpoints.
+Server-generated endpoint installers and self-update workflows now pull artifacts over HTTPS (curl/wget/Invoke-WebRequest), so Git is not required on endpoints.
 It also includes an agent-row `Connect` button that launches the Splashtop Business app URI for Windows/macOS agents.
 If you set `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` on the API server, Windows agent installs from `/install/windows.ps1` will auto-install Splashtop during provisioning.
+Set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server to your published Windows agent zip (default points to GitHub Releases latest asset `winpatchagent-windows-x64.zip`).
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 
 Local dev run:

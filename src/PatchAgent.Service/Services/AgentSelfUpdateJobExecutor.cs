@@ -15,6 +15,7 @@ public sealed class AgentSelfUpdateJobExecutor : IJobExecutor
 {
     private const string DefaultRepoUrl = "https://github.com/Klinenator/WinPatchAgent.git";
     private const string DefaultRepoRef = "main";
+    private const string DefaultWindowsPackageUrl = AgentOptions.DefaultWindowsPackageUrl;
     private static readonly TimeSpan SelfUpdateTimeout = TimeSpan.FromMinutes(45);
     private static readonly Regex UnsafeTokenRegex = new("[^A-Za-z0-9_-]+", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions MarkerJsonOptions = new()
@@ -266,9 +267,10 @@ public sealed class AgentSelfUpdateJobExecutor : IJobExecutor
         var repoRef = string.IsNullOrWhiteSpace(job.AgentSelfUpdateRepoRef)
             ? DefaultRepoRef
             : job.AgentSelfUpdateRepoRef.Trim();
+        var windowsPackageUrl = ResolveWindowsPackageUrl(job);
 
         return OperatingSystem.IsWindows()
-            ? await TryScheduleWindowsUpdateAsync(job.JobId, markerPath, repoUrl, repoRef, cancellationToken)
+            ? await TryScheduleWindowsUpdateAsync(job.JobId, markerPath, windowsPackageUrl, cancellationToken)
             : OperatingSystem.IsLinux()
                 ? await TryScheduleLinuxUpdateAsync(job.JobId, markerPath, repoUrl, repoRef, cancellationToken)
                 : OperatingSystem.IsMacOS()
@@ -279,13 +281,12 @@ public sealed class AgentSelfUpdateJobExecutor : IJobExecutor
     private async Task<bool> TryScheduleWindowsUpdateAsync(
         string jobId,
         string markerPath,
-        string repoUrl,
-        string repoRef,
+        string packageUrl,
         CancellationToken cancellationToken)
     {
         var safeToken = ToSafeToken(jobId);
         var scriptPath = Path.Combine(_pathProvider.CacheDirectory, $"self-update-{safeToken}.ps1");
-        var script = BuildWindowsUpdaterScript(jobId, markerPath, repoUrl, repoRef);
+        var script = BuildWindowsUpdaterScript(jobId, markerPath, packageUrl);
 
         await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(false), cancellationToken);
 
@@ -393,131 +394,45 @@ public sealed class AgentSelfUpdateJobExecutor : IJobExecutor
     private string BuildWindowsUpdaterScript(
         string jobId,
         string markerPath,
-        string repoUrl,
-        string repoRef)
+        string packageUrl)
     {
         var jobIdLiteral = PowerShellLiteral(jobId);
         var markerPathLiteral = PowerShellLiteral(markerPath);
-        var repoUrlLiteral = PowerShellLiteral(repoUrl);
-        var repoRefLiteral = PowerShellLiteral(repoRef);
+        var packageUrlLiteral = PowerShellLiteral(packageUrl);
 
         return $$"""
 $ErrorActionPreference = "Stop"
 
 $JobId = {{jobIdLiteral}}
 $MarkerPath = {{markerPathLiteral}}
-$RepoUrl = {{repoUrlLiteral}}
-$RepoRef = {{repoRefLiteral}}
-$WorkDir = "C:\ProgramData\WinPatchAgent\src"
+$PackageUrl = {{packageUrlLiteral}}
 $InstallDir = "C:\Program Files\WinPatchAgent"
 $ServiceName = "PatchAgentSvc"
 
-function Get-DotnetCommand {
-    $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
-    if ($cmd) {
-        return $cmd.Source
+function Resolve-PackageInstallRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExtractRoot
+    )
+
+    $candidateDirs = @($ExtractRoot)
+    $topLevel = Get-ChildItem -Path $ExtractRoot -Directory -ErrorAction SilentlyContinue
+    foreach ($dir in $topLevel) {
+        $candidateDirs += $dir.FullName
     }
 
-    $fallback = "C:\Program Files\dotnet\dotnet.exe"
-    if (Test-Path $fallback) {
-        return $fallback
-    }
+    foreach ($candidate in $candidateDirs) {
+        if (Test-Path (Join-Path $candidate "PatchAgent.Service.exe")) {
+            return $candidate
+        }
 
-    return $null
-}
-
-function Get-DotnetSdkMajorVersions {
-    param([string]$DotnetExe)
-
-    if ([string]::IsNullOrWhiteSpace($DotnetExe)) {
-        return @()
-    }
-
-    try {
-        $lines = & $DotnetExe --list-sdks 2>$null
-    } catch {
-        return @()
-    }
-
-    $majors = @()
-    foreach ($line in $lines) {
-        if ($line -match "^\s*(\d+)\.") {
-            $majors += [int]$Matches[1]
+        $match = Get-ChildItem -Path $candidate -Recurse -File -Filter "PatchAgent.Service.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($match) {
+            return (Split-Path -Parent $match.FullName)
         }
     }
-    return $majors
-}
 
-function Ensure-DotnetSdk8 {
-    $dotnetExe = Get-DotnetCommand
-    $majors = Get-DotnetSdkMajorVersions -DotnetExe $dotnetExe
-    if ($majors | Where-Object { $_ -ge 8 }) {
-        return $dotnetExe
-    }
-
-    Write-Host ".NET SDK 8+ not found. Installing .NET SDK 8..."
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $installerPath = Join-Path $env:TEMP ("dotnet-install-" + [guid]::NewGuid().ToString("N") + ".ps1")
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $installerPath
-        $installProc = Start-Process -FilePath "powershell.exe" -ArgumentList @(
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", $installerPath,
-            "-Channel", "8.0",
-            "-InstallDir", "C:\Program Files\dotnet",
-            "-Architecture", "x64"
-        ) -Wait -PassThru -WindowStyle Hidden
-        if ($installProc.ExitCode -ne 0) {
-            throw "dotnet-install failed with exit code $($installProc.ExitCode)."
-        }
-    } finally {
-        Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
-    }
-
-    $env:PATH = "C:\Program Files\dotnet;" + $env:PATH
-    $dotnetExe = Get-DotnetCommand
-    $majors = Get-DotnetSdkMajorVersions -DotnetExe $dotnetExe
-    if (-not ($majors | Where-Object { $_ -ge 8 })) {
-        throw "Failed to install .NET SDK 8."
-    }
-
-    return $dotnetExe
-}
-
-function Normalize-RepoHttpUrl {
-    param([string]$RawUrl)
-
-    if ($null -eq $RawUrl) {
-        $url = ""
-    } else {
-        $url = [string]$RawUrl
-    }
-    $url = $url.Trim()
-    if ([string]::IsNullOrWhiteSpace($url)) {
-        throw "Repo URL is empty."
-    }
-
-    $url = $url.TrimEnd("/")
-    if ($url -match "^git@github\\.com:(.+?)(?:\\.git)?$") {
-        return "https://github.com/$($Matches[1])"
-    }
-
-    if ($url.EndsWith(".git", [System.StringComparison]::OrdinalIgnoreCase)) {
-        $url = $url.Substring(0, $url.Length - 4)
-    }
-
-    if ($url -notmatch "^https?://") {
-        throw "Unsupported repo URL format: $RawUrl"
-    }
-
-    return $url
-}
-
-function Build-ArchiveUrl {
-    param([string]$RawRepoUrl, [string]$RawRepoRef)
-    $repoHttpUrl = Normalize-RepoHttpUrl -RawUrl $RawRepoUrl
-    return "$repoHttpUrl/archive/$RawRepoRef.zip"
+    throw "Prebuilt package does not contain PatchAgent.Service.exe."
 }
 
 $success = $false
@@ -527,45 +442,40 @@ $errorMessage = ""
 try {
     Start-Sleep -Seconds 4
 
-    $dotnetExe = Ensure-DotnetSdk8
-
-    $workParent = Split-Path -Parent $WorkDir
-    if (-not [string]::IsNullOrWhiteSpace($workParent)) {
-        New-Item -ItemType Directory -Path $workParent -Force | Out-Null
+    if ([string]::IsNullOrWhiteSpace($PackageUrl)) {
+        throw "Windows self-update package URL is empty."
     }
 
-    $archiveUrl = Build-ArchiveUrl -RawRepoUrl $RepoUrl -RawRepoRef $RepoRef
     $archivePath = Join-Path $env:TEMP ("winpatchagent-selfupdate-" + [guid]::NewGuid().ToString("N") + ".zip")
     $extractRoot = Join-Path $env:TEMP ("winpatchagent-selfupdate-" + [guid]::NewGuid().ToString("N"))
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $archiveUrl -OutFile $archivePath
-        New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
-        Expand-Archive -Path $archivePath -DestinationPath $extractRoot -Force
-
-        $sourceDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
-        if (-not $sourceDir) {
-            throw "Downloaded archive did not contain source files."
-        }
-
-        if (Test-Path $WorkDir) {
-            Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-
-        Move-Item -Path $sourceDir.FullName -Destination $WorkDir
-    } finally {
-        Remove-Item -Path $archivePath -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
     $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($service) {
         Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
     }
 
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    $projectPath = Join-Path $WorkDir "src\PatchAgent.Service\PatchAgent.Service.csproj"
-    & $dotnetExe publish $projectPath -c Release -r win-x64 --self-contained true -o $InstallDir | Out-Null
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $PackageUrl -OutFile $archivePath
+        New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+        Expand-Archive -Path $archivePath -DestinationPath $extractRoot -Force
+
+        $packageRoot = Resolve-PackageInstallRoot -ExtractRoot $extractRoot
+        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+
+        Get-ChildItem -Path $packageRoot -Force | ForEach-Object {
+            if ($_.Name -notin @("appsettings.Production.json", "appsettings.Development.json", "appsettings.json")) {
+                Copy-Item -Path $_.FullName -Destination $InstallDir -Recurse -Force
+            }
+        }
+
+        $exePath = Join-Path $InstallDir "PatchAgent.Service.exe"
+        if (-not (Test-Path $exePath)) {
+            throw "Expected service binary not found after prebuilt install: $exePath"
+        }
+    } finally {
+        Remove-Item -Path $archivePath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
         $exePath = Join-Path $InstallDir "PatchAgent.Service.exe"
@@ -901,10 +811,26 @@ write_marker
         }
     }
 
+    private string ResolveWindowsPackageUrl(JobExecutionState job)
+    {
+        if (!string.IsNullOrWhiteSpace(job.AgentSelfUpdatePackageUrl))
+        {
+            return job.AgentSelfUpdatePackageUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.WindowsSelfUpdatePackageUrl))
+        {
+            return _options.WindowsSelfUpdatePackageUrl.Trim();
+        }
+
+        return DefaultWindowsPackageUrl;
+    }
+
     private static bool IsSelfUpdateJob(JobExecutionState job)
     {
         if (!string.IsNullOrWhiteSpace(job.AgentSelfUpdateRepoUrl)
-            || !string.IsNullOrWhiteSpace(job.AgentSelfUpdateRepoRef))
+            || !string.IsNullOrWhiteSpace(job.AgentSelfUpdateRepoRef)
+            || !string.IsNullOrWhiteSpace(job.AgentSelfUpdatePackageUrl))
         {
             return true;
         }

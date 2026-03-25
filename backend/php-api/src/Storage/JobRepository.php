@@ -367,6 +367,7 @@ final class JobRepository
                 'agent_self_update' => [
                     'repo_url' => trim((string) ($selfUpdate['repo_url'] ?? '')),
                     'repo_ref' => trim((string) ($selfUpdate['repo_ref'] ?? $selfUpdate['branch'] ?? '')),
+                    'package_url' => trim((string) ($selfUpdate['package_url'] ?? $selfUpdate['windows_package_url'] ?? '')),
                 ],
             ];
         }

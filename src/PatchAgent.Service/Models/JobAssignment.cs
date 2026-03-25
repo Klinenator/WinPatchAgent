@@ -41,4 +41,6 @@ public sealed class JobAssignment
     public string AgentSelfUpdateRepoUrl { get; set; } = string.Empty;
 
     public string AgentSelfUpdateRepoRef { get; set; } = string.Empty;
+
+    public string AgentSelfUpdatePackageUrl { get; set; } = string.Empty;
 }

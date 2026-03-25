@@ -247,7 +247,8 @@ public sealed class HttpPolicyClient : IPolicyClient
             MacShellScript = ReadMacShellScript(response.Job.Payload),
             MacShellScriptUrl = ReadMacShellScriptUrl(response.Job.Payload),
             AgentSelfUpdateRepoUrl = ReadAgentSelfUpdateRepoUrl(response.Job.Payload),
-            AgentSelfUpdateRepoRef = ReadAgentSelfUpdateRepoRef(response.Job.Payload)
+            AgentSelfUpdateRepoRef = ReadAgentSelfUpdateRepoRef(response.Job.Payload),
+            AgentSelfUpdatePackageUrl = ReadAgentSelfUpdatePackageUrl(response.Job.Payload)
         };
     }
 
@@ -684,6 +685,31 @@ public sealed class HttpPolicyClient : IPolicyClient
             if (!string.IsNullOrWhiteSpace(repoRef))
             {
                 return repoRef.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ReadAgentSelfUpdatePackageUrl(JsonElement? payload)
+    {
+        if (TryGetAgentSelfUpdateValue(payload, "package_url", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var packageUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(packageUrl))
+            {
+                return packageUrl.Trim();
+            }
+        }
+
+        if (TryGetAgentSelfUpdateValue(payload, "windows_package_url", out value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var packageUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(packageUrl))
+            {
+                return packageUrl.Trim();
             }
         }
 

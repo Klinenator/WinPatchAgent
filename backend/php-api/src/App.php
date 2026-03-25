@@ -2046,8 +2046,7 @@ BASH;
     {
         $backendUrlLiteral = $this->powershellLiteral($baseUrl);
         $enrollmentKeyLiteral = $this->powershellLiteral($enrollmentKey);
-        $repoUrlLiteral = $this->powershellLiteral(self::AGENT_REPO_URL);
-        $repoRefLiteral = $this->powershellLiteral(self::AGENT_REPO_REF);
+        $windowsPackageUrlLiteral = $this->powershellLiteral($this->config->windowsAgentPackageUrl);
         $splashtopMsiUrlLiteral = $this->powershellLiteral($this->config->windowsSplashtopMsiUrl);
         $splashtopDeploymentCodeLiteral = $this->powershellLiteral($this->config->windowsSplashtopDeploymentCode);
 
@@ -2056,164 +2055,73 @@ BASH;
 
 \$BackendUrl = {$backendUrlLiteral}
 \$EnrollmentKey = {$enrollmentKeyLiteral}
-\$RepoUrl = {$repoUrlLiteral}
-\$RepoRef = {$repoRefLiteral}
+\$WindowsAgentPackageUrl = {$windowsPackageUrlLiteral}
 \$SplashtopMsiUrl = {$splashtopMsiUrlLiteral}
 \$SplashtopDeploymentCode = {$splashtopDeploymentCodeLiteral}
-\$WorkDir = "C:\\ProgramData\\WinPatchAgent\\src"
 \$InstallDir = "C:\\Program Files\\WinPatchAgent"
 \$ServiceName = "PatchAgentSvc"
 \$StateDir = "C:\\ProgramData\\WinPatchAgent\\state"
 
-function Require-Command {
-    param([string]\$Name, [string]\$Hint)
-    if (-not (Get-Command \$Name -ErrorAction SilentlyContinue)) {
-        throw "Missing required command '\$Name'. \$Hint"
-    }
-}
+function Resolve-PackageInstallRoot {
+    param(
+        [Parameter(Mandatory = \$true)]
+        [string]\$ExtractRoot
+    )
 
-function Get-DotnetCommand {
-    \$cmd = Get-Command dotnet -ErrorAction SilentlyContinue
-    if (\$cmd) {
-        return \$cmd.Source
-    }
-
-    \$fallback = "C:\\Program Files\\dotnet\\dotnet.exe"
-    if (Test-Path \$fallback) {
-        return \$fallback
+    \$candidateDirs = @(\$ExtractRoot)
+    \$topLevel = Get-ChildItem -Path \$ExtractRoot -Directory -ErrorAction SilentlyContinue
+    foreach (\$dir in \$topLevel) {
+        \$candidateDirs += \$dir.FullName
     }
 
-    return \$null
-}
+    foreach (\$candidate in \$candidateDirs) {
+        if (Test-Path (Join-Path \$candidate "PatchAgent.Service.exe")) {
+            return \$candidate
+        }
 
-function Get-DotnetSdkMajorVersions {
-    param([string]\$DotnetExe)
-
-    if ([string]::IsNullOrWhiteSpace(\$DotnetExe)) {
-        return @()
-    }
-
-    try {
-        \$lines = & \$DotnetExe --list-sdks 2>\$null
-    } catch {
-        return @()
-    }
-
-    \$majors = @()
-    foreach (\$line in \$lines) {
-        if (\$line -match "^\\s*(\\d+)\\.") {
-            \$majors += [int]\$Matches[1]
+        \$match = Get-ChildItem -Path \$candidate -Recurse -File -Filter "PatchAgent.Service.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (\$match) {
+            return (Split-Path -Parent \$match.FullName)
         }
     }
-    return \$majors
-}
 
-function Ensure-DotnetSdk8 {
-    \$dotnetExe = Get-DotnetCommand
-    \$majors = Get-DotnetSdkMajorVersions -DotnetExe \$dotnetExe
-    if (\$majors | Where-Object { \$_ -ge 8 }) {
-        return \$dotnetExe
-    }
-
-    Write-Host ".NET SDK 8+ not found. Installing .NET SDK 8..."
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    \$installerPath = Join-Path \$env:TEMP ("dotnet-install-" + [guid]::NewGuid().ToString("N") + ".ps1")
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile \$installerPath
-        \$installProc = Start-Process -FilePath "powershell.exe" -ArgumentList @(
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", \$installerPath,
-            "-Channel", "8.0",
-            "-InstallDir", "C:\\Program Files\\dotnet",
-            "-Architecture", "x64"
-        ) -Wait -PassThru -WindowStyle Hidden
-        if (\$installProc.ExitCode -ne 0) {
-            throw "dotnet-install failed with exit code \$($installProc.ExitCode)."
-        }
-    } finally {
-        Remove-Item -Path \$installerPath -Force -ErrorAction SilentlyContinue
-    }
-
-    \$env:PATH = "C:\\Program Files\\dotnet;" + \$env:PATH
-    \$dotnetExe = Get-DotnetCommand
-    \$majors = Get-DotnetSdkMajorVersions -DotnetExe \$dotnetExe
-    if (-not (\$majors | Where-Object { \$_ -ge 8 })) {
-        throw "Failed to install .NET SDK 8."
-    }
-
-    return \$dotnetExe
-}
-
-function Normalize-RepoHttpUrl {
-    param([string]\$RawUrl)
-
-    if (\$null -eq \$RawUrl) {
-        \$url = ""
-    } else {
-        \$url = [string]\$RawUrl
-    }
-    \$url = \$url.Trim()
-    if ([string]::IsNullOrWhiteSpace(\$url)) {
-        throw "Repo URL is empty."
-    }
-
-    \$url = \$url.TrimEnd("/")
-    if (\$url -match "^git@github\\.com:(.+?)(?:\\.git)?\$") {
-        return "https://github.com/\$($Matches[1])"
-    }
-
-    if (\$url.EndsWith(".git", [System.StringComparison]::OrdinalIgnoreCase)) {
-        \$url = \$url.Substring(0, \$url.Length - 4)
-    }
-
-    if (\$url -notmatch "^https?://") {
-        throw "Unsupported repo URL format: \$RawUrl"
-    }
-
-    return \$url
-}
-
-function Build-ArchiveUrl {
-    param([string]\$RawRepoUrl, [string]\$RawRepoRef)
-
-    \$repoHttpUrl = Normalize-RepoHttpUrl -RawUrl \$RawRepoUrl
-    return "\$repoHttpUrl/archive/\$RawRepoRef.zip"
+    throw "Prebuilt package does not contain PatchAgent.Service.exe."
 }
 
 New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
 New-Item -ItemType Directory -Path \$StateDir -Force | Out-Null
-\$WorkParent = Split-Path -Parent \$WorkDir
-if (-not [string]::IsNullOrWhiteSpace(\$WorkParent)) {
-    New-Item -ItemType Directory -Path \$WorkParent -Force | Out-Null
-}
-\$ArchiveUrl = Build-ArchiveUrl -RawRepoUrl \$RepoUrl -RawRepoRef \$RepoRef
-\$ArchivePath = Join-Path \$env:TEMP ("winpatchagent-src-" + [guid]::NewGuid().ToString("N") + ".zip")
-\$ExtractRoot = Join-Path \$env:TEMP ("winpatchagent-src-" + [guid]::NewGuid().ToString("N"))
 
+if (Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue) {
+    Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
+    sc.exe delete \$ServiceName | Out-Null
+    Start-Sleep -Seconds 2
+}
+
+if ([string]::IsNullOrWhiteSpace(\$WindowsAgentPackageUrl)) {
+    throw "Windows prebuilt package URL is empty. Set PATCH_API_WINDOWS_AGENT_PACKAGE_URL on the API server."
+}
+
+\$ArchivePath = Join-Path \$env:TEMP ("winpatchagent-prebuilt-" + [guid]::NewGuid().ToString("N") + ".zip")
+\$ExtractRoot = Join-Path \$env:TEMP ("winpatchagent-prebuilt-" + [guid]::NewGuid().ToString("N"))
 try {
-    Invoke-WebRequest -UseBasicParsing -Uri \$ArchiveUrl -OutFile \$ArchivePath
+    Invoke-WebRequest -UseBasicParsing -Uri \$WindowsAgentPackageUrl -OutFile \$ArchivePath
     New-Item -ItemType Directory -Path \$ExtractRoot -Force | Out-Null
     Expand-Archive -Path \$ArchivePath -DestinationPath \$ExtractRoot -Force
+    \$PackageRoot = Resolve-PackageInstallRoot -ExtractRoot \$ExtractRoot
 
-    \$ExtractedDir = Get-ChildItem -Path \$ExtractRoot -Directory | Select-Object -First 1
-    if (-not \$ExtractedDir) {
-        throw "Downloaded archive did not contain source files."
+    if (Test-Path \$InstallDir) {
+        Get-ChildItem -Path \$InstallDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
     }
 
-    if (Test-Path \$WorkDir) {
-        Remove-Item -Path \$WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path \$PackageRoot -Force | ForEach-Object {
+        Copy-Item -Path \$_.FullName -Destination \$InstallDir -Recurse -Force
     }
-
-    Move-Item -Path \$ExtractedDir.FullName -Destination \$WorkDir
 } finally {
     Remove-Item -Path \$ArchivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -Path \$ExtractRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-\$ProjectPath = Join-Path \$WorkDir "src\\PatchAgent.Service\\PatchAgent.Service.csproj"
-\$DotnetExe = Ensure-DotnetSdk8
-& \$DotnetExe publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
 
 \$ConfigPath = Join-Path \$InstallDir "appsettings.Production.json"
 \$ConfigObject = @{
@@ -2237,6 +2145,7 @@ try {
         WindowsPowerShellScriptCommandTimeoutSeconds = 3600
         EnableMacSoftwareUpdateJobExecution = \$false
         MacSoftwareUpdateCommandTimeoutSeconds = 5400
+        WindowsSelfUpdatePackageUrl = \$WindowsAgentPackageUrl
     }
 }
 \$ConfigObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$ConfigPath -Encoding UTF8
@@ -2271,12 +2180,6 @@ if ([string]::IsNullOrWhiteSpace(\$SplashtopMsiUrl)) {
     } finally {
         Remove-Item -Path \$splashtopMsiPath -Force -ErrorAction SilentlyContinue
     }
-}
-
-if (Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue) {
-    Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
-    sc.exe delete \$ServiceName | Out-Null
-    Start-Sleep -Seconds 2
 }
 
 \$ExePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
