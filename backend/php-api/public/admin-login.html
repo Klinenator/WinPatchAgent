@@ -57,6 +57,8 @@
             background: var(--primary);
             color: #fff;
             font-weight: 600;
+            border: 0;
+            cursor: pointer;
         }
 
         a.button[aria-disabled="true"] {
@@ -73,6 +75,36 @@
         .status.error {
             color: var(--danger);
         }
+
+        .totp {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .totp label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .totp-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .totp-row input {
+            flex: 1 1 auto;
+            min-width: 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 16px;
+            letter-spacing: 0.2em;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -80,12 +112,34 @@
     <h1>PatchAgent Admin Login</h1>
     <p>Sign in with your Google Workspace account to access the admin console.</p>
     <a id="googleLoginLink" class="button" href="/v1/admin/auth/google/start">Sign in with Google</a>
+    <div id="totpPanel" class="totp" hidden>
+        <p id="totpPrompt">Enter the 6-digit code from Google Authenticator/Authy.</p>
+        <form id="totpForm">
+            <label for="totpCode">Verification Code</label>
+            <div class="totp-row">
+                <input
+                    id="totpCode"
+                    type="text"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    maxlength="6"
+                    autocomplete="one-time-code"
+                    placeholder="123456">
+                <button id="totpSubmit" type="submit" class="button">Verify</button>
+            </div>
+        </form>
+    </div>
     <div id="status" class="status"></div>
 </div>
 <script>
 (() => {
     const link = document.getElementById("googleLoginLink");
     const status = document.getElementById("status");
+    const totpPanel = document.getElementById("totpPanel");
+    const totpPrompt = document.getElementById("totpPrompt");
+    const totpForm = document.getElementById("totpForm");
+    const totpCode = document.getElementById("totpCode");
+    const totpSubmit = document.getElementById("totpSubmit");
 
     const params = new URLSearchParams(window.location.search);
     const error = params.get("error");
@@ -96,21 +150,69 @@
         status.className = "status error";
     }
 
+    totpForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const code = String(totpCode.value || "").replace(/\D+/g, "").slice(0, 6);
+        if (code.length !== 6) {
+            status.textContent = "Enter the 6-digit authentication code.";
+            status.className = "status error";
+            totpCode.focus();
+            return;
+        }
+
+        totpSubmit.disabled = true;
+        try {
+            const response = await fetch("/v1/admin/auth/totp/verify", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ code: code })
+            });
+
+            const payload = await response.json();
+            if (!response.ok) {
+                const message = payload?.error?.message || "Verification failed.";
+                throw new Error(message);
+            }
+
+            window.location.replace("/admin");
+        } catch (verifyError) {
+            status.textContent = String(verifyError.message || verifyError);
+            status.className = "status error";
+        } finally {
+            totpSubmit.disabled = false;
+        }
+    });
+
     fetch("/v1/admin/auth/status", {
         method: "GET",
         headers: { "Accept": "application/json" }
     }).then(async (response) => {
         const payload = await response.json();
 
+        if (payload.logged_in === true) {
+            window.location.replace("/admin");
+            return;
+        }
+
+        if (payload.totp_required === true) {
+            link.setAttribute("aria-disabled", "true");
+            const email = String(payload?.totp_user?.email || "").trim();
+            if (email !== "") {
+                totpPrompt.textContent = "Enter the 6-digit code for " + email + ".";
+            }
+            totpPanel.hidden = false;
+            totpCode.focus();
+            return;
+        }
+
         if (payload.oauth_enabled !== true) {
             link.setAttribute("aria-disabled", "true");
             status.textContent = "Google OAuth is not configured on this server yet.";
             status.className = "status error";
-            return;
-        }
-
-        if (payload.logged_in === true) {
-            window.location.replace("/admin");
             return;
         }
 

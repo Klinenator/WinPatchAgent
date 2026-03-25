@@ -27,6 +27,7 @@ final class App
     private const OAUTH_SESSION_NONCE_KEY = 'google_oauth_nonce';
     private const OAUTH_SESSION_STARTED_AT_KEY = 'google_oauth_started_at';
     private const ADMIN_SESSION_USER_KEY = 'admin_user';
+    private const ADMIN_SESSION_TOTP_PENDING_KEY = 'admin_totp_pending';
 
     private Config $config;
     private AgentRepository $agents;
@@ -160,6 +161,11 @@ final class App
 
             if ($method === 'POST' && $path === '/v1/admin/auth/logout') {
                 $this->handleAdminLogout();
+                return;
+            }
+
+            if ($method === 'POST' && $path === '/v1/admin/auth/totp/verify') {
+                $this->handleAdminTotpVerify($request);
                 return;
             }
 
@@ -555,6 +561,7 @@ final class App
     private function handleAdminAuthStatus(): void
     {
         $user = $this->currentAdminUser();
+        $pendingTotpUser = $this->currentPendingTotpUser();
 
         JsonResponse::ok([
             'oauth_enabled' => $this->isGoogleOAuthEnabled(),
@@ -562,6 +569,11 @@ final class App
             'user' => $user,
             'login_url' => '/v1/admin/auth/google/start',
             'logout_url' => '/v1/admin/auth/logout',
+            'totp_enabled' => $this->isAdminTotpEnabled(),
+            'totp_required' => $pendingTotpUser !== null,
+            'totp_user' => $pendingTotpUser,
+            'totp_verify_url' => '/v1/admin/auth/totp/verify',
+            'totp_issuer' => $this->config->adminTotpIssuer,
             'redirect_uri' => $this->googleRedirectUri(),
             'hosted_domain' => $this->config->googleHostedDomain,
         ]);
@@ -574,6 +586,7 @@ final class App
         }
 
         $this->startAdminSession();
+        unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
 
         $state = bin2hex(random_bytes(24));
         $nonce = bin2hex(random_bytes(24));
@@ -659,18 +672,13 @@ final class App
             $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
         );
 
-        $sessionTtl = max(300, $this->config->adminSessionTtlSeconds);
-        $_SESSION[self::ADMIN_SESSION_USER_KEY] = [
-            'email' => $claims['email'],
-            'name' => $claims['name'],
-            'picture' => $claims['picture'],
-            'sub' => $claims['sub'],
-            'hd' => $claims['hd'],
-            'authenticated_at' => gmdate(DATE_ATOM),
-            'expires_at' => time() + $sessionTtl,
-        ];
-        session_regenerate_id(true);
+        if ($this->isAdminTotpEnabled()) {
+            $this->startPendingTotpChallenge($claims);
+            $this->redirect('/admin/login?totp=required');
+            return;
+        }
 
+        $this->authenticateAdminUser($claims);
         $this->redirect('/admin');
     }
 
@@ -680,6 +688,7 @@ final class App
 
         unset(
             $_SESSION[self::ADMIN_SESSION_USER_KEY],
+            $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY],
             $_SESSION[self::OAUTH_SESSION_STATE_KEY],
             $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
             $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
@@ -689,6 +698,197 @@ final class App
         JsonResponse::ok([
             'logged_out' => true,
         ]);
+    }
+
+    private function handleAdminTotpVerify(Request $request): void
+    {
+        if (!$this->isAdminTotpEnabled()) {
+            throw new ApiException(409, 'totp_not_enabled', 'TOTP is not enabled on this server.');
+        }
+
+        $pendingClaims = $this->currentPendingTotpClaims();
+        if ($pendingClaims === null) {
+            throw new ApiException(401, 'totp_not_pending', 'No pending TOTP challenge was found. Start login again.');
+        }
+
+        $body = $request->json();
+        $code = preg_replace('/\D+/', '', (string) ($body['code'] ?? ''));
+        if (!is_string($code) || strlen($code) !== 6) {
+            throw new ApiException(422, 'invalid_request', 'Field "code" must be a 6-digit number.');
+        }
+
+        if (!$this->verifyAdminTotpCode($code)) {
+            throw new ApiException(401, 'invalid_totp_code', 'The authentication code is invalid.');
+        }
+
+        $this->authenticateAdminUser($pendingClaims);
+
+        JsonResponse::ok([
+            'verified' => true,
+            'logged_in' => true,
+            'user' => $this->currentAdminUser(),
+            'redirect' => '/admin',
+        ]);
+    }
+
+    private function authenticateAdminUser(array $claims): void
+    {
+        $sessionTtl = max(300, $this->config->adminSessionTtlSeconds);
+        $_SESSION[self::ADMIN_SESSION_USER_KEY] = [
+            'email' => strtolower(trim((string) ($claims['email'] ?? ''))),
+            'name' => trim((string) ($claims['name'] ?? '')),
+            'picture' => trim((string) ($claims['picture'] ?? '')),
+            'sub' => trim((string) ($claims['sub'] ?? '')),
+            'hd' => trim((string) ($claims['hd'] ?? '')),
+            'authenticated_at' => gmdate(DATE_ATOM),
+            'expires_at' => time() + $sessionTtl,
+        ];
+        unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+        session_regenerate_id(true);
+    }
+
+    private function startPendingTotpChallenge(array $claims): void
+    {
+        $challengeTtl = max(60, $this->config->adminTotpChallengeTtlSeconds);
+        $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY] = [
+            'email' => strtolower(trim((string) ($claims['email'] ?? ''))),
+            'name' => trim((string) ($claims['name'] ?? '')),
+            'picture' => trim((string) ($claims['picture'] ?? '')),
+            'sub' => trim((string) ($claims['sub'] ?? '')),
+            'hd' => trim((string) ($claims['hd'] ?? '')),
+            'started_at' => time(),
+            'challenge_expires_at' => time() + $challengeTtl,
+        ];
+        unset($_SESSION[self::ADMIN_SESSION_USER_KEY]);
+        session_regenerate_id(true);
+    }
+
+    private function currentPendingTotpUser(): ?array
+    {
+        $pending = $this->currentPendingTotpClaims();
+        if ($pending === null) {
+            return null;
+        }
+
+        return [
+            'email' => (string) ($pending['email'] ?? ''),
+            'name' => (string) ($pending['name'] ?? ''),
+            'challenge_expires_at' => (int) ($pending['challenge_expires_at'] ?? 0),
+        ];
+    }
+
+    private function currentPendingTotpClaims(): ?array
+    {
+        $this->startAdminSession();
+
+        $pending = $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY] ?? null;
+        if (!is_array($pending)) {
+            return null;
+        }
+
+        $email = strtolower(trim((string) ($pending['email'] ?? '')));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+            return null;
+        }
+
+        $expiresAt = (int) ($pending['challenge_expires_at'] ?? 0);
+        if ($expiresAt <= time()) {
+            unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+            return null;
+        }
+
+        return [
+            'email' => $email,
+            'name' => trim((string) ($pending['name'] ?? '')),
+            'picture' => trim((string) ($pending['picture'] ?? '')),
+            'sub' => trim((string) ($pending['sub'] ?? '')),
+            'hd' => trim((string) ($pending['hd'] ?? '')),
+            'challenge_expires_at' => $expiresAt,
+        ];
+    }
+
+    private function isAdminTotpEnabled(): bool
+    {
+        return $this->normalizeTotpSecret($this->config->adminTotpSecret) !== '';
+    }
+
+    private function verifyAdminTotpCode(string $code): bool
+    {
+        $normalizedCode = preg_replace('/\D+/', '', trim($code));
+        if (!is_string($normalizedCode) || strlen($normalizedCode) !== 6) {
+            return false;
+        }
+
+        $secret = $this->decodeBase32Secret($this->normalizeTotpSecret($this->config->adminTotpSecret));
+        if ($secret === '') {
+            return false;
+        }
+
+        $counter = intdiv(time(), 30);
+        $window = max(0, $this->config->adminTotpWindow);
+        for ($offset = -$window; $offset <= $window; $offset++) {
+            $expectedCode = $this->computeTotpCodeForCounter($secret, $counter + $offset);
+            if (hash_equals($expectedCode, $normalizedCode)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function computeTotpCodeForCounter(string $secret, int $counter): string
+    {
+        $high = ($counter >> 32) & 0xFFFFFFFF;
+        $low = $counter & 0xFFFFFFFF;
+        $counterBytes = pack('N2', $high, $low);
+
+        $hash = hash_hmac('sha1', $counterBytes, $secret, true);
+        if (!is_string($hash) || strlen($hash) < 20) {
+            return '000000';
+        }
+
+        $offset = ord($hash[19]) & 0x0F;
+        $binaryCode = ((ord($hash[$offset]) & 0x7F) << 24)
+            | ((ord($hash[$offset + 1]) & 0xFF) << 16)
+            | ((ord($hash[$offset + 2]) & 0xFF) << 8)
+            | (ord($hash[$offset + 3]) & 0xFF);
+
+        return str_pad((string) ($binaryCode % 1000000), 6, '0', STR_PAD_LEFT);
+    }
+
+    private function normalizeTotpSecret(string $secret): string
+    {
+        $normalized = strtoupper(trim($secret));
+        $normalized = preg_replace('/[^A-Z2-7]/', '', $normalized);
+        return is_string($normalized) ? $normalized : '';
+    }
+
+    private function decodeBase32Secret(string $secret): string
+    {
+        if ($secret === '') {
+            return '';
+        }
+
+        $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        $bits = '';
+        $length = strlen($secret);
+
+        for ($index = 0; $index < $length; $index++) {
+            $position = strpos($alphabet, $secret[$index]);
+            if ($position === false) {
+                return '';
+            }
+
+            $bits .= str_pad(decbin($position), 5, '0', STR_PAD_LEFT);
+        }
+
+        $output = '';
+        for ($index = 0; $index + 8 <= strlen($bits); $index += 8) {
+            $output .= chr(bindec(substr($bits, $index, 8)));
+        }
+
+        return $output;
     }
 
     private function servePublicHtmlFile(string $filename, string $missingMessage): void

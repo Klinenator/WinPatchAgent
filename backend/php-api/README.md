@@ -52,6 +52,10 @@ Environment variables:
 - `PATCH_API_LEGACY_CONFIG_FILE`: optional path to legacy PHP config include used as fallback for Google OAuth values (default `/var/lib/php/config.php`)
 - `PATCH_API_ADMIN_SESSION_NAME`: optional admin session cookie name (default `patchagent_admin`)
 - `PATCH_API_ADMIN_SESSION_TTL_SECONDS`: optional admin session lifetime seconds (default `28800`)
+- `PATCH_API_ADMIN_TOTP_SECRET`: optional Base32 TOTP secret for admin MFA (Google Authenticator/Authy compatible)
+- `PATCH_API_ADMIN_TOTP_ISSUER`: optional TOTP issuer label (default `PatchAgent Admin`)
+- `PATCH_API_ADMIN_TOTP_WINDOW`: optional clock-drift window in 30-second steps (default `1`)
+- `PATCH_API_ADMIN_TOTP_CHALLENGE_TTL_SECONDS`: optional pending TOTP challenge lifetime in seconds (default `300`)
 - `PATCH_API_STORAGE_ROOT`: optional override for the runtime storage path
 - `PATCH_API_HEARTBEAT_SECONDS`: default `300`
 - `PATCH_API_JOBS_SECONDS`: default `120`
@@ -71,6 +75,7 @@ Open the admin page in your browser:
 Admin authentication supports either:
 - `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl)
 - Google OAuth session login when `PATCH_API_GOOGLE_CLIENT_ID`, `PATCH_API_GOOGLE_CLIENT_SECRET`, and `PATCH_API_GOOGLE_REDIRECT_URI` are set
+- Optional TOTP second factor for OAuth sessions when `PATCH_API_ADMIN_TOTP_SECRET` is set
 
 Admin pages:
 - `/admin` main dashboard (agents + jobs)

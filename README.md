@@ -107,7 +107,7 @@ sudo bash ./scripts/uninstall_macos_agent.sh --purge-state
 
 API scaffold is under `backend/php-api/`.
 It now includes a basic admin web view at `/admin` for viewing agents, generating installer links, and seeding/listing jobs.
-Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth.
+Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth, with optional TOTP second factor.
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
 It now also supports queueing Windows PowerShell script jobs (inline script or script URL), including a GCPW template.
 Admin pages are split into `/admin` (main), `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.

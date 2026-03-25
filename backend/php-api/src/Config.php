@@ -18,6 +18,10 @@ final class Config
         public readonly string $googleHostedDomain,
         public readonly string $adminSessionName,
         public readonly int $adminSessionTtlSeconds,
+        public readonly string $adminTotpSecret,
+        public readonly string $adminTotpIssuer,
+        public readonly int $adminTotpWindow,
+        public readonly int $adminTotpChallengeTtlSeconds,
         public readonly int $heartbeatSeconds,
         public readonly int $jobsSeconds,
         public readonly int $inventorySeconds
@@ -41,6 +45,10 @@ final class Config
             googleHostedDomain: self::env('PATCH_API_GOOGLE_HOSTED_DOMAIN', $legacyConfig['google_hosted_domain'] ?? ''),
             adminSessionName: self::env('PATCH_API_ADMIN_SESSION_NAME', 'patchagent_admin'),
             adminSessionTtlSeconds: self::envInt('PATCH_API_ADMIN_SESSION_TTL_SECONDS', 28800),
+            adminTotpSecret: self::env('PATCH_API_ADMIN_TOTP_SECRET', ''),
+            adminTotpIssuer: self::env('PATCH_API_ADMIN_TOTP_ISSUER', 'PatchAgent Admin'),
+            adminTotpWindow: max(0, self::envInt('PATCH_API_ADMIN_TOTP_WINDOW', 1)),
+            adminTotpChallengeTtlSeconds: max(60, self::envInt('PATCH_API_ADMIN_TOTP_CHALLENGE_TTL_SECONDS', 300)),
             heartbeatSeconds: self::envInt('PATCH_API_HEARTBEAT_SECONDS', 300),
             jobsSeconds: self::envInt('PATCH_API_JOBS_SECONDS', 120),
             inventorySeconds: self::envInt('PATCH_API_INVENTORY_SECONDS', 21600)
