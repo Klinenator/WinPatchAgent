@@ -1208,6 +1208,24 @@
             : {};
     }
 
+    function getLinuxSection(agent) {
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        return (typeof inventory.linux === "object" && inventory.linux !== null)
+            ? inventory.linux
+            : {};
+    }
+
+    function getMacOsSection(agent) {
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        if (typeof inventory.mac_os === "object" && inventory.mac_os !== null) {
+            return inventory.mac_os;
+        }
+
+        return (typeof inventory.macos === "object" && inventory.macos !== null)
+            ? inventory.macos
+            : {};
+    }
+
     function getInstalledUpdates(agent) {
         const windowsUpdate = getWindowsUpdateSection(agent);
         const installed = windowsUpdate.installed_patches;
@@ -1236,7 +1254,6 @@
 
     function countAvailablePackages(agent) {
         const deviceType = getDeviceType(agent).value;
-        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
 
         if (deviceType === "windows") {
             const windowsUpdate = getWindowsUpdateSection(agent);
@@ -1248,10 +1265,31 @@
             if (Array.isArray(windowsUpdate.available_patches)) {
                 return windowsUpdate.available_patches.length;
             }
+
+            return 0;
+        }
+
+        if (deviceType === "linux") {
+            const linux = getLinuxSection(agent);
+            const count = Number.parseInt(String(linux.available_packages_count || ""), 10);
+            if (Number.isFinite(count) && count >= 0) {
+                return count;
+            }
+
+            if (Array.isArray(linux.available_packages)) {
+                return linux.available_packages.length;
+            }
+
+            return linux.package_updates_available ? 1 : 0;
         }
 
         if (deviceType === "mac") {
-            const macOs = (typeof inventory.macos === "object" && inventory.macos !== null) ? inventory.macos : {};
+            const macOs = getMacOsSection(agent);
+            const count = Number.parseInt(String(macOs.available_updates_count || ""), 10);
+            if (Number.isFinite(count) && count >= 0) {
+                return count;
+            }
+
             const labels = Array.isArray(macOs.available_update_labels) ? macOs.available_update_labels : [];
             if (labels.length > 0) {
                 return labels.length;
@@ -1260,7 +1298,7 @@
             return macOs.software_update_available ? 1 : 0;
         }
 
-        return countInstalledUpdates(agent);
+        return 0;
     }
 
     function getDeviceType(agent) {

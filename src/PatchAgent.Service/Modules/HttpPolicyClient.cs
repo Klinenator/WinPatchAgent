@@ -179,7 +179,10 @@ public sealed class HttpPolicyClient : IPolicyClient
                     DistroId = snapshot.LinuxDistroId,
                     DistroVersionId = snapshot.LinuxDistroVersionId,
                     KernelVersion = snapshot.LinuxKernelVersion,
-                    AptAvailable = snapshot.AptAvailable
+                    AptAvailable = snapshot.AptAvailable,
+                    PackageUpdatesAvailable = snapshot.LinuxPackageUpdatesAvailable,
+                    AvailablePackages = snapshot.LinuxAvailablePackages.ToList(),
+                    AvailablePackagesCount = snapshot.LinuxAvailablePackages.Count
                 }
                 : null,
             MacOs = OperatingSystem.IsMacOS()
@@ -188,7 +191,8 @@ public sealed class HttpPolicyClient : IPolicyClient
                     ProductVersion = snapshot.MacOsProductVersion,
                     BuildVersion = snapshot.MacOsBuildVersion,
                     SoftwareUpdateAvailable = snapshot.MacSoftwareUpdateAvailable,
-                    AvailableUpdateLabels = snapshot.MacAvailableUpdateLabels.ToList()
+                    AvailableUpdateLabels = snapshot.MacAvailableUpdateLabels.ToList(),
+                    AvailableUpdatesCount = snapshot.MacAvailableUpdatesCount
                 }
                 : null
         };

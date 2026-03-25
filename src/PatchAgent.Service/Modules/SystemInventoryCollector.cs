@@ -64,6 +64,13 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             {
                 snapshot.LinuxDistroVersionId = versionId;
             }
+
+            if (snapshot.AptAvailable)
+            {
+                var linuxUpdateSnapshot = await CollectLinuxAvailableAptUpdatesAsync(cancellationToken);
+                snapshot.LinuxPackageUpdatesAvailable = linuxUpdateSnapshot.PackageUpdatesAvailable;
+                snapshot.LinuxAvailablePackages = linuxUpdateSnapshot.AvailablePackages;
+            }
         }
         else if (OperatingSystem.IsMacOS())
         {
@@ -74,6 +81,9 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             var macOsUpdateSnapshot = await CollectMacAvailableUpdatesAsync(cancellationToken);
             snapshot.MacSoftwareUpdateAvailable = macOsUpdateSnapshot.SoftwareUpdateAvailable;
             snapshot.MacAvailableUpdateLabels = macOsUpdateSnapshot.AvailableUpdateLabels;
+            snapshot.MacAvailableUpdatesCount = macOsUpdateSnapshot.AvailableUpdateLabels.Count > 0
+                ? macOsUpdateSnapshot.AvailableUpdateLabels.Count
+                : (macOsUpdateSnapshot.SoftwareUpdateAvailable ? 1 : 0);
         }
 
         _logger.LogInformation(
@@ -478,6 +488,72 @@ $items | ConvertTo-Json -Depth 5 -Compress
         return data;
     }
 
+    private async Task<LinuxAptUpdateSnapshot> CollectLinuxAvailableAptUpdatesAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new LinuxAptUpdateSnapshot(false, []);
+        }
+
+        var aptExecutable = File.Exists("/usr/bin/apt") ? "/usr/bin/apt" : "apt";
+        var result = await RunProcessAsync(
+            aptExecutable,
+            ["list", "--upgradeable"],
+            TimeSpan.FromSeconds(30),
+            cancellationToken);
+
+        if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            _logger.LogDebug(
+                "Linux apt inventory query failed with exit code {ExitCode}: {Error}",
+                result.ExitCode,
+                result.StandardError);
+            return new LinuxAptUpdateSnapshot(false, []);
+        }
+
+        var availablePackages = ParseAptUpgradeablePackages(result.StandardOutput);
+        return new LinuxAptUpdateSnapshot(availablePackages.Count > 0, availablePackages);
+    }
+
+    private static List<string> ParseAptUpgradeablePackages(string output)
+    {
+        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawLine in output.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("Listing", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("WARNING", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("N:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var delimiterIndex = line.IndexOf('/');
+            if (delimiterIndex <= 0)
+            {
+                continue;
+            }
+
+            var packageName = line[..delimiterIndex].Trim();
+            if (packageName.Length == 0)
+            {
+                continue;
+            }
+
+            packages.Add(packageName);
+        }
+
+        return packages
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private async Task<string?> ReadMacSwVersValueAsync(string argument, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsMacOS())
@@ -673,6 +749,10 @@ $items | ConvertTo-Json -Depth 5 -Compress
         string StandardOutput,
         string StandardError,
         bool TimedOut);
+
+    private readonly record struct LinuxAptUpdateSnapshot(
+        bool PackageUpdatesAvailable,
+        List<string> AvailablePackages);
 
     private readonly record struct MacSoftwareUpdateSnapshot(
         bool SoftwareUpdateAvailable,

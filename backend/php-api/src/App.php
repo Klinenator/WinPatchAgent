@@ -294,6 +294,9 @@ final class App
             'os' => is_array($body['os'] ?? null) ? $body['os'] : [],
             'windows_update' => is_array($body['windows_update'] ?? null) ? $body['windows_update'] : [],
             'linux' => is_array($body['linux'] ?? null) ? $body['linux'] : [],
+            'mac_os' => is_array($body['mac_os'] ?? null)
+                ? $body['mac_os']
+                : (is_array($body['macos'] ?? null) ? $body['macos'] : []),
             'hardware' => is_array($body['hardware'] ?? null) ? $body['hardware'] : [],
             'applications' => is_array($body['applications'] ?? null) ? $body['applications'] : [],
         ]);

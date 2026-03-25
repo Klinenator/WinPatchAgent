@@ -183,6 +183,12 @@ public sealed class InventoryUploadLinux
     public string? KernelVersion { get; set; }
 
     public bool AptAvailable { get; set; }
+
+    public bool PackageUpdatesAvailable { get; set; }
+
+    public List<string> AvailablePackages { get; set; } = [];
+
+    public int AvailablePackagesCount { get; set; }
 }
 
 public sealed class InventoryUploadMacOs
@@ -194,6 +200,8 @@ public sealed class InventoryUploadMacOs
     public bool SoftwareUpdateAvailable { get; set; }
 
     public List<string> AvailableUpdateLabels { get; set; } = [];
+
+    public int AvailableUpdatesCount { get; set; }
 }
 
 public sealed class InventoryApplication

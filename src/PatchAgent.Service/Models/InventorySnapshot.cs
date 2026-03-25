@@ -28,6 +28,10 @@ public sealed class InventorySnapshot
 
     public bool AptAvailable { get; set; }
 
+    public bool LinuxPackageUpdatesAvailable { get; set; }
+
+    public List<string> LinuxAvailablePackages { get; set; } = [];
+
     public string? MacOsProductVersion { get; set; }
 
     public string? MacOsBuildVersion { get; set; }
@@ -35,6 +39,8 @@ public sealed class InventorySnapshot
     public bool MacSoftwareUpdateAvailable { get; set; }
 
     public List<string> MacAvailableUpdateLabels { get; set; } = [];
+
+    public int MacAvailableUpdatesCount { get; set; }
 
     public List<InstalledPatchSnapshot> InstalledWindowsPatches { get; set; } = [];
 
