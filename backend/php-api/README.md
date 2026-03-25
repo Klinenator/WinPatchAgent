@@ -30,6 +30,7 @@ Current endpoints:
 - `POST /v1/agents/jobs/{jobId}/complete`
 - `POST /v1/agents/job-events`
 - `POST /v1/admin/jobs`
+- `POST /v1/admin/jobs/{jobId}/cancel`
 - `GET /v1/admin/jobs`
 - `GET /v1/admin/automations`
 - `POST /v1/admin/automations`

@@ -234,6 +234,12 @@ final class App
                 return;
             }
 
+            if ($method === 'POST' && preg_match('#^/v1/admin/jobs/([^/]+)/cancel$#', $path, $matches) === 1) {
+                $this->requireAdmin($request);
+                $this->handleCancelJob($request, rawurldecode($matches[1]));
+                return;
+            }
+
             if ($method !== 'POST') {
                 JsonResponse::error(405, 'method_not_allowed', 'The requested route does not support this HTTP method.');
                 return;
@@ -424,6 +430,9 @@ final class App
 
         $targetAgentId = $this->optionalString($body, 'target_agent_id');
         $targetDeviceId = $this->optionalString($body, 'target_device_id');
+        $type = $this->optionalString($body, 'type') ?? 'windows_update_install';
+        $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
+        $policy = is_array($body['policy'] ?? null) ? $body['policy'] : [];
 
         if ($targetAgentId === null && $targetDeviceId === null) {
             throw new ApiException(
@@ -433,18 +442,50 @@ final class App
             );
         }
 
+        $duplicate = $this->jobs->findActiveDuplicate(
+            $type,
+            $targetAgentId ?? '',
+            $targetDeviceId ?? '',
+            $payload
+        );
+
+        if ($duplicate !== null) {
+            JsonResponse::ok([
+                'job' => $duplicate,
+                'duplicate' => true,
+                'message' => 'A matching active job already exists. Returning existing job.',
+            ]);
+            return;
+        }
+
         $job = $this->jobs->createJob([
             'job_id' => $this->optionalString($body, 'job_id'),
-            'type' => $this->optionalString($body, 'type'),
+            'type' => $type,
             'correlation_id' => $this->optionalString($body, 'correlation_id'),
             'status' => $this->optionalString($body, 'status'),
             'target_agent_id' => $targetAgentId,
             'target_device_id' => $targetDeviceId,
-            'policy' => is_array($body['policy'] ?? null) ? $body['policy'] : [],
-            'payload' => is_array($body['payload'] ?? null) ? $body['payload'] : [],
+            'policy' => $policy,
+            'payload' => $payload,
         ]);
 
         JsonResponse::created([
+            'job' => $job,
+            'duplicate' => false,
+        ]);
+    }
+
+    private function handleCancelJob(Request $request, string $jobId): void
+    {
+        $body = $request->json();
+        $reason = trim((string) ($body['reason'] ?? ''));
+        $job = $this->jobs->cancelJob($jobId, $reason);
+        if ($job === null) {
+            throw new ApiException(404, 'job_not_found', 'The requested job does not exist.');
+        }
+
+        JsonResponse::ok([
+            'canceled' => true,
             'job' => $job,
         ]);
     }

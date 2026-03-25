@@ -122,3 +122,4 @@ php -S 127.0.0.1:8080 -t public
 See backend details and endpoints in:
 - `backend/php-api/README.md`
 - `docs/php-backend-api.md`
+- `docs/server-pull-and-permissions.md` (server pull + permission fix runbook)

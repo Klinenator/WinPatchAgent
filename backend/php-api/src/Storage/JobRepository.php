@@ -7,6 +7,7 @@ namespace PatchAgent\Api\Storage;
 final class JobRepository
 {
     private const FILE = 'jobs.json';
+    private const TERMINAL_STATUSES = ['succeeded', 'failed', 'canceled', 'rejected'];
 
     public function __construct(private readonly FileStore $store)
     {
@@ -70,6 +71,51 @@ final class JobRepository
         return $record;
     }
 
+    public function findActiveDuplicate(
+        string $type,
+        string $targetAgentId,
+        string $targetDeviceId,
+        array $payload
+    ): ?array {
+        $typeNormalized = strtolower(trim($type));
+        if ($typeNormalized === '') {
+            return null;
+        }
+
+        $candidateSignature = $this->payloadSignature($typeNormalized, $payload);
+        $jobs = $this->store->readJson(self::FILE, ['jobs' => []]);
+        foreach ($jobs['jobs'] as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+
+            if (!$this->isActiveStatus((string) ($job['status'] ?? 'assigned'))) {
+                continue;
+            }
+
+            if (strtolower(trim((string) ($job['type'] ?? ''))) !== $typeNormalized) {
+                continue;
+            }
+
+            if ($targetAgentId !== '' && trim((string) ($job['target_agent_id'] ?? '')) !== $targetAgentId) {
+                continue;
+            }
+
+            if ($targetDeviceId !== '' && trim((string) ($job['target_device_id'] ?? '')) !== $targetDeviceId) {
+                continue;
+            }
+
+            $jobPayload = is_array($job['payload'] ?? null) ? $job['payload'] : [];
+            if ($this->payloadSignature($typeNormalized, $jobPayload) !== $candidateSignature) {
+                continue;
+            }
+
+            return $job;
+        }
+
+        return null;
+    }
+
     public function listJobs(): array
     {
         $jobs = $this->store->readJson(self::FILE, ['jobs' => []]);
@@ -122,6 +168,22 @@ final class JobRepository
         });
     }
 
+    public function cancelJob(string $jobId, string $reason = ''): ?array
+    {
+        return $this->updateJob($jobId, function (array $job) use ($reason): array {
+            $currentStatus = strtolower(trim((string) ($job['status'] ?? 'assigned')));
+            if (!$this->isActiveStatus($currentStatus)) {
+                return $job;
+            }
+
+            $job['status'] = 'canceled';
+            $job['canceled_at'] = gmdate(DATE_ATOM);
+            $job['cancel_reason'] = trim($reason);
+            $job['updated_at'] = gmdate(DATE_ATOM);
+            return $job;
+        });
+    }
+
     private function normalizePolicy(array $policy): array
     {
         $window = is_array($policy['maintenance_window'] ?? null)
@@ -159,6 +221,183 @@ final class JobRepository
     private function newId(string $prefix): string
     {
         return sprintf('%s_%s', $prefix, bin2hex(random_bytes(10)));
+    }
+
+    private function isActiveStatus(string $status): bool
+    {
+        $normalized = strtolower(trim($status));
+        if ($normalized === '') {
+            $normalized = 'assigned';
+        }
+
+        return !in_array($normalized, self::TERMINAL_STATUSES, true);
+    }
+
+    private function payloadSignature(string $typeNormalized, array $payload): string
+    {
+        $normalizedPayload = $this->normalizePayloadForComparison($typeNormalized, $payload);
+        return json_encode($normalizedPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            ?: md5(serialize($normalizedPayload));
+    }
+
+    private function normalizePayloadForComparison(string $typeNormalized, array $payload): array
+    {
+        if ($typeNormalized === 'windows_update_install') {
+            $windows = is_array($payload['windows_update'] ?? null) ? $payload['windows_update'] : [];
+            $kbs = is_array($windows['kbs'] ?? null) ? $windows['kbs'] : [];
+            $normalizedKbs = [];
+            foreach ($kbs as $kb) {
+                if (!is_string($kb)) {
+                    continue;
+                }
+
+                $value = strtoupper(trim($kb));
+                if ($value === '') {
+                    continue;
+                }
+
+                if (preg_match('/^\d+$/', $value) === 1) {
+                    $value = 'KB' . $value;
+                }
+
+                $normalizedKbs[$value] = true;
+            }
+
+            $kbList = array_values(array_keys($normalizedKbs));
+            sort($kbList, SORT_STRING);
+
+            return [
+                'windows_update' => [
+                    'install_all' => filter_var($windows['install_all'] ?? false, FILTER_VALIDATE_BOOL),
+                    'kbs' => $kbList,
+                ],
+            ];
+        }
+
+        if ($typeNormalized === 'ubuntu_apt_upgrade') {
+            $apt = is_array($payload['apt'] ?? null) ? $payload['apt'] : [];
+            $packages = is_array($apt['packages'] ?? null) ? $apt['packages'] : [];
+            $normalizedPackages = [];
+            foreach ($packages as $package) {
+                if (!is_string($package)) {
+                    continue;
+                }
+
+                $value = strtolower(trim($package));
+                if ($value === '') {
+                    continue;
+                }
+
+                $normalizedPackages[$value] = true;
+            }
+
+            $packageList = array_values(array_keys($normalizedPackages));
+            sort($packageList, SORT_STRING);
+
+            return [
+                'apt' => [
+                    'upgrade_all' => filter_var($apt['upgrade_all'] ?? false, FILTER_VALIDATE_BOOL),
+                    'packages' => $packageList,
+                ],
+            ];
+        }
+
+        if ($typeNormalized === 'macos_software_update') {
+            $mac = is_array($payload['macos_update'] ?? null) ? $payload['macos_update'] : [];
+            $labels = is_array($mac['labels'] ?? null) ? $mac['labels'] : [];
+            $normalizedLabels = [];
+            foreach ($labels as $label) {
+                if (!is_string($label)) {
+                    continue;
+                }
+
+                $value = trim($label);
+                if ($value === '') {
+                    continue;
+                }
+
+                $normalizedLabels[$value] = true;
+            }
+
+            $labelList = array_values(array_keys($normalizedLabels));
+            sort($labelList, SORT_STRING);
+
+            return [
+                'macos_update' => [
+                    'install_all' => filter_var($mac['install_all'] ?? false, FILTER_VALIDATE_BOOL),
+                    'labels' => $labelList,
+                ],
+            ];
+        }
+
+        if ($typeNormalized === 'windows_powershell_script') {
+            $script = is_array($payload['windows_script'] ?? null) ? $payload['windows_script'] : [];
+            return [
+                'windows_script' => [
+                    'script' => trim((string) ($script['script'] ?? '')),
+                    'script_url' => trim((string) ($script['script_url'] ?? '')),
+                ],
+            ];
+        }
+
+        return $this->normalizeRecursive($payload);
+    }
+
+    private function normalizeRecursive(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            if ($this->isList($value)) {
+                $normalized = array_map(fn ($item) => $this->normalizeRecursive($item), $value);
+                if ($this->isScalarList($normalized)) {
+                    $copy = $normalized;
+                    sort($copy);
+                    return $copy;
+                }
+
+                return $normalized;
+            }
+
+            $normalized = [];
+            ksort($value);
+            foreach ($value as $key => $item) {
+                $normalized[(string) $key] = $this->normalizeRecursive($item);
+            }
+            return $normalized;
+        }
+
+        if (is_string($value)) {
+            return trim($value);
+        }
+
+        return $value;
+    }
+
+    private function isScalarList(array $value): bool
+    {
+        foreach ($value as $item) {
+            if (!is_scalar($item) && $item !== null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function isList(array $value): bool
+    {
+        if (function_exists('array_is_list')) {
+            return array_is_list($value);
+        }
+
+        $index = 0;
+        foreach ($value as $key => $_unused) {
+            if ($key !== $index) {
+                return false;
+            }
+            $index++;
+        }
+
+        return true;
     }
 
     private function updateJob(string $jobId, callable $transform): ?array

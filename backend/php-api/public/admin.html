@@ -214,6 +214,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            white-space: nowrap;
             transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
         }
 
@@ -223,6 +224,13 @@
 
         .btn:active {
             transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
 
         .btn.primary {
@@ -496,10 +504,30 @@
             padding: 10px 12px;
             border-bottom: 1px solid #d9e7f0;
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
+            justify-content: space-between;
+            gap: 12px;
             align-items: center;
             background: #fff;
+        }
+
+        .patch-actions-left {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .patch-actions-right {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .patch-actions-right .btn {
+            min-width: 210px;
         }
 
         .patch-select-all {
@@ -704,6 +732,25 @@
             .patch-toolbar-right {
                 justify-content: flex-start;
             }
+
+            .patch-actions {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .patch-actions-left {
+                justify-content: flex-start;
+            }
+
+            .patch-actions-right {
+                width: 100%;
+                justify-content: flex-start;
+            }
+
+            .patch-actions-right .btn {
+                min-width: 0;
+                width: 100%;
+            }
         }
 
         @media (max-width: 560px) {
@@ -856,13 +903,17 @@
                         </div>
                     </div>
                     <div class="patch-actions">
-                        <label class="patch-select-all">
-                            <input id="selectAllVisiblePatches" type="checkbox">
-                            Select visible
-                        </label>
-                        <span id="selectedPackagesCount" class="hint">0 selected</span>
-                        <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Selected Packages</button>
-                        <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                        <div class="patch-actions-left">
+                            <label class="patch-select-all">
+                                <input id="selectAllVisiblePatches" type="checkbox">
+                                Select visible
+                            </label>
+                            <span id="selectedPackagesCount" class="hint">0 selected</span>
+                        </div>
+                        <div class="patch-actions-right">
+                            <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Selected Packages</button>
+                            <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                        </div>
                     </div>
                     <div class="table-wrap compact patch-table-wrap">
                         <table>
@@ -981,6 +1032,7 @@
     let selectedAgentId = "";
     let selectedAvailablePackageIds = new Set();
     let activePatchTab = "available";
+    let installActionInFlight = false;
 
     logoutBtn.addEventListener("click", async () => {
         try {
@@ -1044,6 +1096,10 @@
     });
 
     installListedUpdatesBtn.addEventListener("click", async () => {
+        if (installActionInFlight) {
+            return;
+        }
+
         if (!selectedAgentId) {
             setStatus(agentActionStatus, "Select an agent first.", "error");
             return;
@@ -1065,20 +1121,33 @@
             return;
         }
 
+        installActionInFlight = true;
+        renderPatchTableForSelectedAgent();
+
         try {
             const queued = await queuePackageInstallJob(selectedAgent, false, updateIds);
             const response = queued.response;
             const jobId = response?.job?.job_id || "(unknown)";
-            selectedAvailablePackageIds = new Set();
-            renderPatchTableForSelectedAgent();
-            setStatus(agentActionStatus, "Package install job queued (" + queued.type + "): " + jobId, "success");
+            if (response?.duplicate === true) {
+                setStatus(agentActionStatus, "Matching job already active (" + queued.type + "): " + jobId, "success");
+            } else {
+                selectedAvailablePackageIds = new Set();
+                setStatus(agentActionStatus, "Package install job queued (" + queued.type + "): " + jobId, "success");
+            }
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
+        } finally {
+            installActionInFlight = false;
+            renderPatchTableForSelectedAgent();
         }
     });
 
     installAllUpdatesBtn.addEventListener("click", async () => {
+        if (installActionInFlight) {
+            return;
+        }
+
         if (!selectedAgentId) {
             setStatus(agentActionStatus, "Select an agent first.", "error");
             return;
@@ -1090,14 +1159,24 @@
             return;
         }
 
+        installActionInFlight = true;
+        renderPatchTableForSelectedAgent();
+
         try {
             const queued = await queuePackageInstallJob(selectedAgent, true, []);
             const response = queued.response;
             const jobId = response?.job?.job_id || "(unknown)";
-            setStatus(agentActionStatus, "Install-all package job queued (" + queued.type + "): " + jobId, "success");
+            if (response?.duplicate === true) {
+                setStatus(agentActionStatus, "Matching install-all job already active (" + queued.type + "): " + jobId, "success");
+            } else {
+                setStatus(agentActionStatus, "Install-all package job queued (" + queued.type + "): " + jobId, "success");
+            }
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
+        } finally {
+            installActionInFlight = false;
+            renderPatchTableForSelectedAgent();
         }
     });
 
@@ -1693,8 +1772,8 @@
 
         const availableMode = activePatchTab === "available";
         const availableCount = agent ? countAvailablePackages(agent) : 0;
-        installListedUpdatesBtn.disabled = !availableMode || selectedCount === 0;
-        installAllUpdatesBtn.disabled = !availableMode || availableCount <= 0;
+        installListedUpdatesBtn.disabled = installActionInFlight || !availableMode || selectedCount === 0;
+        installAllUpdatesBtn.disabled = installActionInFlight || !availableMode || availableCount <= 0;
         selectAllVisiblePatches.disabled = !availableMode;
 
         if (!availableMode) {
