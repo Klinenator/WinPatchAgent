@@ -122,12 +122,14 @@ API scaffold is under `backend/php-api/`.
 It now includes a basic admin web view at `/admin` for viewing agents, generating installer links, and seeding/listing jobs.
 Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth, with optional TOTP second factor and optional Touch ID/passkey (WebAuthn) as an MFA alternative.
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
+Linux available package inventory is now CVE-enriched through OSV lookups (Ubuntu/Debian) with on-disk caching on the API server.
 It now also supports queueing script jobs for Windows and macOS (inline script or script URL), including built-in GCPW and Splashtop install templates.
 It now also supports per-agent self-update jobs (`agent_self_update`) from the main admin page.
 Server-generated endpoint installers and self-update workflows now pull artifacts over HTTPS (curl/wget/Invoke-WebRequest), so Git is not required on endpoints.
 It also includes an agent-row `Connect` button that launches the Splashtop Business app URI for Windows/macOS agents.
 If you set `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` on the API server, Windows agent installs from `/install/windows.ps1` will auto-install Splashtop during provisioning.
 Set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server to your published Windows agent zip (default points to GitHub Releases latest asset `winpatchagent-windows-x64.zip`).
+Windows install links from `/install/windows.ps1` support `mode=prebuilt` (default, no endpoint compile) or `mode=source` (compile on endpoint after downloading source).
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 
 Local dev run:

@@ -565,6 +565,10 @@
             background: #2d82da;
         }
 
+        .patch-status-dot.warn {
+            background: #dc2626;
+        }
+
         table {
             width: 100%;
             border-collapse: separate;
@@ -903,7 +907,7 @@
                         <button id="installedPackagesTabBtn" type="button" class="patch-tab" role="tab" aria-selected="false">Installed Packages (0)</button>
                     </div>
                     <div class="patch-toolbar">
-                        <input id="patchSearchInput" type="search" placeholder="Search package name, title, label, or source">
+                        <input id="patchSearchInput" type="search" placeholder="Search package name, title, label, source, or CVE">
                         <div class="patch-toolbar-right">
                             <span id="patchLastUpdatedCopy" class="hint">Last updated: n/a</span>
                             <button id="refreshSelectedInventoryBtn" type="button" class="btn subtle">Refresh</button>
@@ -931,7 +935,7 @@
                                 <th>Label</th>
                                 <th>Classification</th>
                                 <th>Source</th>
-                                <th>Status</th>
+                                <th>Status / Security</th>
                             </tr>
                             </thead>
                             <tbody id="patchPackagesTableBody">
@@ -1613,6 +1617,31 @@
             : {};
     }
 
+    function getLinuxPackageDetails(agent) {
+        const linux = getLinuxSection(agent);
+        if (Array.isArray(linux.available_package_details)) {
+            return linux.available_package_details;
+        }
+        if (Array.isArray(linux.availablePackageDetails)) {
+            return linux.availablePackageDetails;
+        }
+        if (Array.isArray(linux.AvailablePackageDetails)) {
+            return linux.AvailablePackageDetails;
+        }
+        return [];
+    }
+
+    function getLinuxCveSummary(agent) {
+        const linux = getLinuxSection(agent);
+        if (typeof linux.cve_summary === "object" && linux.cve_summary !== null) {
+            return linux.cve_summary;
+        }
+        if (typeof linux.cveSummary === "object" && linux.cveSummary !== null) {
+            return linux.cveSummary;
+        }
+        return {};
+    }
+
     function getMacOsSection(agent) {
         const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
         if (typeof inventory.mac_os === "object" && inventory.mac_os !== null) {
@@ -1955,6 +1984,72 @@
 
         if (deviceType === "linux") {
             const linux = getLinuxSection(agent);
+            const details = getLinuxPackageDetails(agent)
+                .filter((detail) => typeof detail === "object" && detail !== null)
+                .map((detail, index) => {
+                    const name = String(detail.name || detail.package || "").trim();
+                    if (!name) {
+                        return null;
+                    }
+
+                    const currentVersion = String(detail.current_version || detail.currentVersion || "").trim();
+                    const candidateVersion = String(detail.candidate_version || detail.candidateVersion || "").trim();
+                    const architecture = String(detail.architecture || detail.arch || "").trim();
+                    const source = String(detail.source || "").trim() || "APT";
+                    const cveCountRaw = detail.vulnerability_count;
+                    const cveCount = Number.parseInt(String(cveCountRaw ?? ""), 10);
+                    const vulnerabilities = Array.isArray(detail.vulnerabilities)
+                        ? detail.vulnerabilities
+                        : [];
+                    const cveIds = vulnerabilities
+                        .map((item) => (typeof item === "object" && item !== null) ? String(item.id || "").trim() : "")
+                        .filter((value) => value !== "");
+
+                    let status = "Available";
+                    let statusTone = "normal";
+                    let statusTooltip = "";
+                    if (Number.isFinite(cveCount) && cveCount > 0) {
+                        status = "Available - " + String(cveCount) + " CVE" + (cveCount === 1 ? "" : "s");
+                        statusTone = "warn";
+                        statusTooltip = cveIds.length > 0
+                            ? ("Matched CVEs: " + cveIds.slice(0, 8).join(", "))
+                            : "Matched CVEs were found for this package.";
+                    } else if (Number.isFinite(cveCount) && cveCount === 0) {
+                        status = "Available - No CVEs";
+                    }
+
+                    const labelParts = [];
+                    if (currentVersion || candidateVersion) {
+                        labelParts.push(
+                            currentVersion && candidateVersion
+                                ? (currentVersion + " \u2192 " + candidateVersion)
+                                : (candidateVersion || currentVersion)
+                        );
+                    }
+                    if (architecture) {
+                        labelParts.push(architecture);
+                    }
+
+                    return {
+                        row_id: "available-linux-" + String(index) + "-" + name,
+                        install_id: name,
+                        name: name,
+                        label: labelParts.join(" | ") || "Linux",
+                        classification: Number.isFinite(cveCount) && cveCount > 0 ? "Package (Security)" : "Package",
+                        source: source,
+                        status: status,
+                        status_tone: statusTone,
+                        status_tooltip: statusTooltip,
+                        search_text: cveIds.join(" "),
+                        selectable: true
+                    };
+                })
+                .filter((entry) => entry !== null);
+
+            if (details.length > 0) {
+                return details;
+            }
+
             const available = Array.isArray(linux.available_packages)
                 ? linux.available_packages
                 : (Array.isArray(linux.availablePackages) ? linux.availablePackages : []);
@@ -1970,6 +2065,9 @@
                     classification: "Package",
                     source: "APT",
                     status: "Available",
+                    status_tone: "normal",
+                    status_tooltip: "",
+                    search_text: "",
                     selectable: true
                 }));
         }
@@ -2021,7 +2119,8 @@
                 String(row.label || "") + " " +
                 String(row.classification || "") + " " +
                 String(row.source || "") + " " +
-                String(row.status || "")
+                String(row.status || "") + " " +
+                String(row.search_text || "")
             ).toLowerCase();
             return haystack.includes(query);
         });
@@ -2110,7 +2209,38 @@
 
         const agentName = String(agent.display_name || agent.hostname || "selected agent");
         const viewName = activePatchTab === "available" ? "available packages" : "installed packages";
-        patchInventoryMeta.textContent = "Viewing " + viewName + " for " + agentName + ".";
+        let metaCopy = "Viewing " + viewName + " for " + agentName + ".";
+        if (activePatchTab === "available" && getDeviceType(agent).value === "linux") {
+            const cveSummary = getLinuxCveSummary(agent);
+            const checkedPackages = Number.parseInt(String(cveSummary.checked_packages || ""), 10);
+            const packagesWithCves = Number.parseInt(String(cveSummary.packages_with_cves || ""), 10);
+            const totalCves = Number.parseInt(String(cveSummary.total_cves || ""), 10);
+            const supported = cveSummary.supported === true;
+
+            if (
+                supported
+                && Number.isFinite(checkedPackages)
+                && Number.isFinite(packagesWithCves)
+                && Number.isFinite(totalCves)
+                && checkedPackages > 0
+            ) {
+                metaCopy += " CVE scan: "
+                    + String(packagesWithCves)
+                    + " package"
+                    + (packagesWithCves === 1 ? "" : "s")
+                    + " matched, "
+                    + String(totalCves)
+                    + " CVE"
+                    + (totalCves === 1 ? "" : "s")
+                    + ".";
+            } else if (supported && cveSummary.truncated === true) {
+                metaCopy += " CVE scan is partial due to lookup limits.";
+            } else if (cveSummary.enabled === true && supported === false) {
+                metaCopy += " CVE scan is not available for this distro yet.";
+            }
+        }
+
+        patchInventoryMeta.textContent = metaCopy;
 
         const rows = getFilteredPatchRows(agent);
 
@@ -2133,13 +2263,18 @@
             const checkbox = selectable
                 ? "<input type=\"checkbox\" class=\"patch-row-checkbox\" data-install-id=\"" + escapeHtml(row.install_id) + "\"" + (selectedAvailablePackageIds.has(row.install_id) ? " checked" : "") + ">"
                 : "";
+            const statusTone = String(row.status_tone || "normal").toLowerCase() === "warn" ? " warn" : "";
+            const statusTooltip = String(row.status_tooltip || "").trim();
+            const statusAttr = statusTooltip !== ""
+                ? (" title=\"" + escapeHtml(statusTooltip) + "\"")
+                : "";
             return "<tr>" +
                 "<td>" + checkbox + "</td>" +
                 "<td>" + escapeHtml(String(row.name || "")) + "</td>" +
                 "<td>" + escapeHtml(String(row.label || "")) + "</td>" +
                 "<td>" + escapeHtml(String(row.classification || "")) + "</td>" +
                 "<td>" + escapeHtml(String(row.source || "")) + "</td>" +
-                "<td><span class=\"patch-status-dot\"></span>" + escapeHtml(String(row.status || "")) + "</td>" +
+                "<td><span class=\"patch-status-dot" + statusTone + "\"></span><span" + statusAttr + ">" + escapeHtml(String(row.status || "")) + "</span></td>" +
                 "</tr>";
         }).join("");
 

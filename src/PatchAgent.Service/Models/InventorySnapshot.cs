@@ -34,6 +34,8 @@ public sealed class InventorySnapshot
 
     public List<string> LinuxAvailablePackages { get; set; } = [];
 
+    public List<LinuxAvailablePackageSnapshot> LinuxAvailablePackageDetails { get; set; } = [];
+
     public string? MacOsProductVersion { get; set; }
 
     public string? MacOsBuildVersion { get; set; }
@@ -63,4 +65,19 @@ public sealed class AvailablePatchSnapshot
     public string UpdateId { get; set; } = string.Empty;
 
     public string Title { get; set; } = string.Empty;
+}
+
+public sealed class LinuxAvailablePackageSnapshot
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string CurrentVersion { get; set; } = string.Empty;
+
+    public string CandidateVersion { get; set; } = string.Empty;
+
+    public string Architecture { get; set; } = string.Empty;
+
+    public string Source { get; set; } = string.Empty;
+
+    public string RawLine { get; set; } = string.Empty;
 }

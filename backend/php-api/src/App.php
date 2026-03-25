@@ -14,6 +14,7 @@ use PatchAgent\Api\Storage\InventoryRepository;
 use PatchAgent\Api\Storage\JobRepository;
 use PatchAgent\Api\Storage\AutomationProfileRepository;
 use PatchAgent\Api\Storage\AdminPasskeyRepository;
+use PatchAgent\Api\Support\Json;
 use RuntimeException;
 use Throwable;
 
@@ -25,6 +26,7 @@ final class App
     private const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
     private const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
     private const GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo';
+    private const OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
     private const OAUTH_SESSION_STATE_KEY = 'google_oauth_state';
     private const OAUTH_SESSION_NONCE_KEY = 'google_oauth_nonce';
     private const OAUTH_SESSION_STARTED_AT_KEY = 'google_oauth_started_at';
@@ -34,6 +36,7 @@ final class App
     private const ADMIN_SESSION_PASSKEY_REGISTRATION_KEY = 'admin_passkey_registration_pending';
 
     private Config $config;
+    private FileStore $store;
     private AgentRepository $agents;
     private EnrollmentRepository $enrollments;
     private InventoryRepository $inventory;
@@ -46,6 +49,7 @@ final class App
     {
         $this->config = Config::fromEnvironment();
         $store = new FileStore($this->config->storageRoot);
+        $this->store = $store;
 
         $this->agents = new AgentRepository($store);
         $this->enrollments = new EnrollmentRepository($store);
@@ -502,18 +506,23 @@ final class App
 
         $ttlSeconds = $this->readEnrollmentTtlSeconds($body);
         $enrollment = $this->enrollments->createEnrollment($platform, $ttlSeconds);
+        $windowsInstallMode = $platform === 'windows'
+            ? $this->normalizeWindowsInstallMode($body['windows_install_mode'] ?? $body['install_mode'] ?? null)
+            : 'prebuilt';
 
         $scriptPath = match ($platform) {
             'windows' => '/install/windows.ps1',
             'mac' => '/install/macos.sh',
             default => '/install/linux.sh',
         };
-        $scriptUrl = sprintf(
-            '%s%s?enrollment_key=%s',
-            $request->baseUrl(),
-            $scriptPath,
-            rawurlencode((string) $enrollment['enrollment_key'])
-        );
+        $query = [
+            'enrollment_key' => (string) $enrollment['enrollment_key'],
+        ];
+        if ($platform === 'windows') {
+            $query['mode'] = $windowsInstallMode;
+        }
+
+        $scriptUrl = sprintf('%s%s?%s', $request->baseUrl(), $scriptPath, http_build_query($query, '', '&', PHP_QUERY_RFC3986));
 
         $installCommand = match ($platform) {
             'windows' => $this->buildWindowsInstallCommand($scriptUrl),
@@ -527,6 +536,7 @@ final class App
                 'platform' => $platform,
                 'script_url' => $scriptUrl,
                 'command' => $installCommand,
+                'windows_install_mode' => $platform === 'windows' ? $windowsInstallMode : null,
             ],
         ]);
     }
@@ -1900,7 +1910,8 @@ final class App
 
         header('Content-Type: text/plain; charset=utf-8');
         header('Content-Disposition: inline; filename="install-winpatchagent-windows.ps1"');
-        echo $this->buildWindowsInstallScript($request->baseUrl(), $enrollmentKey);
+        $installMode = $this->normalizeWindowsInstallMode($request->queryParam('mode'));
+        echo $this->buildWindowsInstallScript($request->baseUrl(), $enrollmentKey, $installMode);
     }
 
     private function handleMacOsInstallScript(Request $request): void
@@ -1947,6 +1958,19 @@ final class App
         }
 
         return $ttl;
+    }
+
+    private function normalizeWindowsInstallMode(mixed $value): string
+    {
+        if (!is_string($value)) {
+            return 'prebuilt';
+        }
+
+        $normalized = strtolower(trim($value));
+        return match ($normalized) {
+            'source', 'compile', 'build' => 'source',
+            default => 'prebuilt',
+        };
     }
 
     private function buildLinuxInstallScript(string $baseUrl, string $enrollmentKey): string
@@ -2042,10 +2066,13 @@ bash "\${WORK_DIR}/scripts/setup_ubuntu_agent.sh" \\
 BASH;
     }
 
-    private function buildWindowsInstallScript(string $baseUrl, string $enrollmentKey): string
+    private function buildWindowsInstallScript(string $baseUrl, string $enrollmentKey, string $installMode): string
     {
         $backendUrlLiteral = $this->powershellLiteral($baseUrl);
         $enrollmentKeyLiteral = $this->powershellLiteral($enrollmentKey);
+        $installModeLiteral = $this->powershellLiteral($installMode);
+        $repoUrlLiteral = $this->powershellLiteral(self::AGENT_REPO_URL);
+        $repoRefLiteral = $this->powershellLiteral(self::AGENT_REPO_REF);
         $windowsPackageUrlLiteral = $this->powershellLiteral($this->config->windowsAgentPackageUrl);
         $splashtopMsiUrlLiteral = $this->powershellLiteral($this->config->windowsSplashtopMsiUrl);
         $splashtopDeploymentCodeLiteral = $this->powershellLiteral($this->config->windowsSplashtopDeploymentCode);
@@ -2055,12 +2082,24 @@ BASH;
 
 \$BackendUrl = {$backendUrlLiteral}
 \$EnrollmentKey = {$enrollmentKeyLiteral}
+\$InstallMode = {$installModeLiteral}
+\$RepoUrl = {$repoUrlLiteral}
+\$RepoRef = {$repoRefLiteral}
 \$WindowsAgentPackageUrl = {$windowsPackageUrlLiteral}
 \$SplashtopMsiUrl = {$splashtopMsiUrlLiteral}
 \$SplashtopDeploymentCode = {$splashtopDeploymentCodeLiteral}
+\$WorkDir = "C:\\ProgramData\\WinPatchAgent\\src"
 \$InstallDir = "C:\\Program Files\\WinPatchAgent"
 \$ServiceName = "PatchAgentSvc"
 \$StateDir = "C:\\ProgramData\\WinPatchAgent\\state"
+
+if ([string]::IsNullOrWhiteSpace(\$InstallMode)) {
+    \$InstallMode = "prebuilt"
+}
+\$InstallMode = \$InstallMode.Trim().ToLowerInvariant()
+if (\$InstallMode -ne "source" -and \$InstallMode -ne "prebuilt") {
+    \$InstallMode = "prebuilt"
+}
 
 function Resolve-PackageInstallRoot {
     param(
@@ -2085,74 +2124,224 @@ function Resolve-PackageInstallRoot {
         }
     }
 
-    throw "Prebuilt package does not contain PatchAgent.Service.exe."
+    throw "Package did not contain PatchAgent.Service.exe."
 }
 
-New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
-New-Item -ItemType Directory -Path \$StateDir -Force | Out-Null
-
-if (Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue) {
-    Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
-    sc.exe delete \$ServiceName | Out-Null
-    Start-Sleep -Seconds 2
+function Stop-And-RemoveService {
+    \$existing = Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue
+    if (\$existing) {
+        Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
+        sc.exe delete \$ServiceName | Out-Null
+        Start-Sleep -Seconds 2
+    }
 }
 
-if ([string]::IsNullOrWhiteSpace(\$WindowsAgentPackageUrl)) {
-    throw "Windows prebuilt package URL is empty. Set PATCH_API_WINDOWS_AGENT_PACKAGE_URL on the API server."
+function Get-DotnetCommand {
+    \$cmd = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (\$cmd) {
+        return \$cmd.Source
+    }
+
+    \$fallback = "C:\\Program Files\\dotnet\\dotnet.exe"
+    if (Test-Path \$fallback) {
+        return \$fallback
+    }
+
+    return \$null
 }
 
-\$ArchivePath = Join-Path \$env:TEMP ("winpatchagent-prebuilt-" + [guid]::NewGuid().ToString("N") + ".zip")
-\$ExtractRoot = Join-Path \$env:TEMP ("winpatchagent-prebuilt-" + [guid]::NewGuid().ToString("N"))
-try {
-    Invoke-WebRequest -UseBasicParsing -Uri \$WindowsAgentPackageUrl -OutFile \$ArchivePath
-    New-Item -ItemType Directory -Path \$ExtractRoot -Force | Out-Null
-    Expand-Archive -Path \$ArchivePath -DestinationPath \$ExtractRoot -Force
-    \$PackageRoot = Resolve-PackageInstallRoot -ExtractRoot \$ExtractRoot
+function Get-DotnetSdkMajorVersions {
+    param([string]\$DotnetExe)
 
+    if ([string]::IsNullOrWhiteSpace(\$DotnetExe)) {
+        return @()
+    }
+
+    try {
+        \$lines = & \$DotnetExe --list-sdks 2>\$null
+    } catch {
+        return @()
+    }
+
+    \$majors = @()
+    foreach (\$line in \$lines) {
+        if (\$line -match "^\\s*(\\d+)\\.") {
+            \$majors += [int]\$Matches[1]
+        }
+    }
+    return \$majors
+}
+
+function Ensure-DotnetSdk8 {
+    \$dotnetExe = Get-DotnetCommand
+    \$majors = Get-DotnetSdkMajorVersions -DotnetExe \$dotnetExe
+    if (\$majors | Where-Object { \$_ -ge 8 }) {
+        return \$dotnetExe
+    }
+
+    Write-Host ".NET SDK 8+ not found. Installing .NET SDK 8..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    \$installerPath = Join-Path \$env:TEMP ("dotnet-install-" + [guid]::NewGuid().ToString("N") + ".ps1")
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile \$installerPath
+        & powershell -NoProfile -ExecutionPolicy Bypass -File \$installerPath -Channel "8.0" -InstallDir "C:\\Program Files\\dotnet" -Architecture "x64"
+    } finally {
+        Remove-Item -Path \$installerPath -Force -ErrorAction SilentlyContinue
+    }
+
+    \$env:PATH = "C:\\Program Files\\dotnet;" + \$env:PATH
+    \$dotnetExe = Get-DotnetCommand
+    \$majors = Get-DotnetSdkMajorVersions -DotnetExe \$dotnetExe
+    if (-not (\$majors | Where-Object { \$_ -ge 8 })) {
+        throw "Failed to install .NET SDK 8."
+    }
+
+    return \$dotnetExe
+}
+
+function Normalize-RepoHttpUrl {
+    param([string]\$RawUrl)
+
+    if (\$null -eq \$RawUrl) {
+        \$url = ""
+    } else {
+        \$url = [string]\$RawUrl
+    }
+    \$url = \$url.Trim()
+    if ([string]::IsNullOrWhiteSpace(\$url)) {
+        throw "Repo URL is empty."
+    }
+
+    \$url = \$url.TrimEnd("/")
+    if (\$url -match "^git@github\\.com:(.+?)(?:\\.git)?\$") {
+        return "https://github.com/\$($Matches[1])"
+    }
+
+    if (\$url.EndsWith(".git", [System.StringComparison]::OrdinalIgnoreCase)) {
+        \$url = \$url.Substring(0, \$url.Length - 4)
+    }
+
+    if (\$url -notmatch "^https?://") {
+        throw "Unsupported repo URL format: \$RawUrl"
+    }
+
+    return \$url
+}
+
+function Build-ArchiveUrl {
+    param([string]\$RawRepoUrl, [string]\$RawRepoRef)
+
+    \$repoHttpUrl = Normalize-RepoHttpUrl -RawUrl \$RawRepoUrl
+    return "\$repoHttpUrl/archive/\$RawRepoRef.zip"
+}
+
+function Clear-InstallDir {
     if (Test-Path \$InstallDir) {
         Get-ChildItem -Path \$InstallDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     } else {
         New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
     }
-
-    Get-ChildItem -Path \$PackageRoot -Force | ForEach-Object {
-        Copy-Item -Path \$_.FullName -Destination \$InstallDir -Recurse -Force
-    }
-} finally {
-    Remove-Item -Path \$ArchivePath -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path \$ExtractRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-\$ConfigPath = Join-Path \$InstallDir "appsettings.Production.json"
-\$ConfigObject = @{
-    Agent = @{
-        ServiceName = "PatchAgentSvc"
-        BackendBaseUrl = \$BackendUrl
-        EnrollmentKey = \$EnrollmentKey
-        AgentChannel = "stable"
-        StorageRoot = \$StateDir
-        RequestTimeoutSeconds = 30
-        LoopDelaySeconds = 15
-        HeartbeatIntervalSeconds = 300
-        InventoryIntervalSeconds = 21600
-        JobPollIntervalSeconds = 120
-        EnableStubJobExecution = \$true
-        StubJobDurationSeconds = 20
-        EnableAptJobExecution = \$false
-        EnableWindowsUpdateJobExecution = \$true
-        WindowsUpdateCommandTimeoutSeconds = 5400
-        EnableWindowsPowerShellScriptExecution = \$true
-        WindowsPowerShellScriptCommandTimeoutSeconds = 3600
-        EnableMacSoftwareUpdateJobExecution = \$false
-        MacSoftwareUpdateCommandTimeoutSeconds = 5400
-        WindowsSelfUpdatePackageUrl = \$WindowsAgentPackageUrl
+function Install-FromPrebuilt {
+    if ([string]::IsNullOrWhiteSpace(\$WindowsAgentPackageUrl)) {
+        throw "Windows prebuilt package URL is empty. Set PATCH_API_WINDOWS_AGENT_PACKAGE_URL on the API server."
+    }
+
+    \$archivePath = Join-Path \$env:TEMP ("winpatchagent-prebuilt-" + [guid]::NewGuid().ToString("N") + ".zip")
+    \$extractRoot = Join-Path \$env:TEMP ("winpatchagent-prebuilt-" + [guid]::NewGuid().ToString("N"))
+
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri \$WindowsAgentPackageUrl -OutFile \$archivePath
+        New-Item -ItemType Directory -Path \$extractRoot -Force | Out-Null
+        Expand-Archive -Path \$archivePath -DestinationPath \$extractRoot -Force
+        \$packageRoot = Resolve-PackageInstallRoot -ExtractRoot \$extractRoot
+
+        Clear-InstallDir
+        Get-ChildItem -Path \$packageRoot -Force | ForEach-Object {
+            Copy-Item -Path \$_.FullName -Destination \$InstallDir -Recurse -Force
+        }
+    } finally {
+        Remove-Item -Path \$archivePath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path \$extractRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-\$ConfigObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$ConfigPath -Encoding UTF8
 
-if ([string]::IsNullOrWhiteSpace(\$SplashtopMsiUrl)) {
-    Write-Host "Splashtop auto-install: skipped (PATCH_API_WINDOWS_SPLASHTOP_MSI_URL is not set on server)."
-} else {
+function Install-FromSource {
+    \$archiveUrl = Build-ArchiveUrl -RawRepoUrl \$RepoUrl -RawRepoRef \$RepoRef
+    \$archivePath = Join-Path \$env:TEMP ("winpatchagent-src-" + [guid]::NewGuid().ToString("N") + ".zip")
+    \$extractRoot = Join-Path \$env:TEMP ("winpatchagent-src-" + [guid]::NewGuid().ToString("N"))
+
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri \$archiveUrl -OutFile \$archivePath
+        New-Item -ItemType Directory -Path \$extractRoot -Force | Out-Null
+        Expand-Archive -Path \$archivePath -DestinationPath \$extractRoot -Force
+
+        \$extractedDir = Get-ChildItem -Path \$extractRoot -Directory | Select-Object -First 1
+        if (-not \$extractedDir) {
+            throw "Downloaded archive did not contain source files."
+        }
+
+        if (Test-Path \$WorkDir) {
+            Remove-Item -Path \$WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        \$workParent = Split-Path -Parent \$WorkDir
+        if (-not [string]::IsNullOrWhiteSpace(\$workParent)) {
+            New-Item -ItemType Directory -Path \$workParent -Force | Out-Null
+        }
+
+        Move-Item -Path \$extractedDir.FullName -Destination \$WorkDir
+    } finally {
+        Remove-Item -Path \$archivePath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path \$extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    \$projectPath = Join-Path \$WorkDir "src\\PatchAgent.Service\\PatchAgent.Service.csproj"
+    if (-not (Test-Path \$projectPath)) {
+        throw "Project file not found after source download: \$projectPath"
+    }
+
+    Clear-InstallDir
+    \$dotnetExe = Ensure-DotnetSdk8
+    & \$dotnetExe publish \$projectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
+}
+
+function Write-AgentConfig {
+    \$configPath = Join-Path \$InstallDir "appsettings.Production.json"
+    \$configObject = @{
+        Agent = @{
+            ServiceName = "PatchAgentSvc"
+            BackendBaseUrl = \$BackendUrl
+            EnrollmentKey = \$EnrollmentKey
+            AgentChannel = "stable"
+            StorageRoot = \$StateDir
+            RequestTimeoutSeconds = 30
+            LoopDelaySeconds = 15
+            HeartbeatIntervalSeconds = 300
+            InventoryIntervalSeconds = 21600
+            JobPollIntervalSeconds = 120
+            EnableStubJobExecution = \$true
+            StubJobDurationSeconds = 20
+            EnableAptJobExecution = \$false
+            EnableWindowsUpdateJobExecution = \$true
+            WindowsUpdateCommandTimeoutSeconds = 5400
+            EnableWindowsPowerShellScriptExecution = \$true
+            WindowsPowerShellScriptCommandTimeoutSeconds = 3600
+            EnableMacSoftwareUpdateJobExecution = \$false
+            MacSoftwareUpdateCommandTimeoutSeconds = 5400
+            WindowsSelfUpdatePackageUrl = \$WindowsAgentPackageUrl
+        }
+    }
+    \$configObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$configPath -Encoding UTF8
+}
+
+function Install-Splashtop {
+    if ([string]::IsNullOrWhiteSpace(\$SplashtopMsiUrl)) {
+        Write-Host "Splashtop auto-install: skipped (PATCH_API_WINDOWS_SPLASHTOP_MSI_URL is not set on server)."
+        return
+    }
+
     if (\$SplashtopMsiUrl -notmatch "^https?://") {
         throw "Splashtop auto-install URL must start with http:// or https://. Current value: \$SplashtopMsiUrl"
     }
@@ -2182,16 +2371,33 @@ if ([string]::IsNullOrWhiteSpace(\$SplashtopMsiUrl)) {
     }
 }
 
-\$ExePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
-if (-not (Test-Path \$ExePath)) {
-    throw "Expected service binary not found: \$ExePath"
+function Ensure-ServiceAndStart {
+    \$exePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
+    if (-not (Test-Path \$exePath)) {
+        throw "Expected service binary not found: \$exePath"
+    }
+
+    sc.exe create \$ServiceName binPath= "`"\$exePath`"" start= auto | Out-Null
+    sc.exe description \$ServiceName "WinPatchAgent endpoint service" | Out-Null
+    Start-Service -Name \$ServiceName
 }
 
-sc.exe create \$ServiceName binPath= "`"\$ExePath`"" start= auto | Out-Null
-sc.exe description \$ServiceName "WinPatchAgent endpoint service" | Out-Null
-Start-Service -Name \$ServiceName
+New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
+New-Item -ItemType Directory -Path \$StateDir -Force | Out-Null
+
+Stop-And-RemoveService
+if (\$InstallMode -eq "source") {
+    Install-FromSource
+} else {
+    Install-FromPrebuilt
+}
+
+Write-AgentConfig
+Install-Splashtop
+Ensure-ServiceAndStart
 
 Write-Host "Install complete."
+Write-Host "Install mode: \$InstallMode"
 Write-Host "Service: \$ServiceName"
 Write-Host "Status:  Get-Service -Name \$ServiceName"
 POWERSHELL;
@@ -2389,6 +2595,25 @@ BASH;
 
     private function normalizeLinuxInventory(array $linux): array
     {
+        $distroId = trim((string) (
+            $linux['distro_id']
+            ?? $linux['distroId']
+            ?? $linux['DistroId']
+            ?? ''
+        ));
+        $distroVersionId = trim((string) (
+            $linux['distro_version_id']
+            ?? $linux['distroVersionId']
+            ?? $linux['DistroVersionId']
+            ?? ''
+        ));
+        $kernelVersion = trim((string) (
+            $linux['kernel_version']
+            ?? $linux['kernelVersion']
+            ?? $linux['KernelVersion']
+            ?? ''
+        ));
+
         $availablePackagesSource = null;
         foreach (['available_packages', 'availablePackages', 'AvailablePackages', 'packages', 'Packages'] as $key) {
             if (is_array($linux[$key] ?? null)) {
@@ -2413,8 +2638,58 @@ BASH;
             }
         }
 
+        $packageDetailsSource = null;
+        foreach (['available_package_details', 'availablePackageDetails', 'AvailablePackageDetails'] as $key) {
+            if (is_array($linux[$key] ?? null)) {
+                $packageDetailsSource = $linux[$key];
+                break;
+            }
+        }
+
+        $normalizedPackageDetails = [];
+        $detailSeen = [];
+        if (is_array($packageDetailsSource)) {
+            foreach ($packageDetailsSource as $detail) {
+                $normalizedDetail = $this->normalizeLinuxPackageDetailEntry($detail);
+                if ($normalizedDetail === null) {
+                    continue;
+                }
+
+                $dedupeKey = strtolower($normalizedDetail['name'])
+                    . '|'
+                    . strtolower((string) ($normalizedDetail['current_version'] ?? ''))
+                    . '|'
+                    . strtolower((string) ($normalizedDetail['candidate_version'] ?? ''));
+
+                if (isset($detailSeen[$dedupeKey])) {
+                    continue;
+                }
+
+                $detailSeen[$dedupeKey] = true;
+                $normalizedPackageDetails[] = $normalizedDetail;
+                $normalizedPackages[$normalizedDetail['name']] = true;
+            }
+        }
+
         $normalizedPackageList = array_values(array_keys($normalizedPackages));
         sort($normalizedPackageList, SORT_STRING);
+
+        if (count($normalizedPackageDetails) === 0) {
+            foreach ($normalizedPackageList as $packageName) {
+                $normalizedPackageDetails[] = [
+                    'name' => $packageName,
+                    'current_version' => '',
+                    'candidate_version' => '',
+                    'architecture' => '',
+                    'source' => '',
+                    'raw_line' => '',
+                ];
+            }
+        } else {
+            usort($normalizedPackageDetails, static function (array $left, array $right): int {
+                return strcmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+            });
+        }
 
         $count = null;
         foreach ([
@@ -2451,32 +2726,452 @@ BASH;
             $count = count($normalizedPackageList) > 0 ? count($normalizedPackageList) : 1;
         }
 
+        [$enrichedPackageDetails, $cveSummary] = $this->enrichLinuxPackageDetailsWithCves(
+            $distroId,
+            $distroVersionId,
+            $normalizedPackageDetails
+        );
+
         return [
-            'distro_id' => trim((string) (
-                $linux['distro_id']
-                ?? $linux['distroId']
-                ?? $linux['DistroId']
-                ?? ''
-            )),
-            'distro_version_id' => trim((string) (
-                $linux['distro_version_id']
-                ?? $linux['distroVersionId']
-                ?? $linux['DistroVersionId']
-                ?? ''
-            )),
-            'kernel_version' => trim((string) (
-                $linux['kernel_version']
-                ?? $linux['kernelVersion']
-                ?? $linux['KernelVersion']
-                ?? ''
-            )),
+            'distro_id' => $distroId,
+            'distro_version_id' => $distroVersionId,
+            'kernel_version' => $kernelVersion,
             'apt_available' => $this->toBool($linux['apt_available'] ?? false)
                 || $this->toBool($linux['aptAvailable'] ?? false)
                 || $this->toBool($linux['AptAvailable'] ?? false),
             'package_updates_available' => $updatesAvailable,
             'available_packages' => array_slice($normalizedPackageList, 0, 500),
             'available_packages_count' => max(0, $count),
+            'available_package_details' => array_slice($enrichedPackageDetails, 0, 500),
+            'cve_summary' => $cveSummary,
         ];
+    }
+
+    private function normalizeLinuxPackageDetailEntry(mixed $detail): ?array
+    {
+        if (is_string($detail)) {
+            return $this->parseLinuxPackageDetailLine($detail);
+        }
+
+        if (!is_array($detail)) {
+            return null;
+        }
+
+        $name = trim((string) (
+            $detail['name']
+            ?? $detail['package']
+            ?? $detail['package_name']
+            ?? $detail['packageName']
+            ?? $detail['id']
+            ?? ''
+        ));
+        if ($name === '') {
+            return null;
+        }
+
+        $currentVersion = trim((string) (
+            $detail['current_version']
+            ?? $detail['currentVersion']
+            ?? $detail['installed_version']
+            ?? $detail['installedVersion']
+            ?? $detail['installed']
+            ?? ''
+        ));
+        $candidateVersion = trim((string) (
+            $detail['candidate_version']
+            ?? $detail['candidateVersion']
+            ?? $detail['new_version']
+            ?? $detail['newVersion']
+            ?? $detail['target_version']
+            ?? $detail['targetVersion']
+            ?? ''
+        ));
+        $architecture = trim((string) (
+            $detail['architecture']
+            ?? $detail['arch']
+            ?? ''
+        ));
+        $source = trim((string) (
+            $detail['source']
+            ?? $detail['repository']
+            ?? $detail['repo']
+            ?? ''
+        ));
+        $rawLine = trim((string) (
+            $detail['raw_line']
+            ?? $detail['rawLine']
+            ?? ''
+        ));
+
+        if ($rawLine === '') {
+            $rawLine = trim(
+                $name
+                . ($source !== '' ? '/' . $source : '')
+                . ($candidateVersion !== '' ? ' ' . $candidateVersion : '')
+                . ($architecture !== '' ? ' ' . $architecture : '')
+                . ($currentVersion !== '' ? ' [upgradable from: ' . $currentVersion . ']' : '')
+            );
+        }
+
+        return [
+            'name' => $name,
+            'current_version' => $currentVersion,
+            'candidate_version' => $candidateVersion,
+            'architecture' => $architecture,
+            'source' => $source,
+            'raw_line' => $rawLine,
+        ];
+    }
+
+    private function parseLinuxPackageDetailLine(string $rawLine): ?array
+    {
+        $line = trim($rawLine);
+        if ($line === '') {
+            return null;
+        }
+
+        $firstSpaceIndex = strpos($line, ' ');
+        if ($firstSpaceIndex === false || $firstSpaceIndex <= 0) {
+            return null;
+        }
+
+        $packageToken = trim(substr($line, 0, $firstSpaceIndex));
+        $remainder = trim(substr($line, $firstSpaceIndex + 1));
+        if ($packageToken === '' || $remainder === '') {
+            return null;
+        }
+
+        $slashIndex = strpos($packageToken, '/');
+        $name = trim($slashIndex !== false ? substr($packageToken, 0, $slashIndex) : $packageToken);
+        if ($name === '') {
+            return null;
+        }
+
+        $source = trim($slashIndex !== false ? substr($packageToken, $slashIndex + 1) : '');
+
+        $candidateVersion = '';
+        $architecture = '';
+        $tokens = preg_split('/\s+/', $remainder);
+        if (is_array($tokens) && count($tokens) > 0) {
+            $candidateVersion = trim((string) ($tokens[0] ?? ''));
+            $architecture = trim((string) ($tokens[1] ?? ''));
+        }
+
+        $currentVersion = '';
+        if (preg_match('/\[\s*upgradable from:\s*([^\]]+)\]/i', $line, $matches) === 1) {
+            $currentVersion = trim((string) ($matches[1] ?? ''));
+        }
+
+        return [
+            'name' => $name,
+            'current_version' => $currentVersion,
+            'candidate_version' => $candidateVersion,
+            'architecture' => $architecture,
+            'source' => $source,
+            'raw_line' => $line,
+        ];
+    }
+
+    private function enrichLinuxPackageDetailsWithCves(
+        string $distroId,
+        string $distroVersionId,
+        array $packageDetails
+    ): array {
+        $summary = [
+            'enabled' => $this->config->linuxCveLookupEnabled,
+            'supported' => false,
+            'ecosystem' => '',
+            'distro_id' => $distroId,
+            'distro_version_id' => $distroVersionId,
+            'checked_packages' => 0,
+            'packages_with_cves' => 0,
+            'total_cves' => 0,
+            'cached_entries' => 0,
+            'queried_entries' => 0,
+            'truncated' => false,
+            'generated_at' => gmdate(DATE_ATOM),
+        ];
+
+        if (!$this->config->linuxCveLookupEnabled) {
+            return [$packageDetails, $summary];
+        }
+
+        $ecosystem = $this->mapLinuxDistroToOsvEcosystem($distroId);
+        if ($ecosystem === null) {
+            $summary['reason'] = 'unsupported_distro';
+            return [$packageDetails, $summary];
+        }
+
+        $summary['supported'] = true;
+        $summary['ecosystem'] = $ecosystem;
+
+        $cacheTtlSeconds = max(300, $this->config->linuxCveCacheTtlSeconds);
+        $maxPackageLookups = max(1, $this->config->linuxCveMaxPackageLookups);
+        $lookupResults = [];
+        $lookupTargets = [];
+
+        foreach ($packageDetails as $detail) {
+            if (!is_array($detail)) {
+                continue;
+            }
+
+            $name = trim((string) ($detail['name'] ?? ''));
+            $currentVersion = trim((string) ($detail['current_version'] ?? ''));
+            if ($name === '' || $currentVersion === '') {
+                continue;
+            }
+
+            $lookupKey = $this->linuxCveCacheKey($ecosystem, $name, $currentVersion);
+            if (isset($lookupResults[$lookupKey]) || isset($lookupTargets[$lookupKey])) {
+                continue;
+            }
+
+            $cachedEntry = $this->loadLinuxCveCacheEntry($lookupKey);
+            if ($cachedEntry !== null && $this->isLinuxCveCacheFresh($cachedEntry, $cacheTtlSeconds)) {
+                $lookupResults[$lookupKey] = $cachedEntry;
+                $summary['cached_entries'] = (int) $summary['cached_entries'] + 1;
+                continue;
+            }
+
+            if (count($lookupTargets) < $maxPackageLookups) {
+                $lookupTargets[$lookupKey] = [
+                    'name' => $name,
+                    'version' => $currentVersion,
+                ];
+            } else {
+                $summary['truncated'] = true;
+            }
+        }
+
+        if (count($lookupTargets) > 0) {
+            $queryKeys = array_keys($lookupTargets);
+            $queries = [];
+            foreach ($lookupTargets as $target) {
+                $queries[] = [
+                    'package' => [
+                        'name' => (string) ($target['name'] ?? ''),
+                        'ecosystem' => $ecosystem,
+                    ],
+                    'version' => (string) ($target['version'] ?? ''),
+                ];
+            }
+
+            try {
+                $results = $this->queryOsvBatch($queries);
+                $summary['queried_entries'] = count($queries);
+                foreach ($queryKeys as $index => $lookupKey) {
+                    $result = is_array($results[$index] ?? null) ? $results[$index] : [];
+                    $vulnerabilitiesRaw = is_array($result['vulns'] ?? null) ? $result['vulns'] : [];
+                    $normalizedVulnerabilities = $this->normalizeOsvVulnerabilities(
+                        $vulnerabilitiesRaw,
+                        $this->config->linuxCveMaxVulnsPerPackage
+                    );
+
+                    $entry = [
+                        'fetched_at' => gmdate(DATE_ATOM),
+                        'vulnerability_count' => count($vulnerabilitiesRaw),
+                        'vulnerabilities' => $normalizedVulnerabilities,
+                    ];
+                    $lookupResults[$lookupKey] = $entry;
+                    $this->saveLinuxCveCacheEntry($lookupKey, $entry);
+                }
+            } catch (\Throwable $exception) {
+                $summary['lookup_error'] = $exception->getMessage();
+            }
+        }
+
+        $enriched = [];
+        foreach ($packageDetails as $detail) {
+            if (!is_array($detail)) {
+                continue;
+            }
+
+            $name = trim((string) ($detail['name'] ?? ''));
+            $currentVersion = trim((string) ($detail['current_version'] ?? ''));
+            $detail['vulnerability_count'] = null;
+            $detail['vulnerabilities'] = [];
+            $detail['cve_ids'] = [];
+            $detail['cve_lookup_state'] = $currentVersion === '' ? 'missing_version' : 'skipped';
+
+            if ($name !== '' && $currentVersion !== '') {
+                $lookupKey = $this->linuxCveCacheKey($ecosystem, $name, $currentVersion);
+                if (is_array($lookupResults[$lookupKey] ?? null)) {
+                    $entry = $lookupResults[$lookupKey];
+                    $vulnerabilities = is_array($entry['vulnerabilities'] ?? null)
+                        ? $entry['vulnerabilities']
+                        : [];
+                    $count = filter_var($entry['vulnerability_count'] ?? null, FILTER_VALIDATE_INT);
+                    $count = $count === false ? count($vulnerabilities) : max(0, (int) $count);
+
+                    $detail['vulnerability_count'] = $count;
+                    $detail['vulnerabilities'] = $vulnerabilities;
+                    $detail['cve_ids'] = array_values(array_filter(array_map(
+                        static fn (mixed $item): string => is_array($item) ? trim((string) ($item['id'] ?? '')) : '',
+                        $vulnerabilities
+                    )));
+                    $detail['cve_lookup_state'] = 'ok';
+
+                    $summary['checked_packages'] = (int) $summary['checked_packages'] + 1;
+                    if ($count > 0) {
+                        $summary['packages_with_cves'] = (int) $summary['packages_with_cves'] + 1;
+                        $summary['total_cves'] = (int) $summary['total_cves'] + $count;
+                    }
+                }
+            }
+
+            $enriched[] = $detail;
+        }
+
+        return [$enriched, $summary];
+    }
+
+    private function mapLinuxDistroToOsvEcosystem(string $distroId): ?string
+    {
+        return match (strtolower(trim($distroId))) {
+            'ubuntu' => 'Ubuntu',
+            'debian', 'raspbian' => 'Debian',
+            default => null,
+        };
+    }
+
+    private function linuxCveCacheKey(string $ecosystem, string $name, string $version): string
+    {
+        return hash('sha256', strtolower($ecosystem) . "\n" . strtolower($name) . "\n" . $version);
+    }
+
+    private function linuxCveCachePath(string $lookupKey): string
+    {
+        return sprintf('cve/osv/%s.json', $lookupKey);
+    }
+
+    private function loadLinuxCveCacheEntry(string $lookupKey): ?array
+    {
+        $path = $this->linuxCveCachePath($lookupKey);
+        if (!$this->store->exists($path)) {
+            return null;
+        }
+
+        $entry = $this->store->readJson($path, []);
+        return is_array($entry) ? $entry : null;
+    }
+
+    private function saveLinuxCveCacheEntry(string $lookupKey, array $entry): void
+    {
+        try {
+            $this->store->writeJson($this->linuxCveCachePath($lookupKey), $entry);
+        } catch (\Throwable) {
+            // Non-fatal: cache write failures should not break inventory rendering.
+        }
+    }
+
+    private function isLinuxCveCacheFresh(array $entry, int $ttlSeconds): bool
+    {
+        $fetchedAt = strtotime((string) ($entry['fetched_at'] ?? ''));
+        if ($fetchedAt === false || $fetchedAt <= 0) {
+            return false;
+        }
+
+        return ($fetchedAt + max(60, $ttlSeconds)) >= time();
+    }
+
+    private function queryOsvBatch(array $queries): array
+    {
+        if (count($queries) === 0) {
+            return [];
+        }
+
+        $payload = Json::encode([
+            'queries' => array_values($queries),
+        ]);
+
+        $response = $this->requestRaw(
+            'POST',
+            self::OSV_QUERY_BATCH_URL,
+            $payload,
+            ['Content-Type: application/json']
+        );
+
+        if (($response['status'] ?? 0) < 200 || ($response['status'] ?? 0) >= 300) {
+            throw new RuntimeException(sprintf(
+                'OSV lookup failed with HTTP status %d.',
+                (int) ($response['status'] ?? 0)
+            ));
+        }
+
+        $decoded = json_decode((string) ($response['body'] ?? ''), true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('OSV lookup returned an invalid JSON payload.');
+        }
+
+        $results = $decoded['results'] ?? [];
+        return is_array($results) ? $results : [];
+    }
+
+    private function normalizeOsvVulnerabilities(array $vulnerabilities, int $maxItems): array
+    {
+        $normalized = [];
+        foreach ($vulnerabilities as $vulnerability) {
+            if (!is_array($vulnerability)) {
+                continue;
+            }
+
+            $id = trim((string) ($vulnerability['id'] ?? ''));
+            $aliases = [];
+            foreach ((array) ($vulnerability['aliases'] ?? []) as $alias) {
+                if (!is_string($alias)) {
+                    continue;
+                }
+                $trimmedAlias = trim($alias);
+                if ($trimmedAlias !== '') {
+                    $aliases[$trimmedAlias] = true;
+                }
+            }
+
+            if ($id === '' && count($aliases) === 0) {
+                continue;
+            }
+
+            $primaryId = $id !== '' ? $id : (array_key_first($aliases) ?? '');
+            if ($primaryId === '') {
+                continue;
+            }
+
+            $normalized[] = [
+                'id' => $primaryId,
+                'summary' => trim((string) ($vulnerability['summary'] ?? '')),
+                'severity' => $this->extractOsvSeveritySummary($vulnerability),
+                'aliases' => array_slice(array_values(array_keys($aliases)), 0, 10),
+            ];
+        }
+
+        usort($normalized, static function (array $left, array $right): int {
+            return strcmp((string) ($left['id'] ?? ''), (string) ($right['id'] ?? ''));
+        });
+
+        return array_slice($normalized, 0, max(1, $maxItems));
+    }
+
+    private function extractOsvSeveritySummary(array $vulnerability): string
+    {
+        $severityEntries = is_array($vulnerability['severity'] ?? null)
+            ? $vulnerability['severity']
+            : [];
+        foreach ($severityEntries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $score = trim((string) ($entry['score'] ?? ''));
+            if ($score !== '') {
+                return $score;
+            }
+        }
+
+        $databaseSpecific = is_array($vulnerability['database_specific'] ?? null)
+            ? $vulnerability['database_specific']
+            : [];
+        $legacy = trim((string) ($databaseSpecific['severity'] ?? ''));
+        return $legacy;
     }
 
     private function normalizeMacOsInventory(array $macOs): array

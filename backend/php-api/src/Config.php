@@ -25,6 +25,10 @@ final class Config
         public readonly string $windowsSplashtopMsiUrl,
         public readonly string $windowsSplashtopDeploymentCode,
         public readonly string $windowsAgentPackageUrl,
+        public readonly bool $linuxCveLookupEnabled,
+        public readonly int $linuxCveCacheTtlSeconds,
+        public readonly int $linuxCveMaxPackageLookups,
+        public readonly int $linuxCveMaxVulnsPerPackage,
         public readonly int $heartbeatSeconds,
         public readonly int $jobsSeconds,
         public readonly int $inventorySeconds
@@ -58,6 +62,10 @@ final class Config
                 'PATCH_API_WINDOWS_AGENT_PACKAGE_URL',
                 'https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip'
             ),
+            linuxCveLookupEnabled: self::envBool('PATCH_API_LINUX_CVE_LOOKUP_ENABLED', true),
+            linuxCveCacheTtlSeconds: max(300, self::envInt('PATCH_API_LINUX_CVE_CACHE_TTL_SECONDS', 21600)),
+            linuxCveMaxPackageLookups: max(1, self::envInt('PATCH_API_LINUX_CVE_MAX_PACKAGE_LOOKUPS', 25)),
+            linuxCveMaxVulnsPerPackage: max(1, self::envInt('PATCH_API_LINUX_CVE_MAX_VULNS_PER_PACKAGE', 25)),
             heartbeatSeconds: self::envInt('PATCH_API_HEARTBEAT_SECONDS', 300),
             jobsSeconds: self::envInt('PATCH_API_JOBS_SECONDS', 120),
             inventorySeconds: self::envInt('PATCH_API_INVENTORY_SECONDS', 21600)
@@ -170,5 +178,28 @@ final class Config
 
         $parsed = filter_var($value, FILTER_VALIDATE_INT);
         return $parsed === false ? $default : (int) $parsed;
+    }
+
+    private static function envBool(string $key, bool $default): bool
+    {
+        $value = getenv($key);
+        if ($value === false) {
+            return $default;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if ($normalized === '') {
+            return $default;
+        }
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return $default;
     }
 }

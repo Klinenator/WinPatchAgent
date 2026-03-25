@@ -191,6 +191,23 @@ public sealed class InventoryUploadLinux
     public List<string> AvailablePackages { get; set; } = [];
 
     public int AvailablePackagesCount { get; set; }
+
+    public List<InventoryLinuxAvailablePackage> AvailablePackageDetails { get; set; } = [];
+}
+
+public sealed class InventoryLinuxAvailablePackage
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string CurrentVersion { get; set; } = string.Empty;
+
+    public string CandidateVersion { get; set; } = string.Empty;
+
+    public string Architecture { get; set; } = string.Empty;
+
+    public string Source { get; set; } = string.Empty;
+
+    public string RawLine { get; set; } = string.Empty;
 }
 
 public sealed class InventoryUploadMacOs

@@ -42,7 +42,7 @@ Current endpoints:
 - `POST /v1/admin/enrollments`
 - `GET /install/linux.sh?enrollment_key=...`
 - `GET /install/macos.sh?enrollment_key=...`
-- `GET /install/windows.ps1?enrollment_key=...`
+- `GET /install/windows.ps1?enrollment_key=...&mode=prebuilt|source` (`mode` optional, default `prebuilt`)
 - `GET /healthz`
 
 Storage model:
@@ -72,6 +72,10 @@ Environment variables:
 - `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL`: optional Splashtop Windows deploy MSI URL; when set, `/install/windows.ps1` auto-installs Splashtop during agent install
 - `PATCH_API_WINDOWS_SPLASHTOP_DEPLOY_CODE`: optional Splashtop deployment code used with `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` (leave empty if MSI embeds deployment code)
 - `PATCH_API_WINDOWS_AGENT_PACKAGE_URL`: prebuilt Windows agent zip URL used by `/install/windows.ps1` and Windows self-update jobs (default `https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip`)
+- `PATCH_API_LINUX_CVE_LOOKUP_ENABLED`: enable/disable Linux CVE enrichment on inventory views (default `true`)
+- `PATCH_API_LINUX_CVE_CACHE_TTL_SECONDS`: freshness window for cached OSV CVE results (default `21600`)
+- `PATCH_API_LINUX_CVE_MAX_PACKAGE_LOOKUPS`: max Linux packages queried on a single cache-miss refresh (default `25`)
+- `PATCH_API_LINUX_CVE_MAX_VULNS_PER_PACKAGE`: max CVE records stored per package (default `25`)
 - `PATCH_API_STORAGE_ROOT`: optional override for the runtime storage path
 - `PATCH_API_HEARTBEAT_SECONDS`: default `300`
 - `PATCH_API_JOBS_SECONDS`: default `120`
@@ -102,7 +106,7 @@ Admin pages:
 - `/admin/install-agent` enrollment key + installer generation
 - `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution.
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution. Linux package rows for Ubuntu/Debian agents include CVE matches from OSV. Windows installer generation now supports both prebuilt mode (default) and source-build mode.
 
 Suggested nginx site:
 

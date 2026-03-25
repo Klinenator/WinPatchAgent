@@ -410,6 +410,16 @@
                         <input id="newAgentTtlSeconds" type="number" min="300" max="2592000" value="604800">
                     </div>
                 </div>
+                <div class="row">
+                    <div id="windowsInstallModeBlock" class="field-block">
+                        <label for="newAgentWindowsInstallMode">Windows Install Mode</label>
+                        <select id="newAgentWindowsInstallMode">
+                            <option value="prebuilt">Prebuilt Binary (no endpoint compile)</option>
+                            <option value="source">Compile from Source on Endpoint</option>
+                        </select>
+                        <p class="hint">Used only when platform is Windows.</p>
+                    </div>
+                </div>
 
                 <div class="actions">
                     <button id="generateAgentBtn" type="button" class="btn primary">Generate Installer</button>
@@ -446,6 +456,8 @@
 
     const newAgentPlatformInput = document.getElementById("newAgentPlatform");
     const newAgentTtlSecondsInput = document.getElementById("newAgentTtlSeconds");
+    const windowsInstallModeBlock = document.getElementById("windowsInstallModeBlock");
+    const newAgentWindowsInstallModeInput = document.getElementById("newAgentWindowsInstallMode");
     const newAgentEnrollmentKeyInput = document.getElementById("newAgentEnrollmentKey");
     const newAgentScriptUrlInput = document.getElementById("newAgentScriptUrl");
     const newAgentInstallCommandInput = document.getElementById("newAgentInstallCommand");
@@ -471,12 +483,17 @@
         }
 
         try {
+            const requestBody = {
+                platform: platform,
+                ttl_seconds: ttlSeconds
+            };
+            if (platform === "windows") {
+                requestBody.windows_install_mode = String(newAgentWindowsInstallModeInput.value || "prebuilt");
+            }
+
             const response = await apiFetch("/v1/admin/enrollments", {
                 method: "POST",
-                body: JSON.stringify({
-                    platform: platform,
-                    ttl_seconds: ttlSeconds
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const enrollment = response.enrollment || {};
@@ -493,6 +510,12 @@
             setStatus(installStatus, String(error.message || error), "error");
         }
     });
+
+    function updateWindowsInstallModeVisibility() {
+        windowsInstallModeBlock.style.display = newAgentPlatformInput.value === "windows" ? "" : "none";
+    }
+
+    newAgentPlatformInput.addEventListener("change", updateWindowsInstallModeVisibility);
 
     async function loadAuthStatus() {
         try {
@@ -579,6 +602,7 @@
 
     async function initialize() {
         await loadAuthStatus();
+        updateWindowsInstallModeVisibility();
     }
 
     initialize();

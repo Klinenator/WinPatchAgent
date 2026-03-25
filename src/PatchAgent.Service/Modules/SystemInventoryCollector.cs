@@ -72,6 +72,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
                 var linuxUpdateSnapshot = await CollectLinuxAvailableAptUpdatesAsync(cancellationToken);
                 snapshot.LinuxPackageUpdatesAvailable = linuxUpdateSnapshot.PackageUpdatesAvailable;
                 snapshot.LinuxAvailablePackages = linuxUpdateSnapshot.AvailablePackages;
+                snapshot.LinuxAvailablePackageDetails = linuxUpdateSnapshot.AvailablePackageDetails;
             }
         }
         else if (OperatingSystem.IsMacOS())
@@ -519,7 +520,7 @@ $items | ConvertTo-Json -Depth 5 -Compress
     {
         if (!OperatingSystem.IsLinux())
         {
-            return new LinuxAptUpdateSnapshot(false, []);
+            return new LinuxAptUpdateSnapshot(false, [], []);
         }
 
         var aptExecutable = File.Exists("/usr/bin/apt") ? "/usr/bin/apt" : "apt";
@@ -544,25 +545,39 @@ $items | ConvertTo-Json -Depth 5 -Compress
                     "Linux apt inventory query failed with exit code {ExitCode}: {Error}",
                     result.ExitCode,
                     result.StandardError);
-                return new LinuxAptUpdateSnapshot(false, []);
+                return new LinuxAptUpdateSnapshot(false, [], []);
             }
 
             var fallbackCount = ParseAptGetSimulationUpgradeCount(fallback.StandardOutput);
             if (fallbackCount <= 0)
             {
-                return new LinuxAptUpdateSnapshot(false, []);
+                return new LinuxAptUpdateSnapshot(false, [], []);
             }
 
-            return new LinuxAptUpdateSnapshot(true, BuildFallbackPackagePlaceholders(fallbackCount));
+            var fallbackDetails = BuildFallbackPackagePlaceholderDetails(fallbackCount);
+            return new LinuxAptUpdateSnapshot(
+                true,
+                fallbackDetails.Select(static package => package.Name).ToList(),
+                fallbackDetails);
         }
 
-        var availablePackages = ParseAptUpgradeablePackages(result.StandardOutput);
-        return new LinuxAptUpdateSnapshot(availablePackages.Count > 0, availablePackages);
+        var availablePackageDetails = ParseAptUpgradeablePackageDetails(result.StandardOutput);
+        var availablePackages = availablePackageDetails
+            .Select(static package => package.Name)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new LinuxAptUpdateSnapshot(
+            availablePackages.Count > 0,
+            availablePackages,
+            availablePackageDetails);
     }
 
-    private static List<string> ParseAptUpgradeablePackages(string output)
+    private static List<LinuxAvailablePackageSnapshot> ParseAptUpgradeablePackageDetails(string output)
     {
-        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var packages = new Dictionary<string, LinuxAvailablePackageSnapshot>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var rawLine in output.Split('\n'))
         {
@@ -579,24 +594,111 @@ $items | ConvertTo-Json -Depth 5 -Compress
                 continue;
             }
 
-            var delimiterIndex = line.IndexOf('/');
-            if (delimiterIndex <= 0)
+            var parsed = ParseAptUpgradeablePackageLine(line);
+            if (parsed is null)
             {
                 continue;
             }
 
-            var packageName = line[..delimiterIndex].Trim();
-            if (packageName.Length == 0)
+            if (packages.TryGetValue(parsed.Name, out var existing))
             {
-                continue;
-            }
+                if (string.IsNullOrWhiteSpace(existing.CurrentVersion) && !string.IsNullOrWhiteSpace(parsed.CurrentVersion))
+                {
+                    existing.CurrentVersion = parsed.CurrentVersion;
+                }
 
-            packages.Add(packageName);
+                if (string.IsNullOrWhiteSpace(existing.CandidateVersion) && !string.IsNullOrWhiteSpace(parsed.CandidateVersion))
+                {
+                    existing.CandidateVersion = parsed.CandidateVersion;
+                }
+
+                if (string.IsNullOrWhiteSpace(existing.Architecture) && !string.IsNullOrWhiteSpace(parsed.Architecture))
+                {
+                    existing.Architecture = parsed.Architecture;
+                }
+
+                if (string.IsNullOrWhiteSpace(existing.Source) && !string.IsNullOrWhiteSpace(parsed.Source))
+                {
+                    existing.Source = parsed.Source;
+                }
+
+                if (string.IsNullOrWhiteSpace(existing.RawLine))
+                {
+                    existing.RawLine = parsed.RawLine;
+                }
+
+                packages[parsed.Name] = existing;
+            }
+            else
+            {
+                packages[parsed.Name] = parsed;
+            }
         }
 
         return packages
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Values
+            .OrderBy(static package => package.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static LinuxAvailablePackageSnapshot? ParseAptUpgradeablePackageLine(string line)
+    {
+        var firstSpaceIndex = line.IndexOf(' ');
+        if (firstSpaceIndex <= 0)
+        {
+            return null;
+        }
+
+        var packageToken = line[..firstSpaceIndex].Trim();
+        var remainder = line[(firstSpaceIndex + 1)..].Trim();
+        if (packageToken.Length == 0 || remainder.Length == 0)
+        {
+            return null;
+        }
+
+        var slashIndex = packageToken.IndexOf('/');
+        var packageName = (slashIndex > 0 ? packageToken[..slashIndex] : packageToken).Trim();
+        if (packageName.Length == 0)
+        {
+            return null;
+        }
+
+        var source = slashIndex > 0
+            ? packageToken[(slashIndex + 1)..].Trim()
+            : "apt";
+
+        var candidateVersion = string.Empty;
+        var architecture = string.Empty;
+        var remainderTokens = remainder.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (remainderTokens.Length > 0)
+        {
+            candidateVersion = remainderTokens[0].Trim();
+        }
+
+        if (remainderTokens.Length > 1)
+        {
+            architecture = remainderTokens[1].Trim();
+        }
+
+        var currentVersion = string.Empty;
+        var currentVersionMatch = System.Text.RegularExpressions.Regex.Match(
+            line,
+            @"\[\s*upgradable from:\s*(?<version>[^\]]+)\]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (currentVersionMatch.Success)
+        {
+            currentVersion = currentVersionMatch.Groups["version"].Value.Trim();
+        }
+
+        return new LinuxAvailablePackageSnapshot
+        {
+            Name = packageName,
+            CurrentVersion = currentVersion,
+            CandidateVersion = candidateVersion,
+            Architecture = architecture,
+            Source = source,
+            RawLine = line
+        };
     }
 
     private static int ParseAptGetSimulationUpgradeCount(string output)
@@ -629,12 +731,18 @@ $items | ConvertTo-Json -Depth 5 -Compress
         return 0;
     }
 
-    private static List<string> BuildFallbackPackagePlaceholders(int count)
+    private static List<LinuxAvailablePackageSnapshot> BuildFallbackPackagePlaceholderDetails(int count)
     {
-        var result = new List<string>(count);
+        var result = new List<LinuxAvailablePackageSnapshot>(count);
         for (var index = 1; index <= count; index++)
         {
-            result.Add("upgrade-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var packageName = "upgrade-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            result.Add(new LinuxAvailablePackageSnapshot
+            {
+                Name = packageName,
+                Source = "apt-simulated",
+                RawLine = packageName
+            });
         }
 
         return result;
@@ -838,7 +946,8 @@ $items | ConvertTo-Json -Depth 5 -Compress
 
     private readonly record struct LinuxAptUpdateSnapshot(
         bool PackageUpdatesAvailable,
-        List<string> AvailablePackages);
+        List<string> AvailablePackages,
+        List<LinuxAvailablePackageSnapshot> AvailablePackageDetails);
 
     private readonly record struct MacSoftwareUpdateSnapshot(
         bool SoftwareUpdateAvailable,

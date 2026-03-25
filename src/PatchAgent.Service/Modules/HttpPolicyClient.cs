@@ -183,7 +183,18 @@ public sealed class HttpPolicyClient : IPolicyClient
                     AptAvailable = snapshot.AptAvailable,
                     PackageUpdatesAvailable = snapshot.LinuxPackageUpdatesAvailable,
                     AvailablePackages = snapshot.LinuxAvailablePackages.ToList(),
-                    AvailablePackagesCount = snapshot.LinuxAvailablePackages.Count
+                    AvailablePackagesCount = snapshot.LinuxAvailablePackages.Count,
+                    AvailablePackageDetails = snapshot.LinuxAvailablePackageDetails
+                        .Select(package => new InventoryLinuxAvailablePackage
+                        {
+                            Name = package.Name,
+                            CurrentVersion = package.CurrentVersion,
+                            CandidateVersion = package.CandidateVersion,
+                            Architecture = package.Architecture,
+                            Source = package.Source,
+                            RawLine = package.RawLine
+                        })
+                        .ToList()
                 }
                 : null,
             MacOs = OperatingSystem.IsMacOS()
