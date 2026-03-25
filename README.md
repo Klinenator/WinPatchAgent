@@ -111,6 +111,7 @@ Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer to
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
 It now also supports queueing script jobs for Windows and macOS (inline script or script URL), including built-in GCPW and Splashtop install templates.
 It now also supports per-agent self-update jobs (`agent_self_update`) from the main admin page.
+Server-generated endpoint installers and self-update workflows now pull source archives over HTTPS (curl/wget/Invoke-WebRequest), so Git is not required on endpoints.
 It also includes an agent-row `Connect` button that launches the Splashtop Business app URI for Windows/macOS agents.
 If you set `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` on the API server, Windows agent installs from `/install/windows.ps1` will auto-install Splashtop during provisioning.
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.

@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Setup WinPatchAgent on macOS from a local git clone.
+Setup WinPatchAgent on macOS from a local source directory.
 
 Usage:
   sudo bash ./scripts/setup_macos_agent.sh --backend-url URL [options] [-- <install-script-options>]
@@ -82,7 +82,6 @@ if [[ -z "${BACKEND_URL}" ]]; then
 fi
 
 require_root
-require_command git
 require_command launchctl
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

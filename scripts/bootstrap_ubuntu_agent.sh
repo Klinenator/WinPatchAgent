@@ -13,9 +13,9 @@ Required:
 
 Optional:
   --enrollment-key KEY         Enrollment key for agent registration
-  --repo-url URL               Git repository URL (default: https://github.com/Klinenator/WinPatchAgent.git)
-  --repo-ref REF               Git branch/tag/commit to deploy (default: main)
-  --work-dir PATH              Source checkout path (default: /opt/winpatchagent-src)
+  --repo-url URL               Repository URL (default: https://github.com/Klinenator/WinPatchAgent.git)
+  --repo-ref REF               Branch/tag/commit to deploy (default: main)
+  --work-dir PATH              Extracted source path (default: /opt/winpatchagent-src)
   --help                       Show this help
 
 Extra install options:
@@ -152,26 +152,68 @@ fi
 
 require_root
 require_command apt-get
-require_command git
-require_command curl
+require_command tar
 require_command systemctl
 
 ensure_dotnet_sdk
 
-if [[ -d "${WORK_DIR}" && ! -d "${WORK_DIR}/.git" ]]; then
-  echo "Work directory exists but is not a git repository: ${WORK_DIR}" >&2
-  echo "Choose another --work-dir or remove the existing directory." >&2
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  apt-get update
+  apt_install ca-certificates curl wget
+fi
+
+normalize_repo_url() {
+  local raw="$1"
+  raw="${raw%/}"
+  if [[ "${raw}" == git@github.com:* ]]; then
+    raw="https://github.com/${raw#git@github.com:}"
+  fi
+  raw="${raw%.git}"
+  printf '%s' "${raw}"
+}
+
+build_archive_url() {
+  local repo_http
+  repo_http="$(normalize_repo_url "$1")"
+  printf '%s/archive/%s.tar.gz' "${repo_http}" "$2"
+}
+
+download_file() {
+  local url="$1"
+  local output="$2"
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "${output}" "${url}"
+    return 0
+  fi
+  curl -fsSL "${url}" -o "${output}"
+}
+
+ARCHIVE_URL="$(build_archive_url "${REPO_URL}" "${REPO_REF}")"
+TMP_ARCHIVE="$(mktemp /tmp/winpatchagent-bootstrap.XXXXXX.tar.gz)"
+TMP_EXTRACT="$(mktemp -d /tmp/winpatchagent-bootstrap.XXXXXX)"
+
+cleanup() {
+  rm -f "${TMP_ARCHIVE}" || true
+  rm -rf "${TMP_EXTRACT}" || true
+}
+trap cleanup EXIT
+
+echo "Downloading ${REPO_URL} (${REPO_REF}) source archive..."
+download_file "${ARCHIVE_URL}" "${TMP_ARCHIVE}"
+tar -xzf "${TMP_ARCHIVE}" -C "${TMP_EXTRACT}"
+SOURCE_DIR="$(find "${TMP_EXTRACT}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+if [[ -z "${SOURCE_DIR}" || ! -x "${SOURCE_DIR}/scripts/install_ubuntu_agent.sh" ]]; then
+  echo "Downloaded archive did not contain scripts/install_ubuntu_agent.sh" >&2
   exit 1
 fi
 
-if [[ -d "${WORK_DIR}/.git" ]]; then
-  echo "Updating existing checkout at ${WORK_DIR}..."
-  git -C "${WORK_DIR}" remote set-url origin "${REPO_URL}"
-  git -C "${WORK_DIR}" fetch --depth 1 origin "${REPO_REF}"
-  git -C "${WORK_DIR}" checkout -B "${REPO_REF}" FETCH_HEAD
-else
-  echo "Cloning ${REPO_URL} (${REPO_REF}) into ${WORK_DIR}..."
-  git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" "${WORK_DIR}"
+if [[ -e "${WORK_DIR}" ]]; then
+  rm -rf "${WORK_DIR}"
+fi
+
+if ! mv "${SOURCE_DIR}" "${WORK_DIR}"; then
+  echo "Failed to place extracted source into ${WORK_DIR}" >&2
+  exit 1
 fi
 
 INSTALL_CMD=(

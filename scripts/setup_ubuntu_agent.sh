@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Setup WinPatchAgent on Ubuntu/Debian from a local git clone.
+Setup WinPatchAgent on Ubuntu/Debian from a local source directory.
 
 Usage:
   sudo bash ./scripts/setup_ubuntu_agent.sh --backend-url URL [options] [-- <install-script-options>]

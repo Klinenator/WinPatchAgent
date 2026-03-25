@@ -412,6 +412,37 @@ $WorkDir = "C:\ProgramData\WinPatchAgent\src"
 $InstallDir = "C:\Program Files\WinPatchAgent"
 $ServiceName = "PatchAgentSvc"
 
+function Normalize-RepoHttpUrl {
+    param([string]$RawUrl)
+
+    $url = [string]($RawUrl ?? "")
+    $url = $url.Trim()
+    if ([string]::IsNullOrWhiteSpace($url)) {
+        throw "Repo URL is empty."
+    }
+
+    $url = $url.TrimEnd("/")
+    if ($url -match "^git@github\\.com:(.+?)(?:\\.git)?$") {
+        return "https://github.com/$($Matches[1])"
+    }
+
+    if ($url.EndsWith(".git", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $url = $url.Substring(0, $url.Length - 4)
+    }
+
+    if ($url -notmatch "^https?://") {
+        throw "Unsupported repo URL format: $RawUrl"
+    }
+
+    return $url
+}
+
+function Build-ArchiveUrl {
+    param([string]$RawRepoUrl, [string]$RawRepoRef)
+    $repoHttpUrl = Normalize-RepoHttpUrl -RawUrl $RawRepoUrl
+    return "$repoHttpUrl/archive/$RawRepoRef.zip"
+}
+
 $success = $false
 $errorCode = ""
 $errorMessage = ""
@@ -419,23 +450,36 @@ $errorMessage = ""
 try {
     Start-Sleep -Seconds 4
 
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        throw "Missing required command: git"
-    }
-
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         throw "Missing required command: dotnet"
     }
 
-    if (Test-Path (Join-Path $WorkDir ".git")) {
-        git -C $WorkDir fetch --depth 1 origin $RepoRef | Out-Null
-        git -C $WorkDir checkout -B $RepoRef FETCH_HEAD | Out-Null
-    } else {
+    $workParent = Split-Path -Parent $WorkDir
+    if (-not [string]::IsNullOrWhiteSpace($workParent)) {
+        New-Item -ItemType Directory -Path $workParent -Force | Out-Null
+    }
+
+    $archiveUrl = Build-ArchiveUrl -RawRepoUrl $RepoUrl -RawRepoRef $RepoRef
+    $archivePath = Join-Path $env:TEMP ("winpatchagent-selfupdate-" + [guid]::NewGuid().ToString("N") + ".zip")
+    $extractRoot = Join-Path $env:TEMP ("winpatchagent-selfupdate-" + [guid]::NewGuid().ToString("N"))
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $archiveUrl -OutFile $archivePath
+        New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+        Expand-Archive -Path $archivePath -DestinationPath $extractRoot -Force
+
+        $sourceDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
+        if (-not $sourceDir) {
+            throw "Downloaded archive did not contain source files."
+        }
+
         if (Test-Path $WorkDir) {
             Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
         }
-        New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
-        git clone --depth 1 --branch $RepoRef $RepoUrl $WorkDir | Out-Null
+
+        Move-Item -Path $sourceDir.FullName -Destination $WorkDir
+    } finally {
+        Remove-Item -Path $archivePath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
@@ -527,17 +571,44 @@ EOF
 run_update() {
   sleep 4
 
-  if ! command -v git >/dev/null 2>&1; then
+  if ! command -v tar >/dev/null 2>&1; then
     return 10
   fi
 
-  if [[ -d "${WORK_DIR}/.git" ]]; then
-    git -C "${WORK_DIR}" fetch --depth 1 origin "${REPO_REF}"
-    git -C "${WORK_DIR}" checkout -B "${REPO_REF}" FETCH_HEAD
-  else
-    rm -rf "${WORK_DIR}"
-    git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" "${WORK_DIR}"
+  if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
+    return 11
   fi
+
+  local repo_http="${REPO_URL%/}"
+  if [[ "${repo_http}" == git@github.com:* ]]; then
+    repo_http="https://github.com/${repo_http#git@github.com:}"
+  fi
+  repo_http="${repo_http%.git}"
+  local archive_url="${repo_http}/archive/${REPO_REF}.tar.gz"
+  local tmp_archive
+  local tmp_extract
+  tmp_archive="$(mktemp /tmp/winpatchagent-selfupdate.XXXXXX.tar.gz)"
+  tmp_extract="$(mktemp -d /tmp/winpatchagent-selfupdate.XXXXXX)"
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "${tmp_archive}" "${archive_url}"
+  else
+    curl -fsSL "${archive_url}" -o "${tmp_archive}"
+  fi
+
+  tar -xzf "${tmp_archive}" -C "${tmp_extract}"
+  local source_dir
+  source_dir="$(find "${tmp_extract}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [[ -z "${source_dir}" || ! -x "${source_dir}/scripts/setup_ubuntu_agent.sh" ]]; then
+    rm -f "${tmp_archive}"
+    rm -rf "${tmp_extract}"
+    return 12
+  fi
+
+  rm -rf "${WORK_DIR}"
+  mv "${source_dir}" "${WORK_DIR}"
+  rm -f "${tmp_archive}"
+  rm -rf "${tmp_extract}"
 
   local cmd=(bash "${WORK_DIR}/scripts/setup_ubuntu_agent.sh" --backend-url "${BACKEND_URL}")
   if [[ -n "${ENROLLMENT_KEY}" ]]; then
@@ -608,17 +679,44 @@ EOF
 run_update() {
   sleep 4
 
-  if ! command -v git >/dev/null 2>&1; then
+  if ! command -v tar >/dev/null 2>&1; then
     return 10
   fi
 
-  if [[ -d "${WORK_DIR}/.git" ]]; then
-    git -C "${WORK_DIR}" fetch --depth 1 origin "${REPO_REF}"
-    git -C "${WORK_DIR}" checkout -B "${REPO_REF}" FETCH_HEAD
-  else
-    rm -rf "${WORK_DIR}"
-    git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" "${WORK_DIR}"
+  if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
+    return 11
   fi
+
+  local repo_http="${REPO_URL%/}"
+  if [[ "${repo_http}" == git@github.com:* ]]; then
+    repo_http="https://github.com/${repo_http#git@github.com:}"
+  fi
+  repo_http="${repo_http%.git}"
+  local archive_url="${repo_http}/archive/${REPO_REF}.tar.gz"
+  local tmp_archive
+  local tmp_extract
+  tmp_archive="$(mktemp /tmp/winpatchagent-selfupdate.XXXXXX.tar.gz)"
+  tmp_extract="$(mktemp -d /tmp/winpatchagent-selfupdate.XXXXXX)"
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "${tmp_archive}" "${archive_url}"
+  else
+    curl -fsSL "${archive_url}" -o "${tmp_archive}"
+  fi
+
+  tar -xzf "${tmp_archive}" -C "${tmp_extract}"
+  local source_dir
+  source_dir="$(find "${tmp_extract}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [[ -z "${source_dir}" || ! -x "${source_dir}/scripts/setup_macos_agent.sh" ]]; then
+    rm -f "${tmp_archive}"
+    rm -rf "${tmp_extract}"
+    return 12
+  fi
+
+  rm -rf "${WORK_DIR}"
+  mv "${source_dir}" "${WORK_DIR}"
+  rm -f "${tmp_archive}"
+  rm -rf "${tmp_extract}"
 
   local cmd=(bash "${WORK_DIR}/scripts/setup_macos_agent.sh" --backend-url "${BACKEND_URL}" --service-label "${SERVICE_LABEL}")
   if [[ -n "${ENROLLMENT_KEY}" ]]; then

@@ -1971,22 +1971,70 @@ if [[ "\${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-if ! command -v git >/dev/null 2>&1; then
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "git is required and apt-get was not found. Install git, then rerun." >&2
-    exit 1
-  fi
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "apt-get was not found. This installer currently supports Ubuntu/Debian." >&2
+  exit 1
+fi
 
+if ! command -v tar >/dev/null 2>&1 || (! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1); then
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates curl
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl wget tar
 fi
 
-if [[ -d "\${WORK_DIR}/.git" ]]; then
-  git -C "\${WORK_DIR}" fetch --depth 1 origin "\${REPO_REF}"
-  git -C "\${WORK_DIR}" checkout -B "\${REPO_REF}" FETCH_HEAD
-else
-  git clone --depth 1 --branch "\${REPO_REF}" "\${REPO_URL}" "\${WORK_DIR}"
+normalize_repo_url() {
+  local raw="\$1"
+  raw="\${raw%/}"
+  if [[ "\${raw}" == git@github.com:* ]]; then
+    raw="https://github.com/\${raw#git@github.com:}"
+  fi
+  raw="\${raw%.git}"
+  printf '%s' "\${raw}"
+}
+
+build_archive_url() {
+  local repo_http
+  repo_http="$(normalize_repo_url "\$1")"
+  printf '%s/archive/%s.tar.gz' "\${repo_http}" "\$2"
+}
+
+download_file() {
+  local url="\$1"
+  local output="\$2"
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "\${output}" "\${url}"
+    return 0
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "\${url}" -o "\${output}"
+    return 0
+  fi
+  return 1
+}
+
+ARCHIVE_URL="$(build_archive_url "\${REPO_URL}" "\${REPO_REF}")"
+TMP_ARCHIVE="$(mktemp /tmp/winpatchagent-src.XXXXXX.tar.gz)"
+TMP_EXTRACT="$(mktemp -d /tmp/winpatchagent-src.XXXXXX)"
+
+cleanup() {
+  rm -f "\${TMP_ARCHIVE}" || true
+  rm -rf "\${TMP_EXTRACT}" || true
+}
+trap cleanup EXIT
+
+if ! download_file "\${ARCHIVE_URL}" "\${TMP_ARCHIVE}"; then
+  echo "Failed to download source archive: \${ARCHIVE_URL}" >&2
+  exit 1
 fi
+
+tar -xzf "\${TMP_ARCHIVE}" -C "\${TMP_EXTRACT}"
+SOURCE_DIR="$(find "\${TMP_EXTRACT}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+if [[ -z "\${SOURCE_DIR}" || ! -x "\${SOURCE_DIR}/scripts/setup_ubuntu_agent.sh" ]]; then
+  echo "Downloaded archive did not contain scripts/setup_ubuntu_agent.sh" >&2
+  exit 1
+fi
+
+rm -rf "\${WORK_DIR}"
+mv "\${SOURCE_DIR}" "\${WORK_DIR}"
 
 bash "\${WORK_DIR}/scripts/setup_ubuntu_agent.sh" \\
   --backend-url "\${BACKEND_URL}" \\
@@ -2024,18 +2072,68 @@ function Require-Command {
     }
 }
 
-Require-Command "git" "Install Git for Windows and rerun."
 Require-Command "dotnet" "Install .NET SDK 8+ and rerun."
+
+function Normalize-RepoHttpUrl {
+    param([string]\$RawUrl)
+
+    \$url = [string](\$RawUrl ?? "")
+    \$url = \$url.Trim()
+    if ([string]::IsNullOrWhiteSpace(\$url)) {
+        throw "Repo URL is empty."
+    }
+
+    \$url = \$url.TrimEnd("/")
+    if (\$url -match "^git@github\\.com:(.+?)(?:\\.git)?\$") {
+        return "https://github.com/\$($Matches[1])"
+    }
+
+    if (\$url.EndsWith(".git", [System.StringComparison]::OrdinalIgnoreCase)) {
+        \$url = \$url.Substring(0, \$url.Length - 4)
+    }
+
+    if (\$url -notmatch "^https?://") {
+        throw "Unsupported repo URL format: \$RawUrl"
+    }
+
+    return \$url
+}
+
+function Build-ArchiveUrl {
+    param([string]\$RawRepoUrl, [string]\$RawRepoRef)
+
+    \$repoHttpUrl = Normalize-RepoHttpUrl -RawUrl \$RawRepoUrl
+    return "\$repoHttpUrl/archive/\$RawRepoRef.zip"
+}
 
 New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
 New-Item -ItemType Directory -Path \$StateDir -Force | Out-Null
+\$WorkParent = Split-Path -Parent \$WorkDir
+if (-not [string]::IsNullOrWhiteSpace(\$WorkParent)) {
+    New-Item -ItemType Directory -Path \$WorkParent -Force | Out-Null
+}
+\$ArchiveUrl = Build-ArchiveUrl -RawRepoUrl \$RepoUrl -RawRepoRef \$RepoRef
+\$ArchivePath = Join-Path \$env:TEMP ("winpatchagent-src-" + [guid]::NewGuid().ToString("N") + ".zip")
+\$ExtractRoot = Join-Path \$env:TEMP ("winpatchagent-src-" + [guid]::NewGuid().ToString("N"))
 
-if (Test-Path "\$WorkDir\\.git") {
-    git -C \$WorkDir fetch --depth 1 origin \$RepoRef
-    git -C \$WorkDir checkout -B \$RepoRef FETCH_HEAD
-} else {
-    New-Item -ItemType Directory -Path \$WorkDir -Force | Out-Null
-    git clone --depth 1 --branch \$RepoRef \$RepoUrl \$WorkDir
+try {
+    Invoke-WebRequest -UseBasicParsing -Uri \$ArchiveUrl -OutFile \$ArchivePath
+    New-Item -ItemType Directory -Path \$ExtractRoot -Force | Out-Null
+    Expand-Archive -Path \$ArchivePath -DestinationPath \$ExtractRoot -Force
+
+    \$ExtractedDir = Get-ChildItem -Path \$ExtractRoot -Directory | Select-Object -First 1
+    if (-not \$ExtractedDir) {
+        throw "Downloaded archive did not contain source files."
+    }
+
+    if (Test-Path \$WorkDir) {
+        Remove-Item -Path \$WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Move-Item -Path \$ExtractedDir.FullName -Destination \$WorkDir
+} finally {
+    Remove-Item -Path \$ArchivePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path \$ExtractRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 \$ProjectPath = Join-Path \$WorkDir "src\\PatchAgent.Service\\PatchAgent.Service.csproj"
@@ -2142,12 +2240,17 @@ if [[ "\${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-for cmd in git curl launchctl; do
+for cmd in launchctl tar; do
   if ! command -v "\${cmd}" >/dev/null 2>&1; then
     echo "Missing required command: \${cmd}" >&2
     exit 1
   fi
 done
+
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  echo "Either curl or wget is required on macOS." >&2
+  exit 1
+fi
 
 if ! command -v dotnet >/dev/null 2>&1; then
   for candidate in /opt/homebrew/bin/dotnet /usr/local/bin/dotnet /usr/local/share/dotnet/dotnet; do
@@ -2163,12 +2266,52 @@ if ! command -v dotnet >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -d "\${WORK_DIR}/.git" ]]; then
-  git -C "\${WORK_DIR}" fetch --depth 1 origin "\${REPO_REF}"
-  git -C "\${WORK_DIR}" checkout -B "\${REPO_REF}" FETCH_HEAD
-else
-  git clone --depth 1 --branch "\${REPO_REF}" "\${REPO_URL}" "\${WORK_DIR}"
+normalize_repo_url() {
+  local raw="\$1"
+  raw="\${raw%/}"
+  if [[ "\${raw}" == git@github.com:* ]]; then
+    raw="https://github.com/\${raw#git@github.com:}"
+  fi
+  raw="\${raw%.git}"
+  printf '%s' "\${raw}"
+}
+
+build_archive_url() {
+  local repo_http
+  repo_http="$(normalize_repo_url "\$1")"
+  printf '%s/archive/%s.tar.gz' "\${repo_http}" "\$2"
+}
+
+download_file() {
+  local url="\$1"
+  local output="\$2"
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "\${output}" "\${url}"
+    return 0
+  fi
+  curl -fsSL "\${url}" -o "\${output}"
+}
+
+ARCHIVE_URL="$(build_archive_url "\${REPO_URL}" "\${REPO_REF}")"
+TMP_ARCHIVE="$(mktemp /tmp/winpatchagent-src.XXXXXX.tar.gz)"
+TMP_EXTRACT="$(mktemp -d /tmp/winpatchagent-src.XXXXXX)"
+
+cleanup() {
+  rm -f "\${TMP_ARCHIVE}" || true
+  rm -rf "\${TMP_EXTRACT}" || true
+}
+trap cleanup EXIT
+
+download_file "\${ARCHIVE_URL}" "\${TMP_ARCHIVE}"
+tar -xzf "\${TMP_ARCHIVE}" -C "\${TMP_EXTRACT}"
+SOURCE_DIR="$(find "\${TMP_EXTRACT}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+if [[ -z "\${SOURCE_DIR}" || ! -x "\${SOURCE_DIR}/scripts/setup_macos_agent.sh" ]]; then
+  echo "Downloaded archive did not contain scripts/setup_macos_agent.sh" >&2
+  exit 1
 fi
+
+rm -rf "\${WORK_DIR}"
+mv "\${SOURCE_DIR}" "\${WORK_DIR}"
 
 bash "\${WORK_DIR}/scripts/setup_macos_agent.sh" \\
   --backend-url "\${BACKEND_URL}" \\
