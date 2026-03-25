@@ -474,6 +474,7 @@
                             <option value="windows_powershell_script">Windows PowerShell script</option>
                             <option value="windows_powershell_script_url">Windows PowerShell script URL</option>
                             <option value="windows_powershell_script_gcpw">Windows GCPW install script</option>
+                            <option value="windows_powershell_script_splashtop">Windows Splashtop install script</option>
                             <option value="macos_software_update">macOS software update</option>
                         </select>
                     </div>
@@ -619,6 +620,15 @@
             },
             policy: defaultPolicy()
         },
+        windows_powershell_script_splashtop: {
+            type: "windows_powershell_script",
+            payload: {
+                windows_script: {
+                    script: splashtopInstallTemplate()
+                }
+            },
+            policy: defaultPolicy()
+        },
         macos_software_update: {
             type: "macos_software_update",
             payload: {
@@ -739,6 +749,34 @@
             "New-Item -Path 'HKLM:\\Software\\Google\\GCPW' -Force | Out-Null",
             "New-ItemProperty -Path 'HKLM:\\Software\\Google\\GCPW' -Name 'domains_allowed_to_login' -Value $allowedDomains -PropertyType String -Force | Out-Null",
             "Write-Host 'GCPW installation complete.'"
+        ].join("\n");
+    }
+
+    function splashtopInstallTemplate() {
+        return [
+            "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
+            "",
+            "# Download your deployable Splashtop Streamer MSI from my.splashtop.com > Management > Deployment.",
+            "$msiUrl = 'https://example.com/Splashtop_Streamer_Windows_DEPLOY_INSTALLER.msi'",
+            "$msiPath = Join-Path $env:TEMP 'splashtop_streamer_deploy.msi'",
+            "Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath",
+            "",
+            "# Optional: set your Splashtop deployment code (typically 12 digits). Leave blank if the MSI already embeds it.",
+            "$deploymentCode = 'REPLACE_WITH_SPLASHTOP_DEPLOY_CODE'",
+            "$userInfoParts = @('hidewindow=1', 'confirm_d=0')",
+            "if (-not [string]::IsNullOrWhiteSpace($deploymentCode) -and $deploymentCode -notlike 'REPLACE_*') {",
+            "    $userInfoParts = @(\"dcode=$deploymentCode\") + $userInfoParts",
+            "} else {",
+            "    Write-Host 'No deployment code provided; assuming MSI already has embedded deployment code.'",
+            "}",
+            "",
+            "$userInfo = [string]::Join(',', $userInfoParts)",
+            "$installArgs = \"/i `\"$msiPath`\" /qn /norestart USERINFO=`\"$userInfo`\"\"",
+            "$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $installArgs -Wait -PassThru",
+            "if ($proc.ExitCode -ne 0) { throw \"Splashtop install failed with exit code $($proc.ExitCode).\" }",
+            "",
+            "Write-Host 'Splashtop Streamer installation complete.'"
         ].join("\n");
     }
 

@@ -99,7 +99,7 @@ Admin pages:
 - `/admin/install-agent` enrollment key + installer generation
 - `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue Windows PowerShell script jobs for Windows agents, and manage automation profiles with recurring schedules and run-now execution.
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue Windows PowerShell script jobs for Windows agents (including GCPW and Splashtop script templates), and manage automation profiles with recurring schedules and run-now execution.
 
 Suggested nginx site:
 

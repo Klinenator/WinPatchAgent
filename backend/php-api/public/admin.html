@@ -945,6 +945,16 @@
                         <input id="windowsScriptUrlInput" type="url" placeholder="https://example.com/provision.ps1">
                     </div>
                 </div>
+                <div class="field-grid">
+                    <div class="field-block">
+                        <label for="splashtopInstallerUrlInput">Splashtop MSI URL (template helper)</label>
+                        <input id="splashtopInstallerUrlInput" type="url" placeholder="https://example.com/Splashtop_Streamer_Windows_DEPLOY_INSTALLER.msi">
+                    </div>
+                    <div class="field-block">
+                        <label for="splashtopDeploymentCodeInput">Splashtop Deploy Code (template helper)</label>
+                        <input id="splashtopDeploymentCodeInput" type="text" placeholder="123456789012">
+                    </div>
+                </div>
                 <div class="field-block">
                     <label for="windowsScriptInput">PowerShell Script (Windows agents)</label>
                     <textarea id="windowsScriptInput" placeholder="$ErrorActionPreference = 'Stop'"></textarea>
@@ -952,6 +962,7 @@
                 <div class="button-row">
                     <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue PowerShell Script</button>
                     <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
+                    <button id="loadSplashtopTemplateBtn" type="button" class="btn subtle">Load Splashtop Template</button>
                 </div>
                 <div id="agentActionStatus" class="status-line"></div>
             </section>
@@ -1015,6 +1026,7 @@
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
     const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
     const loadGcpwTemplateBtn = document.getElementById("loadGcpwTemplateBtn");
+    const loadSplashtopTemplateBtn = document.getElementById("loadSplashtopTemplateBtn");
     const refreshSelectedInventoryBtn = document.getElementById("refreshSelectedInventoryBtn");
 
     const selectedAgentIdInput = document.getElementById("selectedAgentId");
@@ -1023,6 +1035,8 @@
     const windowsScriptCorrelationIdInput = document.getElementById("windowsScriptCorrelationId");
     const windowsScriptUrlInput = document.getElementById("windowsScriptUrlInput");
     const windowsScriptInput = document.getElementById("windowsScriptInput");
+    const splashtopInstallerUrlInput = document.getElementById("splashtopInstallerUrlInput");
+    const splashtopDeploymentCodeInput = document.getElementById("splashtopDeploymentCodeInput");
     const agentSearchInput = document.getElementById("agentSearchInput");
     const availabilityFilterInput = document.getElementById("availabilityFilter");
 
@@ -1232,6 +1246,20 @@
             windowsScriptCorrelationIdInput.value = "windows-gcpw-" + Date.now();
         }
         setStatus(agentActionStatus, "Loaded GCPW install template. Review domain settings before queueing.", "");
+    });
+
+    loadSplashtopTemplateBtn.addEventListener("click", () => {
+        windowsScriptUrlInput.value = "";
+
+        const installerUrl = splashtopInstallerUrlInput.value.trim() || "https://example.com/Splashtop_Streamer_Windows_DEPLOY_INSTALLER.msi";
+        const deploymentCode = splashtopDeploymentCodeInput.value.trim() || "REPLACE_WITH_SPLASHTOP_DEPLOY_CODE";
+        windowsScriptInput.value = buildSplashtopInstallTemplate(installerUrl, deploymentCode);
+
+        if (!windowsScriptCorrelationIdInput.value.trim()) {
+            windowsScriptCorrelationIdInput.value = "windows-splashtop-" + Date.now();
+        }
+
+        setStatus(agentActionStatus, "Loaded Splashtop install template. Confirm MSI URL and deploy code before queueing.", "");
     });
 
     refreshSelectedInventoryBtn.addEventListener("click", async () => {
@@ -2012,6 +2040,41 @@
             "New-ItemProperty -Path 'HKLM:\\Software\\Google\\GCPW' -Name 'domains_allowed_to_login' -Value $allowedDomains -PropertyType String -Force | Out-Null",
             "Write-Host 'GCPW installation complete.'"
         ].join("\n");
+    }
+
+    function buildSplashtopInstallTemplate(installerUrl, deploymentCode) {
+        const escapedInstallerUrl = escapePowerShellSingleQuoted(installerUrl);
+        const escapedDeploymentCode = escapePowerShellSingleQuoted(deploymentCode);
+
+        return [
+            "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
+            "",
+            "# Download your deployable Splashtop Streamer MSI from my.splashtop.com > Management > Deployment.",
+            "$msiUrl = '" + escapedInstallerUrl + "'",
+            "$msiPath = Join-Path $env:TEMP 'splashtop_streamer_deploy.msi'",
+            "Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath",
+            "",
+            "# Optional: Splashtop deployment code (typically 12 digits). Leave blank if your MSI already embeds it.",
+            "$deploymentCode = '" + escapedDeploymentCode + "'",
+            "$userInfoParts = @('hidewindow=1', 'confirm_d=0')",
+            "if (-not [string]::IsNullOrWhiteSpace($deploymentCode) -and $deploymentCode -notlike 'REPLACE_*') {",
+            "    $userInfoParts = @(\"dcode=$deploymentCode\") + $userInfoParts",
+            "} else {",
+            "    Write-Host 'No deployment code provided; assuming MSI already has embedded deployment code.'",
+            "}",
+            "",
+            "$userInfo = [string]::Join(',', $userInfoParts)",
+            "$installArgs = \"/i `\"$msiPath`\" /qn /norestart USERINFO=`\"$userInfo`\"\"",
+            "$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $installArgs -Wait -PassThru",
+            "if ($proc.ExitCode -ne 0) { throw \"Splashtop install failed with exit code $($proc.ExitCode).\" }",
+            "",
+            "Write-Host 'Splashtop Streamer installation complete.'"
+        ].join("\n");
+    }
+
+    function escapePowerShellSingleQuoted(value) {
+        return String(value || "").replace(/'/g, "''");
     }
 
     function availabilityState(agent) {
