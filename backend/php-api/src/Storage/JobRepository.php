@@ -358,6 +358,19 @@ final class JobRepository
             ];
         }
 
+        if ($typeNormalized === 'agent_self_update' || $typeNormalized === 'self_update') {
+            $selfUpdate = is_array($payload['agent_self_update'] ?? null)
+                ? $payload['agent_self_update']
+                : (is_array($payload['self_update'] ?? null) ? $payload['self_update'] : []);
+
+            return [
+                'agent_self_update' => [
+                    'repo_url' => trim((string) ($selfUpdate['repo_url'] ?? '')),
+                    'repo_ref' => trim((string) ($selfUpdate['repo_ref'] ?? $selfUpdate['branch'] ?? '')),
+                ],
+            ];
+        }
+
         return $this->normalizeRecursive($payload);
     }
 

@@ -37,4 +37,8 @@ public sealed class JobAssignment
     public string MacShellScript { get; set; } = string.Empty;
 
     public string MacShellScriptUrl { get; set; } = string.Empty;
+
+    public string AgentSelfUpdateRepoUrl { get; set; } = string.Empty;
+
+    public string AgentSelfUpdateRepoRef { get; set; } = string.Empty;
 }

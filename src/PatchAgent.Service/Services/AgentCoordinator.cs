@@ -204,7 +204,9 @@ public sealed class AgentCoordinator
             WindowsPowerShellScript = job.WindowsPowerShellScript,
             WindowsPowerShellScriptUrl = job.WindowsPowerShellScriptUrl,
             MacShellScript = job.MacShellScript,
-            MacShellScriptUrl = job.MacShellScriptUrl
+            MacShellScriptUrl = job.MacShellScriptUrl,
+            AgentSelfUpdateRepoUrl = job.AgentSelfUpdateRepoUrl,
+            AgentSelfUpdateRepoRef = job.AgentSelfUpdateRepoRef
         };
 
         await _policyClient.AcknowledgeJobAsync(

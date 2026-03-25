@@ -5,6 +5,7 @@ namespace PatchAgent.Service.Services;
 
 public sealed class DispatchingJobExecutor : IJobExecutor
 {
+    private readonly AgentSelfUpdateJobExecutor _agentSelfUpdateJobExecutor;
     private readonly LinuxAptJobExecutor _aptJobExecutor;
     private readonly WindowsUpdateJobExecutor _windowsUpdateJobExecutor;
     private readonly WindowsPowerShellScriptJobExecutor _windowsPowerShellScriptJobExecutor;
@@ -13,6 +14,7 @@ public sealed class DispatchingJobExecutor : IJobExecutor
     private readonly StubJobExecutor _stubJobExecutor;
 
     public DispatchingJobExecutor(
+        AgentSelfUpdateJobExecutor agentSelfUpdateJobExecutor,
         LinuxAptJobExecutor aptJobExecutor,
         WindowsUpdateJobExecutor windowsUpdateJobExecutor,
         WindowsPowerShellScriptJobExecutor windowsPowerShellScriptJobExecutor,
@@ -20,6 +22,7 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         MacShellScriptJobExecutor macShellScriptJobExecutor,
         StubJobExecutor stubJobExecutor)
     {
+        _agentSelfUpdateJobExecutor = agentSelfUpdateJobExecutor;
         _aptJobExecutor = aptJobExecutor;
         _windowsUpdateJobExecutor = windowsUpdateJobExecutor;
         _windowsPowerShellScriptJobExecutor = windowsPowerShellScriptJobExecutor;
@@ -30,6 +33,11 @@ public sealed class DispatchingJobExecutor : IJobExecutor
 
     public async Task<bool> TryAdvanceAsync(AgentState state, CancellationToken cancellationToken)
     {
+        if (await _agentSelfUpdateJobExecutor.TryAdvanceAsync(state, cancellationToken))
+        {
+            return true;
+        }
+
         if (await _aptJobExecutor.TryAdvanceAsync(state, cancellationToken))
         {
             return true;

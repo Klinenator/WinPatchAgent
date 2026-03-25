@@ -11,12 +11,16 @@ set -euo pipefail
 APP_ROOT="/var/www/WinPatchAgent"
 API_ROOT="$APP_ROOT/backend/php-api"
 BRANCH="main"
+SSH_KEY="${HOME}/.ssh/winpatchagentkey"
+SSH_CMD="ssh -i ${SSH_KEY} -o IdentitiesOnly=yes"
 
-# If you use SSH remotes and hit auth issues, switch to HTTPS once:
-# sudo git -C "$APP_ROOT" remote set-url origin https://github.com/Klinenator/WinPatchAgent.git
+if [ ! -r "$SSH_KEY" ]; then
+  echo "Missing SSH key: $SSH_KEY"
+  exit 1
+fi
 
 sudo git config --global --add safe.directory "$APP_ROOT" || true
-sudo git -C "$APP_ROOT" pull origin "$BRANCH"
+sudo GIT_SSH_COMMAND="$SSH_CMD" git -C "$APP_ROOT" pull origin "$BRANCH"
 
 sudo chown -R root:www-data "$APP_ROOT"
 sudo find "$APP_ROOT" -type d -exec chmod 750 {} \;
@@ -49,8 +53,14 @@ set -euo pipefail
 APP_ROOT="/var/www/WinPatchAgent"
 API_ROOT="$APP_ROOT/backend/php-api"
 BRANCH="main"
+SSH_KEY="${HOME}/.ssh/winpatchagentkey"
+SSH_CMD="ssh -i ${SSH_KEY} -o IdentitiesOnly=yes"
+if [ ! -r "$SSH_KEY" ]; then
+  echo "Missing SSH key: $SSH_KEY"
+  exit 1
+fi
 sudo git config --global --add safe.directory "$APP_ROOT" || true
-sudo git -C "$APP_ROOT" pull origin "$BRANCH"
+sudo GIT_SSH_COMMAND="$SSH_CMD" git -C "$APP_ROOT" pull origin "$BRANCH"
 sudo chown -R root:www-data "$APP_ROOT"
 sudo find "$APP_ROOT" -type d -exec chmod 750 {} \;
 sudo find "$APP_ROOT" -type f -exec chmod 640 {} \;

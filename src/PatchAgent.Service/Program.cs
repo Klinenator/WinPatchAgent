@@ -29,6 +29,7 @@ builder.Services.AddSingleton<ITelemetryQueue, FileTelemetryQueue>();
 builder.Services.AddSingleton<IAgentIdentityManager, BootstrapIdentityManager>();
 builder.Services.AddSingleton<IInventoryCollector, SystemInventoryCollector>();
 builder.Services.AddSingleton<StubJobExecutor>();
+builder.Services.AddSingleton<AgentSelfUpdateJobExecutor>();
 builder.Services.AddSingleton<LinuxAptJobExecutor>();
 builder.Services.AddSingleton<WindowsUpdateJobExecutor>();
 builder.Services.AddSingleton<WindowsPowerShellScriptJobExecutor>();

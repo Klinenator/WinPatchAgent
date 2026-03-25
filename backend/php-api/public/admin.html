@@ -869,7 +869,7 @@
 
             <section class="panel">
                 <h2>Selected Agent</h2>
-                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue packages, run scripts, or connect.</p>
+                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue packages, self-update, run scripts, or connect.</p>
 
                 <div class="field-grid">
                     <div class="field-block">
@@ -883,6 +883,7 @@
                 </div>
                 <div class="button-row">
                     <button id="renameAgentBtn" type="button" class="btn subtle">Save Agent Name</button>
+                    <button id="queueSelfUpdateBtn" type="button" class="btn subtle">Queue Agent Self-Update</button>
                 </div>
 
                 <div class="field-grid">
@@ -1028,6 +1029,7 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshBtn = document.getElementById("refreshBtn");
     const renameAgentBtn = document.getElementById("renameAgentBtn");
+    const queueSelfUpdateBtn = document.getElementById("queueSelfUpdateBtn");
     const installListedUpdatesBtn = document.getElementById("installListedUpdatesBtn");
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
     const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
@@ -1112,6 +1114,39 @@
                 body: JSON.stringify({ display_name: displayName })
             });
             setStatus(agentActionStatus, "Agent name saved.", "success");
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
+        }
+    });
+
+    queueSelfUpdateBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        const selectedAgent = findAgent(selectedAgentId);
+        if (!selectedAgent) {
+            setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+            return;
+        }
+
+        const deviceType = getDeviceType(selectedAgent).value;
+        if (deviceType !== "windows" && deviceType !== "linux" && deviceType !== "mac") {
+            setStatus(agentActionStatus, "Self-update is supported only for Windows, Linux, or macOS agents.", "error");
+            return;
+        }
+
+        try {
+            const queued = await queueAgentSelfUpdateJob(selectedAgent);
+            const response = queued.response;
+            const jobId = response?.job?.job_id || "(unknown)";
+            if (response?.duplicate === true) {
+                setStatus(agentActionStatus, "Matching self-update job already active: " + jobId, "success");
+            } else {
+                setStatus(agentActionStatus, "Self-update job queued: " + jobId, "success");
+            }
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
@@ -1536,7 +1571,7 @@
 
     function syncSelectedAgent() {
         if (!selectedAgentId) {
-            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, run scripts, or connect.";
+            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, self-update, run scripts, or connect.";
             renderPatchTableForSelectedAgent();
             return;
         }
@@ -2207,6 +2242,28 @@
         });
 
         return { response: response, type: type };
+    }
+
+    async function queueAgentSelfUpdateJob(agent) {
+        const agentRecordId = String(agent.agent_record_id || "");
+        const correlationRaw = updateCorrelationIdInput.value.trim();
+        const correlationId = correlationRaw || ("agent-self-update-" + Date.now());
+        const response = await apiFetch("/v1/admin/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                target_agent_id: agentRecordId,
+                type: "agent_self_update",
+                correlation_id: correlationId,
+                payload: {
+                    agent_self_update: {
+                        repo_ref: "main"
+                    }
+                },
+                policy: {}
+            })
+        });
+
+        return { response: response, type: "agent_self_update" };
     }
 
     async function queueWindowsScriptJob(agent, scriptBody, scriptUrl) {

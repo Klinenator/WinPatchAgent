@@ -245,7 +245,9 @@ public sealed class HttpPolicyClient : IPolicyClient
             WindowsPowerShellScript = ReadWindowsPowerShellScript(response.Job.Payload),
             WindowsPowerShellScriptUrl = ReadWindowsPowerShellScriptUrl(response.Job.Payload),
             MacShellScript = ReadMacShellScript(response.Job.Payload),
-            MacShellScriptUrl = ReadMacShellScriptUrl(response.Job.Payload)
+            MacShellScriptUrl = ReadMacShellScriptUrl(response.Job.Payload),
+            AgentSelfUpdateRepoUrl = ReadAgentSelfUpdateRepoUrl(response.Job.Payload),
+            AgentSelfUpdateRepoRef = ReadAgentSelfUpdateRepoRef(response.Job.Payload)
         };
     }
 
@@ -651,6 +653,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         return string.Empty;
     }
 
+    private static string ReadAgentSelfUpdateRepoUrl(JsonElement? payload)
+    {
+        if (TryGetAgentSelfUpdateValue(payload, "repo_url", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var repoUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(repoUrl))
+            {
+                return repoUrl.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ReadAgentSelfUpdateRepoRef(JsonElement? payload)
+    {
+        if (TryGetAgentSelfUpdateValue(payload, "repo_ref", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var repoRef = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(repoRef))
+            {
+                return repoRef.Trim();
+            }
+        }
+
+        if (TryGetAgentSelfUpdateValue(payload, "branch", out value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var repoRef = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(repoRef))
+            {
+                return repoRef.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static List<string> ReadWindowsKbIds(JsonElement? payload)
     {
         var kbSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -964,6 +1003,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!scriptSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetAgentSelfUpdateValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement selfUpdateSection;
+        if (payloadObject.TryGetProperty("agent_self_update", out var selfUpdate)
+            && selfUpdate.ValueKind == JsonValueKind.Object)
+        {
+            selfUpdateSection = selfUpdate;
+        }
+        else if (payloadObject.TryGetProperty("self_update", out var selfUpdateAlias)
+                 && selfUpdateAlias.ValueKind == JsonValueKind.Object)
+        {
+            selfUpdateSection = selfUpdateAlias;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!selfUpdateSection.TryGetProperty(key, out var child))
         {
             return false;
         }
