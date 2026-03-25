@@ -2120,6 +2120,8 @@ BASH;
         $windowsPackageUrlLiteral = $this->powershellLiteral($this->config->windowsAgentPackageUrl);
         $splashtopMsiUrlLiteral = $this->powershellLiteral($this->config->windowsSplashtopMsiUrl);
         $splashtopDeploymentCodeLiteral = $this->powershellLiteral($this->config->windowsSplashtopDeploymentCode);
+        $windowsDisableRemovableStorageLiteral = $this->config->windowsDisableRemovableStorageOnInstall ? '$true' : '$false';
+        $windowsEnsureDefenderLiteral = $this->config->windowsEnsureDefenderOnInstall ? '$true' : '$false';
 
         return <<<POWERSHELL
 \$ErrorActionPreference = "Stop"
@@ -2132,6 +2134,8 @@ BASH;
 \$WindowsAgentPackageUrl = {$windowsPackageUrlLiteral}
 \$SplashtopMsiUrl = {$splashtopMsiUrlLiteral}
 \$SplashtopDeploymentCode = {$splashtopDeploymentCodeLiteral}
+\$DisableRemovableStorageOnInstall = {$windowsDisableRemovableStorageLiteral}
+\$EnsureDefenderOnInstall = {$windowsEnsureDefenderLiteral}
 \$WorkDir = "C:\\ProgramData\\WinPatchAgent\\src"
 \$InstallDir = "C:\\Program Files\\WinPatchAgent"
 \$ServiceName = "PatchAgentSvc"
@@ -2439,6 +2443,94 @@ function Install-Splashtop {
     }
 }
 
+function Apply-RemovableStoragePolicy {
+    if (-not \$DisableRemovableStorageOnInstall) {
+        Write-Host "SOC2 hardening: removable storage policy skipped by configuration."
+        return
+    }
+
+    try {
+        \$policyPath = "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\RemovableStorageDevices"
+        New-Item -Path \$policyPath -Force | Out-Null
+        New-ItemProperty -Path \$policyPath -Name "Deny_All" -PropertyType DWord -Value 1 -Force | Out-Null
+        Write-Host "SOC2 hardening: removable storage access disabled (Deny_All=1)."
+    } catch {
+        Write-Warning ("SOC2 hardening: failed to apply removable storage policy: {0}" -f \$_.Exception.Message)
+    }
+}
+
+function Ensure-WindowsDefender {
+    if (-not \$EnsureDefenderOnInstall) {
+        Write-Host "SOC2 hardening: Windows Defender enforcement skipped by configuration."
+        return
+    }
+
+    \$defenderService = Get-Service -Name "WinDefend" -ErrorAction SilentlyContinue
+
+    if (-not \$defenderService) {
+        \$featureInstalled = \$false
+
+        if (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue) {
+            \$featureCandidates = @("Windows-Defender", "Windows-Defender-Features")
+            foreach (\$featureName in \$featureCandidates) {
+                try {
+                    \$feature = Get-WindowsFeature -Name \$featureName -ErrorAction Stop
+                    if (\$feature -and -not \$feature.Installed) {
+                        Install-WindowsFeature -Name \$featureName -IncludeManagementTools -ErrorAction Stop | Out-Null
+                    }
+                    \$featureInstalled = \$true
+                    break
+                } catch {
+                }
+            }
+        } elseif (Get-Command Add-WindowsFeature -ErrorAction SilentlyContinue) {
+            \$featureCandidates = @("Windows-Defender", "Windows-Defender-Features")
+            foreach (\$featureName in \$featureCandidates) {
+                try {
+                    Add-WindowsFeature -Name \$featureName -ErrorAction Stop | Out-Null
+                    \$featureInstalled = \$true
+                    break
+                } catch {
+                }
+            }
+        }
+
+        if (\$featureInstalled) {
+            Start-Sleep -Seconds 2
+            \$defenderService = Get-Service -Name "WinDefend" -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (-not \$defenderService) {
+        Write-Warning "SOC2 hardening: Windows Defender service (WinDefend) was not found after install attempts."
+        return
+    }
+
+    try {
+        Set-Service -Name "WinDefend" -StartupType Automatic -ErrorAction Stop
+    } catch {
+        Write-Warning ("SOC2 hardening: failed to set WinDefend startup type: {0}" -f \$_.Exception.Message)
+    }
+
+    try {
+        if ((Get-Service -Name "WinDefend").Status -ne "Running") {
+            Start-Service -Name "WinDefend" -ErrorAction Stop
+        }
+    } catch {
+        Write-Warning ("SOC2 hardening: failed to start WinDefend: {0}" -f \$_.Exception.Message)
+    }
+
+    if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+        try {
+            Set-MpPreference -DisableRealtimeMonitoring \$false -ErrorAction Stop
+        } catch {
+            Write-Warning ("SOC2 hardening: could not set Defender real-time monitoring preference: {0}" -f \$_.Exception.Message)
+        }
+    }
+
+    Write-Host "SOC2 hardening: Windows Defender service verified."
+}
+
 function Ensure-ServiceAndStart {
     \$exePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
     if (-not (Test-Path \$exePath)) {
@@ -2462,6 +2554,8 @@ if (\$InstallMode -eq "source") {
 
 Write-AgentConfig
 Install-Splashtop
+Apply-RemovableStoragePolicy
+Ensure-WindowsDefender
 Ensure-ServiceAndStart
 
 Write-Host "Install complete."

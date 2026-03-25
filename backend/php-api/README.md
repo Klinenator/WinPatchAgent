@@ -72,6 +72,8 @@ Environment variables:
 - `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL`: optional Splashtop Windows deploy installer URL; supports Easy Deployment `.exe` and deployable `.msi`. When set, `/install/windows.ps1` auto-installs Splashtop during agent install.
 - `PATCH_API_WINDOWS_SPLASHTOP_DEPLOY_CODE`: optional Splashtop deployment code used with `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` (leave empty if the installer embeds deployment settings)
 - `PATCH_API_WINDOWS_AGENT_PACKAGE_URL`: prebuilt Windows agent zip URL used by `/install/windows.ps1` and Windows self-update jobs (default `https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip`)
+- `PATCH_API_WINDOWS_DISABLE_REMOVABLE_STORAGE_ON_INSTALL`: whether Windows installer applies removable storage deny policy (`HKLM\SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\Deny_All=1`) (default `true`)
+- `PATCH_API_WINDOWS_ENSURE_DEFENDER_ON_INSTALL`: whether Windows installer verifies/enables the Defender service (`WinDefend`) during install (default `true`)
 - `PATCH_API_LINUX_CVE_LOOKUP_ENABLED`: enable/disable Linux CVE enrichment on inventory views (default `true`)
 - `PATCH_API_LINUX_CVE_CACHE_TTL_SECONDS`: freshness window for cached OSV CVE results (default `21600`)
 - `PATCH_API_LINUX_CVE_MAX_PACKAGE_LOOKUPS`: max Linux packages queried on a single cache-miss refresh (default `25`)

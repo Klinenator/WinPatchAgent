@@ -25,6 +25,8 @@ final class Config
         public readonly string $windowsSplashtopMsiUrl,
         public readonly string $windowsSplashtopDeploymentCode,
         public readonly string $windowsAgentPackageUrl,
+        public readonly bool $windowsDisableRemovableStorageOnInstall,
+        public readonly bool $windowsEnsureDefenderOnInstall,
         public readonly bool $linuxCveLookupEnabled,
         public readonly int $linuxCveCacheTtlSeconds,
         public readonly int $linuxCveMaxPackageLookups,
@@ -61,6 +63,14 @@ final class Config
             windowsAgentPackageUrl: self::env(
                 'PATCH_API_WINDOWS_AGENT_PACKAGE_URL',
                 'https://github.com/Klinenator/WinPatchAgent/releases/latest/download/winpatchagent-windows-x64.zip'
+            ),
+            windowsDisableRemovableStorageOnInstall: self::envBool(
+                'PATCH_API_WINDOWS_DISABLE_REMOVABLE_STORAGE_ON_INSTALL',
+                true
+            ),
+            windowsEnsureDefenderOnInstall: self::envBool(
+                'PATCH_API_WINDOWS_ENSURE_DEFENDER_ON_INSTALL',
+                true
             ),
             linuxCveLookupEnabled: self::envBool('PATCH_API_LINUX_CVE_LOOKUP_ENABLED', true),
             linuxCveCacheTtlSeconds: max(300, self::envInt('PATCH_API_LINUX_CVE_CACHE_TTL_SECONDS', 21600)),
