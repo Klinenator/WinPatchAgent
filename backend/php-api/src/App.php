@@ -2765,6 +2765,18 @@ function Install-FromSource {
     Clear-InstallDir
     \$dotnetExe = Ensure-DotnetSdk8
     & \$dotnetExe publish \$projectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
+    if (\$LASTEXITCODE -eq 0) {
+        return
+    }
+
+    \$publishExitCode = \$LASTEXITCODE
+    if (-not [string]::IsNullOrWhiteSpace(\$WindowsAgentPackageUrl)) {
+        Write-Warning ("Source build failed with exit code {0}. Falling back to prebuilt package URL." -f \$publishExitCode)
+        Install-FromPrebuilt
+        return
+    }
+
+    throw ("dotnet publish failed with exit code {0} and no prebuilt package fallback URL is configured." -f \$publishExitCode)
 }
 
 function Write-AgentConfig {
