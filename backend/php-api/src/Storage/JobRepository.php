@@ -340,6 +340,24 @@ final class JobRepository
             ];
         }
 
+        if ($typeNormalized === 'macos_shell_script'
+            || $typeNormalized === 'mac_shell_script'
+            || $typeNormalized === 'macos_run_script') {
+            $script = is_array($payload['macos_script'] ?? null)
+                ? $payload['macos_script']
+                : (
+                    is_array($payload['mac_script'] ?? null)
+                        ? $payload['mac_script']
+                        : (is_array($payload['shell_script'] ?? null) ? $payload['shell_script'] : [])
+                );
+            return [
+                'macos_script' => [
+                    'script' => trim((string) ($script['script'] ?? '')),
+                    'script_url' => trim((string) ($script['script_url'] ?? '')),
+                ],
+            ];
+        }
+
         return $this->normalizeRecursive($payload);
     }
 

@@ -202,7 +202,9 @@ public sealed class AgentCoordinator
             MacOsInstallAll = job.MacOsInstallAll,
             MacOsUpdateLabels = job.MacOsUpdateLabels.ToList(),
             WindowsPowerShellScript = job.WindowsPowerShellScript,
-            WindowsPowerShellScriptUrl = job.WindowsPowerShellScriptUrl
+            WindowsPowerShellScriptUrl = job.WindowsPowerShellScriptUrl,
+            MacShellScript = job.MacShellScript,
+            MacShellScriptUrl = job.MacShellScriptUrl
         };
 
         await _policyClient.AcknowledgeJobAsync(

@@ -475,6 +475,8 @@
                             <option value="windows_powershell_script_url">Windows PowerShell script URL</option>
                             <option value="windows_powershell_script_gcpw">Windows GCPW install script</option>
                             <option value="windows_powershell_script_splashtop">Windows Splashtop install script</option>
+                            <option value="macos_shell_script">macOS shell script</option>
+                            <option value="macos_shell_script_splashtop">macOS Splashtop install script</option>
                             <option value="macos_software_update">macOS software update</option>
                         </select>
                     </div>
@@ -624,7 +626,25 @@
             type: "windows_powershell_script",
             payload: {
                 windows_script: {
-                    script: splashtopInstallTemplate()
+                    script: windowsSplashtopInstallTemplate()
+                }
+            },
+            policy: defaultPolicy()
+        },
+        macos_shell_script: {
+            type: "macos_shell_script",
+            payload: {
+                macos_script: {
+                    script: "set -euo pipefail\necho 'hello from patch agent macOS shell script'"
+                }
+            },
+            policy: defaultPolicy()
+        },
+        macos_shell_script_splashtop: {
+            type: "macos_shell_script",
+            payload: {
+                macos_script: {
+                    script: macSplashtopInstallTemplate()
                 }
             },
             policy: defaultPolicy()
@@ -752,7 +772,7 @@
         ].join("\n");
     }
 
-    function splashtopInstallTemplate() {
+    function windowsSplashtopInstallTemplate() {
         return [
             "$ErrorActionPreference = 'Stop'",
             "$ProgressPreference = 'SilentlyContinue'",
@@ -777,6 +797,22 @@
             "if ($proc.ExitCode -ne 0) { throw \"Splashtop install failed with exit code $($proc.ExitCode).\" }",
             "",
             "Write-Host 'Splashtop Streamer installation complete.'"
+        ].join("\n");
+    }
+
+    function macSplashtopInstallTemplate() {
+        return [
+            "set -euo pipefail",
+            "",
+            "# Download your deployable Splashtop Streamer PKG from my.splashtop.com > Management > Deployment.",
+            "pkg_url='https://example.com/Splashtop_Streamer_Mac_DEPLOY_INSTALLER.pkg'",
+            "pkg_path=\"$(mktemp \"${TMPDIR:-/tmp}/splashtop-streamer-XXXXXX.pkg\")\"",
+            "cleanup() { rm -f \"$pkg_path\"; }",
+            "trap cleanup EXIT",
+            "",
+            "curl -fsSL \"$pkg_url\" -o \"$pkg_path\"",
+            "sudo /usr/sbin/installer -pkg \"$pkg_path\" -target /",
+            "echo 'Splashtop Streamer installation complete.'"
         ].join("\n");
     }
 

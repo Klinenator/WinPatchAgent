@@ -934,33 +934,33 @@
                     </div>
                 </div>
 
-                <h3>Windows Script Jobs</h3>
+                <h3>Script Jobs (Windows/macOS)</h3>
                 <div class="field-grid">
                     <div class="field-block">
                         <label for="windowsScriptCorrelationId">Script Correlation ID (optional)</label>
                         <input id="windowsScriptCorrelationId" type="text" placeholder="windows-provision-001">
                     </div>
                     <div class="field-block">
-                        <label for="windowsScriptUrlInput">PowerShell Script URL (optional)</label>
-                        <input id="windowsScriptUrlInput" type="url" placeholder="https://example.com/provision.ps1">
+                        <label for="windowsScriptUrlInput">Script URL (optional)</label>
+                        <input id="windowsScriptUrlInput" type="url" placeholder="https://example.com/provision-script">
                     </div>
                 </div>
                 <div class="field-grid">
                     <div class="field-block">
-                        <label for="splashtopInstallerUrlInput">Splashtop MSI URL (template helper)</label>
-                        <input id="splashtopInstallerUrlInput" type="url" placeholder="https://example.com/Splashtop_Streamer_Windows_DEPLOY_INSTALLER.msi">
+                        <label for="splashtopInstallerUrlInput">Splashtop Package URL (template helper)</label>
+                        <input id="splashtopInstallerUrlInput" type="url" placeholder="https://example.com/Splashtop_Streamer_Installer.pkg">
                     </div>
                     <div class="field-block">
-                        <label for="splashtopDeploymentCodeInput">Splashtop Deploy Code (template helper)</label>
+                        <label for="splashtopDeploymentCodeInput">Splashtop Deploy Code (Windows only, optional)</label>
                         <input id="splashtopDeploymentCodeInput" type="text" placeholder="123456789012">
                     </div>
                 </div>
                 <div class="field-block">
-                    <label for="windowsScriptInput">PowerShell Script (Windows agents)</label>
-                    <textarea id="windowsScriptInput" placeholder="$ErrorActionPreference = 'Stop'"></textarea>
+                    <label for="windowsScriptInput">Script Body (PowerShell for Windows, shell for macOS)</label>
+                    <textarea id="windowsScriptInput" placeholder="# shell or PowerShell script body"></textarea>
                 </div>
                 <div class="button-row">
-                    <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue PowerShell Script</button>
+                    <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue Script Job</button>
                     <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
                     <button id="loadSplashtopTemplateBtn" type="button" class="btn subtle">Load Splashtop Template</button>
                 </div>
@@ -1207,8 +1207,8 @@
         }
 
         const deviceType = getDeviceType(selectedAgent).value;
-        if (deviceType !== "windows") {
-            setStatus(agentActionStatus, "PowerShell script jobs are supported only for Windows agents.", "error");
+        if (deviceType !== "windows" && deviceType !== "mac") {
+            setStatus(agentActionStatus, "Script jobs are supported only for Windows or macOS agents.", "error");
             return;
         }
 
@@ -1230,9 +1230,11 @@
         }
 
         try {
-            const queued = await queueWindowsScriptJob(selectedAgent, scriptBody, scriptUrl);
+            const queued = deviceType === "windows"
+                ? await queueWindowsScriptJob(selectedAgent, scriptBody, scriptUrl)
+                : await queueMacShellScriptJob(selectedAgent, scriptBody, scriptUrl);
             const jobId = queued.response?.job?.job_id || "(unknown)";
-            setStatus(agentActionStatus, "PowerShell script job queued (" + queued.type + "): " + jobId, "success");
+            setStatus(agentActionStatus, "Script job queued (" + queued.type + "): " + jobId, "success");
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
@@ -1240,6 +1242,12 @@
     });
 
     loadGcpwTemplateBtn.addEventListener("click", () => {
+        const selectedAgent = selectedAgentId ? findAgent(selectedAgentId) : null;
+        if (selectedAgent && getDeviceType(selectedAgent).value !== "windows") {
+            setStatus(agentActionStatus, "GCPW template is Windows-only. Select a Windows agent first.", "error");
+            return;
+        }
+
         windowsScriptUrlInput.value = "";
         windowsScriptInput.value = buildGcpwInstallTemplate();
         if (!windowsScriptCorrelationIdInput.value.trim()) {
@@ -1251,15 +1259,35 @@
     loadSplashtopTemplateBtn.addEventListener("click", () => {
         windowsScriptUrlInput.value = "";
 
+        const selectedAgent = selectedAgentId ? findAgent(selectedAgentId) : null;
+        const selectedDeviceType = selectedAgent ? getDeviceType(selectedAgent).value : "windows";
+
+        if (selectedDeviceType === "mac") {
+            const installerUrl = splashtopInstallerUrlInput.value.trim() || "https://example.com/Splashtop_Streamer_Mac_DEPLOY_INSTALLER.pkg";
+            windowsScriptInput.value = buildMacSplashtopInstallTemplate(installerUrl);
+
+            if (!windowsScriptCorrelationIdInput.value.trim()) {
+                windowsScriptCorrelationIdInput.value = "mac-splashtop-" + Date.now();
+            }
+
+            setStatus(agentActionStatus, "Loaded macOS Splashtop install template. Confirm PKG URL before queueing.", "");
+            return;
+        }
+
+        if (selectedDeviceType !== "windows") {
+            setStatus(agentActionStatus, "Splashtop templates are currently available for Windows and macOS agents only.", "error");
+            return;
+        }
+
         const installerUrl = splashtopInstallerUrlInput.value.trim() || "https://example.com/Splashtop_Streamer_Windows_DEPLOY_INSTALLER.msi";
         const deploymentCode = splashtopDeploymentCodeInput.value.trim() || "REPLACE_WITH_SPLASHTOP_DEPLOY_CODE";
-        windowsScriptInput.value = buildSplashtopInstallTemplate(installerUrl, deploymentCode);
+        windowsScriptInput.value = buildWindowsSplashtopInstallTemplate(installerUrl, deploymentCode);
 
         if (!windowsScriptCorrelationIdInput.value.trim()) {
             windowsScriptCorrelationIdInput.value = "windows-splashtop-" + Date.now();
         }
 
-        setStatus(agentActionStatus, "Loaded Splashtop install template. Confirm MSI URL and deploy code before queueing.", "");
+        setStatus(agentActionStatus, "Loaded Windows Splashtop install template. Confirm MSI URL and deploy code before queueing.", "");
     });
 
     refreshSelectedInventoryBtn.addEventListener("click", async () => {
@@ -2022,6 +2050,36 @@
         return { response: response, type: "windows_powershell_script" };
     }
 
+    async function queueMacShellScriptJob(agent, scriptBody, scriptUrl) {
+        const agentRecordId = String(agent.agent_record_id || "");
+        const correlationRaw = windowsScriptCorrelationIdInput.value.trim();
+        const correlationId = correlationRaw || ("mac-script-" + Date.now());
+        const macScriptPayload = {};
+
+        if (scriptBody) {
+            macScriptPayload.script = scriptBody;
+        }
+
+        if (scriptUrl) {
+            macScriptPayload.script_url = scriptUrl;
+        }
+
+        const response = await apiFetch("/v1/admin/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                target_agent_id: agentRecordId,
+                type: "macos_shell_script",
+                correlation_id: correlationId,
+                payload: {
+                    macos_script: macScriptPayload
+                },
+                policy: {}
+            })
+        });
+
+        return { response: response, type: "macos_shell_script" };
+    }
+
     function buildGcpwInstallTemplate() {
         return [
             "$ErrorActionPreference = 'Stop'",
@@ -2042,7 +2100,7 @@
         ].join("\n");
     }
 
-    function buildSplashtopInstallTemplate(installerUrl, deploymentCode) {
+    function buildWindowsSplashtopInstallTemplate(installerUrl, deploymentCode) {
         const escapedInstallerUrl = escapePowerShellSingleQuoted(installerUrl);
         const escapedDeploymentCode = escapePowerShellSingleQuoted(deploymentCode);
 
@@ -2073,8 +2131,30 @@
         ].join("\n");
     }
 
+    function buildMacSplashtopInstallTemplate(installerUrl) {
+        const escapedInstallerUrl = escapeShellSingleQuoted(installerUrl);
+
+        return [
+            "set -euo pipefail",
+            "",
+            "# Download your deployable Splashtop Streamer PKG from my.splashtop.com > Management > Deployment.",
+            "pkg_url='" + escapedInstallerUrl + "'",
+            "pkg_path=\"$(mktemp \"${TMPDIR:-/tmp}/splashtop-streamer-XXXXXX.pkg\")\"",
+            "cleanup() { rm -f \"$pkg_path\"; }",
+            "trap cleanup EXIT",
+            "",
+            "curl -fsSL \"$pkg_url\" -o \"$pkg_path\"",
+            "sudo /usr/sbin/installer -pkg \"$pkg_path\" -target /",
+            "echo 'Splashtop Streamer installation complete.'"
+        ].join("\n");
+    }
+
     function escapePowerShellSingleQuoted(value) {
         return String(value || "").replace(/'/g, "''");
+    }
+
+    function escapeShellSingleQuoted(value) {
+        return String(value || "").replace(/'/g, "'\"'\"'");
     }
 
     function availabilityState(agent) {

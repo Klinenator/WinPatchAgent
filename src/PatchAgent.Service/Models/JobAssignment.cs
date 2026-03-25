@@ -33,4 +33,8 @@ public sealed class JobAssignment
     public string WindowsPowerShellScript { get; set; } = string.Empty;
 
     public string WindowsPowerShellScriptUrl { get; set; } = string.Empty;
+
+    public string MacShellScript { get; set; } = string.Empty;
+
+    public string MacShellScriptUrl { get; set; } = string.Empty;
 }

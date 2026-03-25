@@ -242,7 +242,9 @@ public sealed class HttpPolicyClient : IPolicyClient
             MacOsInstallAll = ReadMacOsInstallAll(response.Job.Payload),
             MacOsUpdateLabels = ReadMacOsUpdateLabels(response.Job.Payload),
             WindowsPowerShellScript = ReadWindowsPowerShellScript(response.Job.Payload),
-            WindowsPowerShellScriptUrl = ReadWindowsPowerShellScriptUrl(response.Job.Payload)
+            WindowsPowerShellScriptUrl = ReadWindowsPowerShellScriptUrl(response.Job.Payload),
+            MacShellScript = ReadMacShellScript(response.Job.Payload),
+            MacShellScriptUrl = ReadMacShellScriptUrl(response.Job.Payload)
         };
     }
 
@@ -611,6 +613,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         return string.Empty;
     }
 
+    private static string ReadMacShellScript(JsonElement? payload)
+    {
+        if (TryGetMacScriptValue(payload, "script", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var script = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(script))
+            {
+                return script.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ReadMacShellScriptUrl(JsonElement? payload)
+    {
+        if (TryGetMacScriptValue(payload, "script_url", out var value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var scriptUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(scriptUrl))
+            {
+                return scriptUrl.Trim();
+            }
+        }
+
+        if (TryGetMacScriptValue(payload, "url", out value) && value is { ValueKind: JsonValueKind.String })
+        {
+            var scriptUrl = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(scriptUrl))
+            {
+                return scriptUrl.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static List<string> ReadWindowsKbIds(JsonElement? payload)
     {
         var kbSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -882,6 +921,48 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!macOsSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetMacScriptValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement scriptSection;
+        if (payloadObject.TryGetProperty("macos_script", out var macOsScriptSection)
+            && macOsScriptSection.ValueKind == JsonValueKind.Object)
+        {
+            scriptSection = macOsScriptSection;
+        }
+        else if (payloadObject.TryGetProperty("mac_script", out var macScriptSection)
+                 && macScriptSection.ValueKind == JsonValueKind.Object)
+        {
+            scriptSection = macScriptSection;
+        }
+        else if (payloadObject.TryGetProperty("shell_script", out var shellScriptSection)
+                 && shellScriptSection.ValueKind == JsonValueKind.Object)
+        {
+            scriptSection = shellScriptSection;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!scriptSection.TryGetProperty(key, out var child))
         {
             return false;
         }

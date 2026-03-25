@@ -33,6 +33,7 @@ builder.Services.AddSingleton<LinuxAptJobExecutor>();
 builder.Services.AddSingleton<WindowsUpdateJobExecutor>();
 builder.Services.AddSingleton<WindowsPowerShellScriptJobExecutor>();
 builder.Services.AddSingleton<MacSoftwareUpdateJobExecutor>();
+builder.Services.AddSingleton<MacShellScriptJobExecutor>();
 builder.Services.AddSingleton<IJobExecutor, DispatchingJobExecutor>();
 builder.Services.AddHttpClient<IPolicyClient, HttpPolicyClient>((serviceProvider, client) =>
 {

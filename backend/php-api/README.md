@@ -99,7 +99,7 @@ Admin pages:
 - `/admin/install-agent` enrollment key + installer generation
 - `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue Windows PowerShell script jobs for Windows agents (including GCPW and Splashtop script templates), and manage automation profiles with recurring schedules and run-now execution.
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), and manage automation profiles with recurring schedules and run-now execution.
 
 Suggested nginx site:
 
@@ -173,6 +173,28 @@ curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
 Inline PowerShell script payload is also supported with:
 - `payload.windows_script.script` (inline script content)
 - `payload.windows_script.script_url` (download and execute script URL)
+
+macOS shell script job seeding example:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
+  -H 'Authorization: Bearer change-me-admin-key' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "target_device_id": "mac-node-001",
+    "type": "macos_shell_script",
+    "correlation_id": "mac-provision-splashtop-001",
+    "payload": {
+      "macos_script": {
+        "script_url": "https://patch.rrsaccess.com/scripts/provision-mac.sh"
+      }
+    }
+  }'
+```
+
+Inline macOS shell script payload is also supported with:
+- `payload.macos_script.script` (inline script content)
+- `payload.macos_script.script_url` (download and execute script URL)
 
 Ubuntu apt job seeding example:
 

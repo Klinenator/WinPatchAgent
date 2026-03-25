@@ -42,6 +42,10 @@ public sealed class AgentOptions
 
     public int MacSoftwareUpdateCommandTimeoutSeconds { get; set; } = 5400;
 
+    public bool EnableMacShellScriptExecution { get; set; } = true;
+
+    public int MacShellScriptCommandTimeoutSeconds { get; set; } = 3600;
+
     public bool AptUseSudoWhenNotRoot { get; set; } = true;
 
     public bool AptRunUpdateBeforeInstall { get; set; } = true;
