@@ -143,6 +143,10 @@ public sealed class InventoryWindowsUpdate
     public List<InventoryInstalledPatch> InstalledPatches { get; set; } = [];
 
     public int InstalledPatchesCount { get; set; }
+
+    public List<InventoryAvailablePatch> AvailablePatches { get; set; } = [];
+
+    public int AvailablePatchesCount { get; set; }
 }
 
 public sealed class InventoryInstalledPatch
@@ -152,6 +156,13 @@ public sealed class InventoryInstalledPatch
     public string Title { get; set; } = string.Empty;
 
     public string InstalledAt { get; set; } = string.Empty;
+}
+
+public sealed class InventoryAvailablePatch
+{
+    public string UpdateId { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
 }
 
 public sealed class InventoryHardware

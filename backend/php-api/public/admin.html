@@ -689,7 +689,7 @@
                             <th>Last Seen</th>
                             <th>Availability</th>
                             <th>Service</th>
-                            <th>Packages</th>
+                            <th>Available</th>
                             <th>Current Job</th>
                             <th>Action</th>
                         </tr>
@@ -1106,7 +1106,7 @@
                 : "";
 
             const displayName = String(agent.display_name || agent.hostname || "");
-            const installedCount = countInstalledUpdates(agent);
+            const availableCount = countAvailablePackages(agent);
             const agentId = String(agent.agent_record_id || "");
             const selectedClass = selectedAgentId && selectedAgentId === agentId ? " selected" : "";
             const status = availabilityState(agent);
@@ -1123,7 +1123,7 @@
                 "<td>" + escapeHtml(describeLastSeen(String(agent.last_seen_at || ""))) + "</td>" +
                 "<td><span class=\"pill " + escapeHtml(status.value) + "\">" + escapeHtml(status.label) + "</span></td>" +
                 "<td>" + escapeHtml(serviceState) + "</td>" +
-                "<td>" + escapeHtml(String(installedCount)) + "</td>" +
+                "<td>" + escapeHtml(String(availableCount)) + "</td>" +
                 "<td><code class=\"mono\">" + escapeHtml(currentJobText) + "</code></td>" +
                 "<td><button type=\"button\" class=\"btn tiny manage-agent-btn\" data-agent-id=\"" + escapeHtml(agentId) + "\">Manage</button></td>" +
                 "</tr>";
@@ -1232,6 +1232,35 @@
         }
 
         return getInstalledUpdates(agent).length;
+    }
+
+    function countAvailablePackages(agent) {
+        const deviceType = getDeviceType(agent).value;
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+
+        if (deviceType === "windows") {
+            const windowsUpdate = getWindowsUpdateSection(agent);
+            const count = Number.parseInt(String(windowsUpdate.available_patches_count || ""), 10);
+            if (Number.isFinite(count) && count >= 0) {
+                return count;
+            }
+
+            if (Array.isArray(windowsUpdate.available_patches)) {
+                return windowsUpdate.available_patches.length;
+            }
+        }
+
+        if (deviceType === "mac") {
+            const macOs = (typeof inventory.macos === "object" && inventory.macos !== null) ? inventory.macos : {};
+            const labels = Array.isArray(macOs.available_update_labels) ? macOs.available_update_labels : [];
+            if (labels.length > 0) {
+                return labels.length;
+            }
+
+            return macOs.software_update_available ? 1 : 0;
+        }
+
+        return countInstalledUpdates(agent);
     }
 
     function getDeviceType(agent) {

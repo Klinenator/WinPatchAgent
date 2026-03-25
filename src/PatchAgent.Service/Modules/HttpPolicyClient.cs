@@ -157,7 +157,15 @@ public sealed class HttpPolicyClient : IPolicyClient
                         InstalledAt = patch.InstalledAt
                     })
                     .ToList(),
-                InstalledPatchesCount = snapshot.InstalledWindowsPatches.Count
+                InstalledPatchesCount = snapshot.InstalledWindowsPatches.Count,
+                AvailablePatches = snapshot.AvailableWindowsPatches
+                    .Select(update => new InventoryAvailablePatch
+                    {
+                        UpdateId = update.UpdateId,
+                        Title = update.Title
+                    })
+                    .ToList(),
+                AvailablePatchesCount = snapshot.AvailableWindowsPatches.Count
             },
             Hardware = new InventoryHardware
             {

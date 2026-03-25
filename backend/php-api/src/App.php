@@ -993,6 +993,9 @@ BASH;
         $installedPatches = is_array($windowsUpdate['installed_patches'] ?? null)
             ? $windowsUpdate['installed_patches']
             : [];
+        $availablePatches = is_array($windowsUpdate['available_patches'] ?? null)
+            ? $windowsUpdate['available_patches']
+            : [];
 
         $normalizedPatches = [];
         foreach ($installedPatches as $patch) {
@@ -1016,8 +1019,43 @@ BASH;
             return strcmp((string) ($right['installed_at'] ?? ''), (string) ($left['installed_at'] ?? ''));
         });
 
+        $normalizedAvailable = [];
+        foreach ($availablePatches as $patch) {
+            if (!is_array($patch)) {
+                continue;
+            }
+
+            $updateId = trim((string) ($patch['update_id'] ?? $patch['kb'] ?? $patch['id'] ?? ''));
+            $title = trim((string) ($patch['title'] ?? $patch['description'] ?? ''));
+
+            if ($updateId !== '') {
+                $upper = strtoupper($updateId);
+                if (preg_match('/^\d+$/', $upper) === 1) {
+                    $upper = 'KB' . $upper;
+                } elseif (preg_match('/^KB\d+$/', $upper) === 1) {
+                    $upper = strtoupper($upper);
+                }
+                $updateId = $upper;
+            }
+
+            if ($updateId === '' && $title === '') {
+                continue;
+            }
+
+            if ($updateId === '') {
+                $updateId = $title;
+            }
+
+            $normalizedAvailable[] = [
+                'update_id' => $updateId,
+                'title' => $title,
+            ];
+        }
+
         $windowsUpdate['installed_patches'] = array_slice($normalizedPatches, 0, 300);
         $windowsUpdate['installed_patches_count'] = count($normalizedPatches);
+        $windowsUpdate['available_patches'] = array_slice($normalizedAvailable, 0, 300);
+        $windowsUpdate['available_patches_count'] = count($normalizedAvailable);
         return $windowsUpdate;
     }
 

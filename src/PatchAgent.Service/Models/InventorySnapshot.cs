@@ -37,6 +37,8 @@ public sealed class InventorySnapshot
     public List<string> MacAvailableUpdateLabels { get; set; } = [];
 
     public List<InstalledPatchSnapshot> InstalledWindowsPatches { get; set; } = [];
+
+    public List<AvailablePatchSnapshot> AvailableWindowsPatches { get; set; } = [];
 }
 
 public sealed class InstalledPatchSnapshot
@@ -46,4 +48,11 @@ public sealed class InstalledPatchSnapshot
     public string Title { get; set; } = string.Empty;
 
     public string InstalledAt { get; set; } = string.Empty;
+}
+
+public sealed class AvailablePatchSnapshot
+{
+    public string UpdateId { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
 }

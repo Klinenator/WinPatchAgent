@@ -46,6 +46,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
         {
             snapshot.PendingReboot = IsWindowsRebootPending();
             snapshot.InstalledWindowsPatches = await CollectInstalledWindowsPatchesAsync(cancellationToken);
+            snapshot.AvailableWindowsPatches = await CollectAvailableWindowsPatchesAsync(cancellationToken);
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -146,6 +147,74 @@ $normalized | ConvertTo-Json -Depth 4 -Compress
         return ParsePatchInventoryJson(result.StandardOutput);
     }
 
+    private async Task<List<AvailablePatchSnapshot>> CollectAvailableWindowsPatchesAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return [];
+        }
+
+        var script = @"
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+$session = New-Object -ComObject Microsoft.Update.Session
+$searcher = $session.CreateUpdateSearcher()
+$searchResult = $searcher.Search(""IsInstalled=0 and IsHidden=0 and Type='Software'"")
+
+$items = @(
+  foreach ($update in $searchResult.Updates) {
+    $kbIds = @($update.KBArticleIDs | ForEach-Object {
+      $id = [string]$_
+      if (-not [string]::IsNullOrWhiteSpace($id)) {
+        $normalized = $id.Trim().ToUpperInvariant()
+        if (-not $normalized.StartsWith('KB')) { $normalized = 'KB' + $normalized }
+        $normalized
+      }
+    } | Where-Object { $_ -ne $null -and $_ -ne '' })
+
+    $updateId = ''
+    if ($kbIds.Count -gt 0) {
+      $updateId = $kbIds[0]
+    } elseif ($update.Identity -and $update.Identity.UpdateID) {
+      $updateId = [string]$update.Identity.UpdateID
+    }
+
+    [PSCustomObject]@{
+      update_id = $updateId
+      title = [string]$update.Title
+    }
+  }
+)
+
+$items | ConvertTo-Json -Depth 5 -Compress
+";
+
+        var result = await RunProcessAsync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
+            ],
+            TimeSpan.FromSeconds(45),
+            cancellationToken);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            _logger.LogDebug(
+                "Windows available update query failed with exit code {ExitCode}: {Error}",
+                result.ExitCode,
+                result.StandardError);
+            return [];
+        }
+
+        return ParseAvailablePatchInventoryJson(result.StandardOutput);
+    }
+
     private static bool IsWindowsRebootPending()
     {
         if (!OperatingSystem.IsWindows())
@@ -214,6 +283,38 @@ $normalized | ConvertTo-Json -Depth 4 -Compress
         return patches;
     }
 
+    private static List<AvailablePatchSnapshot> ParseAvailablePatchInventoryJson(string rawJson)
+    {
+        var patches = new List<AvailablePatchSnapshot>();
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in root.EnumerateArray())
+                {
+                    AddAvailablePatch(item, patches);
+                }
+
+                return patches;
+            }
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                AddAvailablePatch(root, patches);
+            }
+        }
+        catch
+        {
+            return [];
+        }
+
+        return patches;
+    }
+
     private static void AddPatch(JsonElement item, List<InstalledPatchSnapshot> patches)
     {
         if (item.ValueKind != JsonValueKind.Object)
@@ -244,6 +345,60 @@ $normalized | ConvertTo-Json -Depth 4 -Compress
             Title = ReadString(item, "title") ?? ReadString(item, "description") ?? string.Empty,
             InstalledAt = ReadString(item, "installed_at") ?? ReadString(item, "installedon") ?? string.Empty
         });
+    }
+
+    private static void AddAvailablePatch(JsonElement item, List<AvailablePatchSnapshot> patches)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var updateId = ReadString(item, "update_id")
+            ?? ReadString(item, "kb")
+            ?? ReadString(item, "id")
+            ?? string.Empty;
+        var title = ReadString(item, "title") ?? ReadString(item, "description") ?? string.Empty;
+
+        updateId = NormalizeUpdateIdentifier(updateId);
+        title = title.Trim();
+
+        if (string.IsNullOrWhiteSpace(updateId) && string.IsNullOrWhiteSpace(title))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(updateId))
+        {
+            updateId = title;
+        }
+
+        patches.Add(new AvailablePatchSnapshot
+        {
+            UpdateId = updateId,
+            Title = title
+        });
+    }
+
+    private static string NormalizeUpdateIdentifier(string value)
+    {
+        var normalized = value.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (uint.TryParse(normalized, out _))
+        {
+            return "KB" + normalized;
+        }
+
+        if (normalized.StartsWith("KB", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized.ToUpperInvariant();
+        }
+
+        return normalized;
     }
 
     private static string? ReadString(JsonElement item, string propertyName)
