@@ -460,7 +460,17 @@ function Ensure-DotnetSdk8 {
     $installerPath = Join-Path $env:TEMP ("dotnet-install-" + [guid]::NewGuid().ToString("N") + ".ps1")
     try {
         Invoke-WebRequest -UseBasicParsing -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $installerPath
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $installerPath -Channel "8.0" -InstallDir "C:\Program Files\dotnet" -Architecture "x64"
+        $installProc = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $installerPath,
+            "-Channel", "8.0",
+            "-InstallDir", "C:\Program Files\dotnet",
+            "-Architecture", "x64"
+        ) -Wait -PassThru -WindowStyle Hidden
+        if ($installProc.ExitCode -ne 0) {
+            throw "dotnet-install failed with exit code $($installProc.ExitCode)."
+        }
     } finally {
         Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
     }
