@@ -1,9 +1,9 @@
-# WinPatchAgent (Windows + Ubuntu)
+# WinPatchAgent (Windows + Ubuntu + macOS)
 
 Patch management scaffold with:
 - A `.NET` endpoint agent (`src/PatchAgent.Service/`)
 - A minimal PHP API backend (`backend/php-api/`) designed for nginx + PHP-FPM
-- Job seeding endpoints for both Windows update and Ubuntu apt-based patch jobs
+- Job seeding endpoints for Windows Update, Ubuntu apt, and macOS softwareupdate patch jobs
 
 ## Fast Start: Ubuntu Agent
 
@@ -69,13 +69,47 @@ To also delete persisted agent state:
 sudo bash ./scripts/uninstall_ubuntu_agent.sh --purge-state
 ```
 
+## Fast Start: macOS Agent
+
+```bash
+git clone https://github.com/Klinenator/WinPatchAgent.git
+cd WinPatchAgent
+sudo bash ./scripts/setup_macos_agent.sh \
+  --backend-url https://patch-api.example.com \
+  --enrollment-key change-me
+```
+
+`setup_macos_agent.sh` publishes the agent and registers a `launchd` service.
+If an existing agent install is detected, it is automatically uninstalled and replaced.
+
+Optional: pass extra installer args after `--`:
+
+```bash
+sudo bash ./scripts/setup_macos_agent.sh \
+  --backend-url https://patch-api.example.com \
+  -- --service-label com.winpatchagent.agent --self-contained
+```
+
+### Uninstall from macOS
+
+```bash
+cd /path/to/WinPatchAgent
+sudo bash ./scripts/uninstall_macos_agent.sh
+```
+
+To also delete persisted agent state:
+
+```bash
+sudo bash ./scripts/uninstall_macos_agent.sh --purge-state
+```
+
 ## Backend (PHP + nginx)
 
 API scaffold is under `backend/php-api/`.
 It now includes a basic admin web view at `/admin` for viewing agents, generating installer links, and seeding/listing jobs.
 Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth.
-The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs (Windows updates).
-Admin pages are split into `/admin` (main), `/admin/seed-jobs`, and `/admin/install-agent`.
+The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
+Admin pages are split into `/admin` (main), `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 
 Local dev run:
 

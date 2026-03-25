@@ -34,6 +34,10 @@ public sealed class AgentOptions
 
     public int WindowsUpdateCommandTimeoutSeconds { get; set; } = 5400;
 
+    public bool EnableMacSoftwareUpdateJobExecution { get; set; } = true;
+
+    public int MacSoftwareUpdateCommandTimeoutSeconds { get; set; } = 5400;
+
     public bool AptUseSudoWhenNotRoot { get; set; } = true;
 
     public bool AptRunUpdateBeforeInstall { get; set; } = true;

@@ -1,6 +1,6 @@
 # PatchAgent PHP API
 
-This is a minimal PHP backend scaffold for the PatchAgent Windows service.
+This is a minimal PHP backend scaffold for the PatchAgent endpoint service.
 
 It is intentionally framework-free so it can run behind nginx with plain PHP-FPM.
 
@@ -8,6 +8,7 @@ Current endpoints:
 - `GET /admin` (simple admin web view)
 - `GET /admin/seed-jobs`
 - `GET /admin/install-agent`
+- `GET /admin/settings`
 - `GET /admin/login` (Google login page for admin)
 - `GET /v1/admin/auth/status`
 - `GET /v1/admin/auth/google/start`
@@ -27,6 +28,7 @@ Current endpoints:
 - `POST /v1/admin/agents/{agentRecordId}/rename`
 - `POST /v1/admin/enrollments`
 - `GET /install/linux.sh?enrollment_key=...`
+- `GET /install/macos.sh?enrollment_key=...`
 - `GET /install/windows.ps1?enrollment_key=...`
 - `GET /healthz`
 
@@ -67,15 +69,16 @@ Open the admin page in your browser:
 `http://127.0.0.1:8080/admin`
 
 Admin authentication supports either:
-- `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl/UI optional token input)
+- `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl)
 - Google OAuth session login when `PATCH_API_GOOGLE_CLIENT_ID`, `PATCH_API_GOOGLE_CLIENT_SECRET`, and `PATCH_API_GOOGLE_REDIRECT_URI` are set
 
 Admin pages:
 - `/admin` main dashboard (agents + jobs)
 - `/admin/seed-jobs` generic job seeding
 - `/admin/install-agent` enrollment key + installer generation
+- `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, and queue package install jobs (Windows updates).
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, and queue package install jobs by platform (Windows, Linux, macOS).
 
 Suggested nginx site:
 
@@ -142,6 +145,25 @@ curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
       "apt": {
         "upgrade_all": true,
         "packages": ["curl", "openssl"]
+      }
+    }
+  }'
+```
+
+macOS software update job seeding example:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/admin/jobs \
+  -H 'Authorization: Bearer change-me-admin-key' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "target_device_id": "mac-studio-001",
+    "type": "macos_software_update",
+    "correlation_id": "macos-patch-window-001",
+    "payload": {
+      "macos_update": {
+        "install_all": false,
+        "labels": ["Safari17.5SonomaAuto-14.5"]
       }
     }
   }'

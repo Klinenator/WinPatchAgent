@@ -33,4 +33,8 @@ public sealed class JobExecutionState
     public bool WindowsInstallAll { get; set; }
 
     public List<string> WindowsKbIds { get; set; } = [];
+
+    public bool MacOsInstallAll { get; set; }
+
+    public List<string> MacOsUpdateLabels { get; set; } = [];
 }

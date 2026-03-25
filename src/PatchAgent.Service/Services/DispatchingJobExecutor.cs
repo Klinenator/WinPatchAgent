@@ -7,15 +7,18 @@ public sealed class DispatchingJobExecutor : IJobExecutor
 {
     private readonly LinuxAptJobExecutor _aptJobExecutor;
     private readonly WindowsUpdateJobExecutor _windowsUpdateJobExecutor;
+    private readonly MacSoftwareUpdateJobExecutor _macSoftwareUpdateJobExecutor;
     private readonly StubJobExecutor _stubJobExecutor;
 
     public DispatchingJobExecutor(
         LinuxAptJobExecutor aptJobExecutor,
         WindowsUpdateJobExecutor windowsUpdateJobExecutor,
+        MacSoftwareUpdateJobExecutor macSoftwareUpdateJobExecutor,
         StubJobExecutor stubJobExecutor)
     {
         _aptJobExecutor = aptJobExecutor;
         _windowsUpdateJobExecutor = windowsUpdateJobExecutor;
+        _macSoftwareUpdateJobExecutor = macSoftwareUpdateJobExecutor;
         _stubJobExecutor = stubJobExecutor;
     }
 
@@ -27,6 +30,11 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         }
 
         if (await _windowsUpdateJobExecutor.TryAdvanceAsync(state, cancellationToken))
+        {
+            return true;
+        }
+
+        if (await _macSoftwareUpdateJobExecutor.TryAdvanceAsync(state, cancellationToken))
         {
             return true;
         }

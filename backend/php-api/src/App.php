@@ -135,6 +135,11 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && $path === '/install/macos.sh') {
+                $this->handleMacOsInstallScript($request);
+                return;
+            }
+
             if ($method === 'POST' && preg_match('#^/v1/agents/jobs/([^/]+)/ack$#', $path, $matches) === 1) {
                 $agent = $this->requireAgent($request);
                 $this->handleAcknowledgeJob($request, $agent, rawurldecode($matches[1]));
@@ -360,16 +365,21 @@ final class App
     private function handleCreateEnrollment(Request $request): void
     {
         $body = $request->json();
-        $platform = strtolower($this->requireString($body, 'platform'));
+        $platformRaw = strtolower($this->requireString($body, 'platform'));
+        $platform = $platformRaw === 'macos' ? 'mac' : $platformRaw;
 
-        if (!in_array($platform, ['linux', 'windows'], true)) {
-            throw new ApiException(422, 'invalid_request', 'Field "platform" must be "linux" or "windows".');
+        if (!in_array($platform, ['linux', 'windows', 'mac'], true)) {
+            throw new ApiException(422, 'invalid_request', 'Field "platform" must be "linux", "windows", or "mac".');
         }
 
         $ttlSeconds = $this->readEnrollmentTtlSeconds($body);
         $enrollment = $this->enrollments->createEnrollment($platform, $ttlSeconds);
 
-        $scriptPath = $platform === 'windows' ? '/install/windows.ps1' : '/install/linux.sh';
+        $scriptPath = match ($platform) {
+            'windows' => '/install/windows.ps1',
+            'mac' => '/install/macos.sh',
+            default => '/install/linux.sh',
+        };
         $scriptUrl = sprintf(
             '%s%s?enrollment_key=%s',
             $request->baseUrl(),
@@ -377,9 +387,11 @@ final class App
             rawurlencode((string) $enrollment['enrollment_key'])
         );
 
-        $installCommand = $platform === 'windows'
-            ? $this->buildWindowsInstallCommand($scriptUrl)
-            : $this->buildLinuxInstallCommand($scriptUrl);
+        $installCommand = match ($platform) {
+            'windows' => $this->buildWindowsInstallCommand($scriptUrl),
+            'mac' => $this->buildMacInstallCommand($scriptUrl),
+            default => $this->buildLinuxInstallCommand($scriptUrl),
+        };
 
         JsonResponse::created([
             'enrollment' => $enrollment,
@@ -721,6 +733,21 @@ final class App
         echo $this->buildWindowsInstallScript($request->baseUrl(), $enrollmentKey);
     }
 
+    private function handleMacOsInstallScript(Request $request): void
+    {
+        $enrollmentKey = $request->queryParam('enrollment_key');
+        if ($enrollmentKey === null || !$this->enrollments->isEnrollmentKeyActive($enrollmentKey)) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "Invalid or expired enrollment key.\n";
+            return;
+        }
+
+        header('Content-Type: text/x-shellscript; charset=utf-8');
+        header('Content-Disposition: inline; filename="install-winpatchagent-macos.sh"');
+        echo $this->buildMacOsInstallScript($request->baseUrl(), $enrollmentKey);
+    }
+
     private function isEnrollmentAuthorized(string $incomingEnrollmentKey, string $deviceId): bool
     {
         if ($this->config->enrollmentKey !== '' && hash_equals($this->config->enrollmentKey, $incomingEnrollmentKey)) {
@@ -883,6 +910,62 @@ Write-Host "Status:  Get-Service -Name \$ServiceName"
 POWERSHELL;
     }
 
+    private function buildMacOsInstallScript(string $baseUrl, string $enrollmentKey): string
+    {
+        $backendLiteral = escapeshellarg($baseUrl);
+        $keyLiteral = escapeshellarg($enrollmentKey);
+        $repoUrlLiteral = escapeshellarg(self::AGENT_REPO_URL);
+        $repoRefLiteral = escapeshellarg(self::AGENT_REPO_REF);
+
+        return <<<BASH
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKEND_URL={$backendLiteral}
+ENROLLMENT_KEY={$keyLiteral}
+REPO_URL={$repoUrlLiteral}
+REPO_REF={$repoRefLiteral}
+WORK_DIR="/opt/winpatchagent-src"
+
+if [[ "\${EUID}" -ne 0 ]]; then
+  echo "Run as root (or pipe into sudo bash)." >&2
+  exit 1
+fi
+
+for cmd in git curl launchctl; do
+  if ! command -v "\${cmd}" >/dev/null 2>&1; then
+    echo "Missing required command: \${cmd}" >&2
+    exit 1
+  fi
+done
+
+if ! command -v dotnet >/dev/null 2>&1; then
+  for candidate in /opt/homebrew/bin/dotnet /usr/local/bin/dotnet /usr/local/share/dotnet/dotnet; do
+    if [[ -x "\${candidate}" ]]; then
+      export PATH="$(dirname "\${candidate}"):\${PATH}"
+      break
+    fi
+  done
+fi
+
+if ! command -v dotnet >/dev/null 2>&1; then
+  echo "dotnet SDK 8+ is required on macOS. Install it (for example via Homebrew), then rerun." >&2
+  exit 1
+fi
+
+if [[ -d "\${WORK_DIR}/.git" ]]; then
+  git -C "\${WORK_DIR}" fetch --depth 1 origin "\${REPO_REF}"
+  git -C "\${WORK_DIR}" checkout -B "\${REPO_REF}" FETCH_HEAD
+else
+  git clone --depth 1 --branch "\${REPO_REF}" "\${REPO_URL}" "\${WORK_DIR}"
+fi
+
+bash "\${WORK_DIR}/scripts/setup_macos_agent.sh" \\
+  --backend-url "\${BACKEND_URL}" \\
+  --enrollment-key "\${ENROLLMENT_KEY}"
+BASH;
+    }
+
     private function buildLinuxInstallCommand(string $scriptUrl): string
     {
         return sprintf('curl -fsSL %s | sudo bash', escapeshellarg($scriptUrl));
@@ -894,6 +977,11 @@ POWERSHELL;
             "powershell -ExecutionPolicy Bypass -NoProfile -Command \"iwr -UseBasicParsing '%s' | iex\"",
             str_replace("'", "''", $scriptUrl)
         );
+    }
+
+    private function buildMacInstallCommand(string $scriptUrl): string
+    {
+        return sprintf('curl -fsSL %s | sudo bash', escapeshellarg($scriptUrl));
     }
 
     private function normalizeWindowsUpdateInventory(array $windowsUpdate): array

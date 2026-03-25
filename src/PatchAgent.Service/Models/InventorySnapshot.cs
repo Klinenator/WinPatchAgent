@@ -28,6 +28,14 @@ public sealed class InventorySnapshot
 
     public bool AptAvailable { get; set; }
 
+    public string? MacOsProductVersion { get; set; }
+
+    public string? MacOsBuildVersion { get; set; }
+
+    public bool MacSoftwareUpdateAvailable { get; set; }
+
+    public List<string> MacAvailableUpdateLabels { get; set; } = [];
+
     public List<InstalledPatchSnapshot> InstalledWindowsPatches { get; set; } = [];
 }
 

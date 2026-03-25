@@ -860,16 +860,24 @@
             return;
         }
 
-        const updateIds = parsePackageIds(updateIdsInput.value);
+        const selectedAgent = findAgent(selectedAgentId);
+        if (!selectedAgent) {
+            setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+            return;
+        }
+
+        const deviceType = getDeviceType(selectedAgent).value;
+        const updateIds = parsePackageIds(updateIdsInput.value, deviceType === "windows");
         if (!updateIds.length) {
             setStatus(agentActionStatus, "Provide at least one package ID.", "error");
             return;
         }
 
         try {
-            const response = await queueWindowsUpdateJob(selectedAgentId, false, updateIds);
+            const queued = await queuePackageInstallJob(selectedAgent, false, updateIds);
+            const response = queued.response;
             const jobId = response?.job?.job_id || "(unknown)";
-            setStatus(agentActionStatus, "Package install job queued: " + jobId, "success");
+            setStatus(agentActionStatus, "Package install job queued (" + queued.type + "): " + jobId, "success");
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
@@ -882,10 +890,17 @@
             return;
         }
 
+        const selectedAgent = findAgent(selectedAgentId);
+        if (!selectedAgent) {
+            setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+            return;
+        }
+
         try {
-            const response = await queueWindowsUpdateJob(selectedAgentId, true, []);
+            const queued = await queuePackageInstallJob(selectedAgent, true, []);
+            const response = queued.response;
             const jobId = response?.job?.job_id || "(unknown)";
-            setStatus(agentActionStatus, "Install-all package job queued: " + jobId, "success");
+            setStatus(agentActionStatus, "Install-all package job queued (" + queued.type + "): " + jobId, "success");
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
@@ -1174,42 +1189,72 @@
         }).join("");
     }
 
-    async function queueWindowsUpdateJob(agentRecordId, installAll, updateIds) {
+    async function queuePackageInstallJob(agent, installAll, packageIds) {
+        const agentRecordId = String(agent.agent_record_id || "");
+        const deviceType = getDeviceType(agent).value;
         const correlationRaw = updateCorrelationIdInput.value.trim();
-        const correlationId = correlationRaw || ("windows-update-" + Date.now());
+        const correlationPrefix = deviceType === "linux"
+            ? "linux-apt"
+            : (deviceType === "mac" ? "macos-update" : "windows-update");
+        const correlationId = correlationRaw || (correlationPrefix + "-" + Date.now());
 
-        return await apiFetch("/v1/admin/jobs", {
+        let type = "windows_update_install";
+        let payload = {
+            windows_update: {
+                install_all: installAll,
+                kbs: packageIds
+            }
+        };
+
+        if (deviceType === "linux") {
+            type = "ubuntu_apt_upgrade";
+            payload = {
+                apt: {
+                    upgrade_all: installAll,
+                    packages: packageIds
+                }
+            };
+        } else if (deviceType === "mac") {
+            type = "macos_software_update";
+            payload = {
+                macos_update: {
+                    install_all: installAll,
+                    labels: packageIds
+                }
+            };
+        }
+
+        const response = await apiFetch("/v1/admin/jobs", {
             method: "POST",
             body: JSON.stringify({
                 target_agent_id: agentRecordId,
-                type: "windows_update_install",
+                type: type,
                 correlation_id: correlationId,
-                payload: {
-                    windows_update: {
-                        install_all: installAll,
-                        kbs: updateIds
-                    }
-                },
+                payload: payload,
                 policy: {}
             })
         });
+
+        return { response: response, type: type };
     }
 
-    function parsePackageIds(rawValue) {
+    function parsePackageIds(rawValue, normalizeKbStyle) {
         const seen = new Set();
         const result = [];
 
         String(rawValue || "")
-            .split(/[\s,]+/)
+            .split(/[\n,]+/)
             .map((value) => value.trim())
             .filter((value) => value !== "")
             .forEach((value) => {
                 let normalized = value;
 
-                if (/^\d+$/.test(normalized)) {
-                    normalized = "KB" + normalized;
-                } else if (/^kb\d+$/i.test(normalized)) {
-                    normalized = normalized.toUpperCase();
+                if (normalizeKbStyle) {
+                    if (/^\d+$/.test(normalized)) {
+                        normalized = "KB" + normalized;
+                    } else if (/^kb\d+$/i.test(normalized)) {
+                        normalized = normalized.toUpperCase();
+                    }
                 }
 
                 const key = normalized.toLowerCase();

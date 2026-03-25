@@ -123,6 +123,8 @@ public sealed class InventoryUploadRequest
     public List<InventoryApplication> Applications { get; set; } = [];
 
     public InventoryUploadLinux? Linux { get; set; }
+
+    public InventoryUploadMacOs? MacOs { get; set; }
 }
 
 public sealed class InventoryUploadOs
@@ -170,6 +172,17 @@ public sealed class InventoryUploadLinux
     public string? KernelVersion { get; set; }
 
     public bool AptAvailable { get; set; }
+}
+
+public sealed class InventoryUploadMacOs
+{
+    public string? ProductVersion { get; set; }
+
+    public string? BuildVersion { get; set; }
+
+    public bool SoftwareUpdateAvailable { get; set; }
+
+    public List<string> AvailableUpdateLabels { get; set; } = [];
 }
 
 public sealed class InventoryApplication

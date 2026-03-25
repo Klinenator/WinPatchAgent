@@ -64,6 +64,16 @@ public sealed class SystemInventoryCollector : IInventoryCollector
                 snapshot.LinuxDistroVersionId = versionId;
             }
         }
+        else if (OperatingSystem.IsMacOS())
+        {
+            snapshot.PendingReboot = false;
+            snapshot.MacOsProductVersion = await ReadMacSwVersValueAsync("-productVersion", cancellationToken);
+            snapshot.MacOsBuildVersion = await ReadMacSwVersValueAsync("-buildVersion", cancellationToken);
+
+            var macOsUpdateSnapshot = await CollectMacAvailableUpdatesAsync(cancellationToken);
+            snapshot.MacSoftwareUpdateAvailable = macOsUpdateSnapshot.SoftwareUpdateAvailable;
+            snapshot.MacAvailableUpdateLabels = macOsUpdateSnapshot.AvailableUpdateLabels;
+        }
 
         _logger.LogInformation(
             "Collected inventory snapshot for device {DeviceId} on host {Hostname}",
@@ -313,6 +323,121 @@ $normalized | ConvertTo-Json -Depth 4 -Compress
         return data;
     }
 
+    private async Task<string?> ReadMacSwVersValueAsync(string argument, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return null;
+        }
+
+        var result = await RunProcessAsync(
+            "sw_vers",
+            [argument],
+            TimeSpan.FromSeconds(10),
+            cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var value = result.StandardOutput.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private async Task<MacSoftwareUpdateSnapshot> CollectMacAvailableUpdatesAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return new MacSoftwareUpdateSnapshot(false, []);
+        }
+
+        if (!File.Exists("/usr/sbin/softwareupdate") && !File.Exists("/usr/bin/softwareupdate"))
+        {
+            return new MacSoftwareUpdateSnapshot(false, []);
+        }
+
+        var result = await RunProcessAsync(
+            "softwareupdate",
+            ["--list"],
+            TimeSpan.FromSeconds(45),
+            cancellationToken);
+
+        if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            _logger.LogDebug(
+                "macOS softwareupdate inventory query failed with exit code {ExitCode}: {Error}",
+                result.ExitCode,
+                result.StandardError);
+            return new MacSoftwareUpdateSnapshot(false, []);
+        }
+
+        var labels = ParseMacSoftwareUpdateLabels(result.StandardOutput);
+        var output = result.StandardOutput.ToLowerInvariant();
+        var hasNoUpdatesMarker = output.Contains("no new software available", StringComparison.Ordinal);
+        var hasUpdatesMarker = output.Contains("software update found the following", StringComparison.Ordinal)
+            || output.Contains("new or updated software", StringComparison.Ordinal);
+
+        var available = !hasNoUpdatesMarker && (labels.Count > 0 || hasUpdatesMarker);
+        return new MacSoftwareUpdateSnapshot(available, labels);
+    }
+
+    private static List<string> ParseMacSoftwareUpdateLabels(string output)
+    {
+        var labels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawLine in output.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var labelIndex = line.IndexOf("Label:", StringComparison.OrdinalIgnoreCase);
+            if (labelIndex >= 0)
+            {
+                var label = line[(labelIndex + "Label:".Length)..].Trim();
+                if (label.Length > 0)
+                {
+                    labels.Add(label);
+                }
+                continue;
+            }
+
+            if (!line.StartsWith("*", StringComparison.Ordinal) && !line.StartsWith("-", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var candidate = line.TrimStart('*', '-').Trim();
+            if (candidate.Length == 0)
+            {
+                continue;
+            }
+
+            if (candidate.Contains("software update", StringComparison.OrdinalIgnoreCase)
+                || candidate.Contains("finding available software", StringComparison.OrdinalIgnoreCase)
+                || candidate.Contains("title:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var commaIndex = candidate.IndexOf(',');
+            if (commaIndex > 0)
+            {
+                candidate = candidate[..commaIndex].Trim();
+            }
+
+            if (candidate.Length > 0)
+            {
+                labels.Add(candidate);
+            }
+        }
+
+        return labels.ToList();
+    }
+
     private static async Task<ProcessResult> RunProcessAsync(
         string executable,
         IReadOnlyList<string> args,
@@ -393,4 +518,8 @@ $normalized | ConvertTo-Json -Depth 4 -Compress
         string StandardOutput,
         string StandardError,
         bool TimedOut);
+
+    private readonly record struct MacSoftwareUpdateSnapshot(
+        bool SoftwareUpdateAvailable,
+        List<string> AvailableUpdateLabels);
 }

@@ -198,7 +198,9 @@ public sealed class AgentCoordinator
             AptUpgradeAll = job.AptUpgradeAll,
             AptPackages = job.AptPackages.ToList(),
             WindowsInstallAll = job.WindowsInstallAll,
-            WindowsKbIds = job.WindowsKbIds.ToList()
+            WindowsKbIds = job.WindowsKbIds.ToList(),
+            MacOsInstallAll = job.MacOsInstallAll,
+            MacOsUpdateLabels = job.MacOsUpdateLabels.ToList()
         };
 
         await _policyClient.AcknowledgeJobAsync(

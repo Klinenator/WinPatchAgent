@@ -173,6 +173,15 @@ public sealed class HttpPolicyClient : IPolicyClient
                     KernelVersion = snapshot.LinuxKernelVersion,
                     AptAvailable = snapshot.AptAvailable
                 }
+                : null,
+            MacOs = OperatingSystem.IsMacOS()
+                ? new InventoryUploadMacOs
+                {
+                    ProductVersion = snapshot.MacOsProductVersion,
+                    BuildVersion = snapshot.MacOsBuildVersion,
+                    SoftwareUpdateAvailable = snapshot.MacSoftwareUpdateAvailable,
+                    AvailableUpdateLabels = snapshot.MacAvailableUpdateLabels.ToList()
+                }
                 : null
         };
 
@@ -217,7 +226,9 @@ public sealed class HttpPolicyClient : IPolicyClient
             AptUpgradeAll = ReadAptUpgradeAll(response.Job.Payload),
             AptPackages = ReadAptPackages(response.Job.Payload),
             WindowsInstallAll = ReadWindowsInstallAll(response.Job.Payload),
-            WindowsKbIds = ReadWindowsKbIds(response.Job.Payload)
+            WindowsKbIds = ReadWindowsKbIds(response.Job.Payload),
+            MacOsInstallAll = ReadMacOsInstallAll(response.Job.Payload),
+            MacOsUpdateLabels = ReadMacOsUpdateLabels(response.Job.Payload)
         };
     }
 
@@ -564,6 +575,32 @@ public sealed class HttpPolicyClient : IPolicyClient
             .ToList();
     }
 
+    private static bool ReadMacOsInstallAll(JsonElement? payload)
+    {
+        if (TryGetMacOsUpdateValue(payload, "install_all", out var value) && value is { ValueKind: JsonValueKind.True or JsonValueKind.False })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return false;
+    }
+
+    private static List<string> ReadMacOsUpdateLabels(JsonElement? payload)
+    {
+        var labelSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddMacLabelValuesFromArrayValue(payload, "labels", labelSet);
+        AddMacLabelValuesFromArrayValue(payload, "update_labels", labelSet);
+        AddMacLabelValuesFromArrayValue(payload, "packages", labelSet);
+        AddMacLabelValuesFromUpdates(payload, labelSet);
+
+        return labelSet
+            .Select(static label => label.Trim())
+            .Where(static label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static void AddKbValuesFromArrayValue(
         JsonElement? payload,
         string key,
@@ -630,6 +667,77 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
     }
 
+    private static void AddMacLabelValuesFromArrayValue(
+        JsonElement? payload,
+        string key,
+        ISet<string> labelSet)
+    {
+        if (!TryGetMacOsUpdateValue(payload, key, out var value) || value is not { ValueKind: JsonValueKind.Array })
+        {
+            return;
+        }
+
+        foreach (var item in value.Value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var label = item.GetString();
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                labelSet.Add(label.Trim());
+            }
+        }
+    }
+
+    private static void AddMacLabelValuesFromUpdates(JsonElement? payload, ISet<string> labelSet)
+    {
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return;
+        }
+
+        JsonElement updatesValue;
+        if (TryGetMacOsUpdateValue(payload, "updates", out var nestedUpdates)
+            && nestedUpdates is { ValueKind: JsonValueKind.Array })
+        {
+            updatesValue = nestedUpdates.Value;
+        }
+        else if (payloadObject.TryGetProperty("updates", out var topLevelUpdates)
+                 && topLevelUpdates.ValueKind == JsonValueKind.Array)
+        {
+            updatesValue = topLevelUpdates;
+        }
+        else
+        {
+            return;
+        }
+
+        foreach (var update in updatesValue.EnumerateArray())
+        {
+            if (update.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            foreach (var propertyName in new[] { "label", "name", "id", "package" })
+            {
+                if (!update.TryGetProperty(propertyName, out var labelValue) || labelValue.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var label = labelValue.GetString();
+                if (!string.IsNullOrWhiteSpace(label))
+                {
+                    labelSet.Add(label.Trim());
+                }
+            }
+        }
+    }
+
     private static bool TryGetWindowsUpdateValue(
         JsonElement? payload,
         string key,
@@ -649,6 +757,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!windowsUpdateSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetMacOsUpdateValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement macOsSection;
+        if (payloadObject.TryGetProperty("macos_update", out var macOsUpdateSection)
+            && macOsUpdateSection.ValueKind == JsonValueKind.Object)
+        {
+            macOsSection = macOsUpdateSection;
+        }
+        else if (payloadObject.TryGetProperty("mac_update", out var macUpdateSection)
+                 && macUpdateSection.ValueKind == JsonValueKind.Object)
+        {
+            macOsSection = macUpdateSection;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!macOsSection.TryGetProperty(key, out var child))
         {
             return false;
         }
