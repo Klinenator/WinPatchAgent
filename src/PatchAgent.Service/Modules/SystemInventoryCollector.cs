@@ -498,17 +498,35 @@ $items | ConvertTo-Json -Depth 5 -Compress
         var aptExecutable = File.Exists("/usr/bin/apt") ? "/usr/bin/apt" : "apt";
         var result = await RunProcessAsync(
             aptExecutable,
-            ["list", "--upgradeable"],
+            ["list", "--upgradable"],
             TimeSpan.FromSeconds(30),
             cancellationToken);
 
         if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
         {
-            _logger.LogDebug(
-                "Linux apt inventory query failed with exit code {ExitCode}: {Error}",
-                result.ExitCode,
-                result.StandardError);
-            return new LinuxAptUpdateSnapshot(false, []);
+            var aptGetExecutable = File.Exists("/usr/bin/apt-get") ? "/usr/bin/apt-get" : "apt-get";
+            var fallback = await RunProcessAsync(
+                aptGetExecutable,
+                ["-s", "upgrade"],
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+
+            if (fallback.ExitCode != 0)
+            {
+                _logger.LogDebug(
+                    "Linux apt inventory query failed with exit code {ExitCode}: {Error}",
+                    result.ExitCode,
+                    result.StandardError);
+                return new LinuxAptUpdateSnapshot(false, []);
+            }
+
+            var fallbackCount = ParseAptGetSimulationUpgradeCount(fallback.StandardOutput);
+            if (fallbackCount <= 0)
+            {
+                return new LinuxAptUpdateSnapshot(false, []);
+            }
+
+            return new LinuxAptUpdateSnapshot(true, BuildFallbackPackagePlaceholders(fallbackCount));
         }
 
         var availablePackages = ParseAptUpgradeablePackages(result.StandardOutput);
@@ -552,6 +570,47 @@ $items | ConvertTo-Json -Depth 5 -Compress
         return packages
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static int ParseAptGetSimulationUpgradeCount(string output)
+    {
+        foreach (var rawLine in output.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                line,
+                @"^(?<count>\d+)\s+upgraded,\s+\d+\s+newly installed,\s+\d+\s+to remove",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var groupValue = match.Groups["count"].Value;
+            if (int.TryParse(groupValue, out var parsed) && parsed >= 0)
+            {
+                return parsed;
+            }
+        }
+
+        return 0;
+    }
+
+    private static List<string> BuildFallbackPackagePlaceholders(int count)
+    {
+        var result = new List<string>(count);
+        for (var index = 1; index <= count; index++)
+        {
+            result.Add("upgrade-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return result;
     }
 
     private async Task<string?> ReadMacSwVersValueAsync(string argument, CancellationToken cancellationToken)
