@@ -1015,6 +1015,8 @@ final class App
     {
         $user = $this->currentAdminUser();
         $pendingTotpUser = $this->currentPendingTotpUser();
+        $totpEnabled = $this->isAdminTotpEnabled();
+        $secondFactorRequired = $pendingTotpUser !== null;
         $pendingPasskeyCount = 0;
         if ($pendingTotpUser !== null) {
             $pendingEmail = strtolower(trim((string) ($pendingTotpUser['email'] ?? '')));
@@ -1036,12 +1038,15 @@ final class App
             'user' => $user,
             'login_url' => '/v1/admin/auth/google/start',
             'logout_url' => '/v1/admin/auth/logout',
-            'totp_enabled' => $this->isAdminTotpEnabled(),
-            'totp_required' => $pendingTotpUser !== null,
-            'totp_user' => $pendingTotpUser,
+            'totp_enabled' => $totpEnabled,
+            'totp_required' => $secondFactorRequired && $totpEnabled,
+            'totp_user' => $totpEnabled ? $pendingTotpUser : null,
             'totp_verify_url' => '/v1/admin/auth/totp/verify',
             'totp_issuer' => $this->config->adminTotpIssuer,
+            'second_factor_required' => $secondFactorRequired,
+            'second_factor_user' => $pendingTotpUser,
             'passkey_supported' => $this->isPasskeySupported(),
+            'passkey_required' => $secondFactorRequired && $effectivePasskeyCount > 0,
             'passkey_available' => $effectivePasskeyCount > 0,
             'passkey_count' => $effectivePasskeyCount,
             'passkey_challenge_url' => '/v1/admin/auth/passkey/challenge',
@@ -1154,9 +1159,11 @@ final class App
             $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
         );
 
-        if ($this->isAdminTotpEnabled()) {
+        $email = strtolower(trim((string) ($claims['email'] ?? '')));
+        $hasPasskey = $email !== '' && $this->passkeys->countForUser($email) > 0;
+        if ($hasPasskey || $this->isAdminTotpEnabled()) {
             $this->startPendingTotpChallenge($claims);
-            $this->redirect('/admin/login?totp=required');
+            $this->redirect($hasPasskey ? '/admin/login?passkey=required' : '/admin/login?totp=required');
             return;
         }
 

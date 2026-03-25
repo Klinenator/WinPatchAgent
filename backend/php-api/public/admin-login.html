@@ -200,7 +200,13 @@
         }
     });
 
-    passkeyBtn.addEventListener("click", async () => {
+    let autoPasskeyAttempted = false;
+
+    async function beginPasskeyAssertion() {
+        if (passkeyBtn.disabled) {
+            return;
+        }
+
         if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.get) {
             status.textContent = "This browser does not support passkeys.";
             status.className = "status error";
@@ -255,6 +261,10 @@
         } finally {
             passkeyBtn.disabled = false;
         }
+    }
+
+    passkeyBtn.addEventListener("click", () => {
+        void beginPasskeyAssertion();
     });
 
     fetch("/v1/admin/auth/status", {
@@ -268,18 +278,45 @@
             return;
         }
 
-        if (payload.totp_required === true) {
+        const secondFactorRequired = payload.second_factor_required === true || payload.totp_required === true;
+        if (secondFactorRequired) {
             link.setAttribute("aria-disabled", "true");
-            const email = String(payload?.totp_user?.email || "").trim();
-            if (email !== "") {
-                totpPrompt.textContent = "Enter the 6-digit code for " + email + ".";
-            }
             totpPanel.hidden = false;
-            totpCode.focus();
-            if (payload.passkey_supported === true && payload.passkey_available === true) {
+            const secondFactorUser = payload?.second_factor_user || payload?.totp_user || {};
+            const email = String(secondFactorUser?.email || "").trim();
+            const totpRequired = payload.totp_required === true;
+            const passkeyAvailable = payload.passkey_supported === true && payload.passkey_available === true;
+
+            if (totpRequired) {
+                if (email !== "") {
+                    totpPrompt.textContent = "Enter the 6-digit code for " + email + ".";
+                } else {
+                    totpPrompt.textContent = "Enter the 6-digit code from Google Authenticator/Authy.";
+                }
+                totpForm.hidden = false;
+                totpCode.focus();
+            } else {
+                if (email !== "") {
+                    totpPrompt.textContent = "Use your saved passkey for " + email + ".";
+                } else {
+                    totpPrompt.textContent = "Use your saved passkey to finish signing in.";
+                }
+                totpForm.hidden = true;
+            }
+
+            if (passkeyAvailable) {
                 passkeyBtn.hidden = false;
+                if (!totpRequired && !autoPasskeyAttempted) {
+                    autoPasskeyAttempted = true;
+                    void beginPasskeyAssertion();
+                }
             } else {
                 passkeyBtn.hidden = true;
+            }
+
+            if (!totpRequired && !passkeyAvailable) {
+                status.textContent = "No available second-factor method was found for this account.";
+                status.className = "status error";
             }
             return;
         }
