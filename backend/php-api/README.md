@@ -6,6 +6,7 @@ It is intentionally framework-free so it can run behind nginx with plain PHP-FPM
 
 Current endpoints:
 - `GET /admin` (simple admin web view)
+- `GET /admin/automation`
 - `GET /admin/seed-jobs`
 - `GET /admin/install-agent`
 - `GET /admin/settings`
@@ -14,6 +15,13 @@ Current endpoints:
 - `GET /v1/admin/auth/google/start`
 - `GET /v1/admin/auth/google/callback`
 - `POST /v1/admin/auth/logout`
+- `POST /v1/admin/auth/totp/verify`
+- `GET /v1/admin/auth/passkeys`
+- `POST /v1/admin/auth/passkey/challenge`
+- `POST /v1/admin/auth/passkey/verify`
+- `POST /v1/admin/auth/passkey/register/options`
+- `POST /v1/admin/auth/passkey/register/complete`
+- `POST /v1/admin/auth/passkeys/{credentialId}/delete`
 - `POST /v1/agents/register`
 - `POST /v1/agents/heartbeat`
 - `POST /v1/agents/inventory`
@@ -23,6 +31,10 @@ Current endpoints:
 - `POST /v1/agents/job-events`
 - `POST /v1/admin/jobs`
 - `GET /v1/admin/jobs`
+- `GET /v1/admin/automations`
+- `POST /v1/admin/automations`
+- `POST /v1/admin/automations/{profileId}/run`
+- `POST /v1/admin/automations/{profileId}/delete`
 - `GET /v1/admin/agents`
 - `GET /v1/admin/agents/{agentRecordId}/inventory`
 - `POST /v1/admin/agents/{agentRecordId}/rename`
@@ -76,14 +88,17 @@ Admin authentication supports either:
 - `PATCH_API_ADMIN_KEY` bearer token (for scripts/curl)
 - Google OAuth session login when `PATCH_API_GOOGLE_CLIENT_ID`, `PATCH_API_GOOGLE_CLIENT_SECRET`, and `PATCH_API_GOOGLE_REDIRECT_URI` are set
 - Optional TOTP second factor for OAuth sessions when `PATCH_API_ADMIN_TOTP_SECRET` is set
+- Optional WebAuthn passkey second factor (Touch ID / platform passkey) for OAuth sessions once enrolled in `/admin/settings`
+  - Passkeys require HTTPS and a WebAuthn-capable browser/device.
 
 Admin pages:
 - `/admin` main dashboard (agents + jobs)
+- `/admin/automation` automation profile builder and run-now controls
 - `/admin/seed-jobs` generic job seeding
 - `/admin/install-agent` enrollment key + installer generation
 - `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), and queue Windows PowerShell script jobs for Windows agents.
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue Windows PowerShell script jobs for Windows agents, and manage automation profiles with recurring schedules and run-now execution.
 
 Suggested nginx site:
 

@@ -49,7 +49,7 @@
             color: var(--muted);
         }
 
-        a.button {
+        .button {
             display: inline-block;
             text-decoration: none;
             border-radius: 8px;
@@ -61,7 +61,12 @@
             cursor: pointer;
         }
 
-        a.button[aria-disabled="true"] {
+        .button.secondary {
+            background: #0b7a5f;
+        }
+
+        a.button[aria-disabled="true"],
+        .button:disabled {
             pointer-events: none;
             opacity: 0.6;
         }
@@ -105,6 +110,10 @@
             letter-spacing: 0.2em;
             text-align: center;
         }
+
+        .passkey {
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -128,6 +137,9 @@
                 <button id="totpSubmit" type="submit" class="button">Verify</button>
             </div>
         </form>
+        <div class="passkey">
+            <button id="passkeyBtn" type="button" class="button secondary" hidden>Use Touch ID / Passkey</button>
+        </div>
     </div>
     <div id="status" class="status"></div>
 </div>
@@ -140,6 +152,7 @@
     const totpForm = document.getElementById("totpForm");
     const totpCode = document.getElementById("totpCode");
     const totpSubmit = document.getElementById("totpSubmit");
+    const passkeyBtn = document.getElementById("passkeyBtn");
 
     const params = new URLSearchParams(window.location.search);
     const error = params.get("error");
@@ -187,6 +200,63 @@
         }
     });
 
+    passkeyBtn.addEventListener("click", async () => {
+        if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.get) {
+            status.textContent = "This browser does not support passkeys.";
+            status.className = "status error";
+            return;
+        }
+
+        passkeyBtn.disabled = true;
+        try {
+            const challengeResponse = await fetch("/v1/admin/auth/passkey/challenge", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json"
+                }
+            });
+            const challengePayload = await challengeResponse.json();
+            if (!challengeResponse.ok) {
+                const message = challengePayload?.error?.message || "Could not start passkey challenge.";
+                throw new Error(message);
+            }
+
+            const requestOptions = normalizeAssertionOptions(challengePayload?.publicKey || {});
+            const assertion = await navigator.credentials.get({ publicKey: requestOptions });
+            if (!assertion) {
+                throw new Error("Passkey authentication was cancelled.");
+            }
+
+            const verifyResponse = await fetch("/v1/admin/auth/passkey/verify", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    credential_id: toBase64Url(assertion.rawId),
+                    client_data_json: toBase64Url(assertion.response.clientDataJSON),
+                    authenticator_data: toBase64Url(assertion.response.authenticatorData),
+                    signature: toBase64Url(assertion.response.signature),
+                    user_handle: assertion.response.userHandle ? toBase64Url(assertion.response.userHandle) : ""
+                })
+            });
+
+            const verifyPayload = await verifyResponse.json();
+            if (!verifyResponse.ok) {
+                const message = verifyPayload?.error?.message || "Passkey verification failed.";
+                throw new Error(message);
+            }
+
+            window.location.replace("/admin");
+        } catch (passkeyError) {
+            status.textContent = String(passkeyError.message || passkeyError);
+            status.className = "status error";
+        } finally {
+            passkeyBtn.disabled = false;
+        }
+    });
+
     fetch("/v1/admin/auth/status", {
         method: "GET",
         headers: { "Accept": "application/json" }
@@ -206,6 +276,11 @@
             }
             totpPanel.hidden = false;
             totpCode.focus();
+            if (payload.passkey_supported === true && payload.passkey_available === true) {
+                passkeyBtn.hidden = false;
+            } else {
+                passkeyBtn.hidden = true;
+            }
             return;
         }
 
@@ -228,6 +303,39 @@
         status.textContent = "Could not check login status. Please refresh and try again.";
         status.className = "status error";
     });
+
+    function normalizeAssertionOptions(options) {
+        const normalized = { ...options };
+        normalized.challenge = fromBase64Url(String(options.challenge || ""));
+        normalized.allowCredentials = Array.isArray(options.allowCredentials)
+            ? options.allowCredentials.map((item) => ({
+                ...item,
+                id: fromBase64Url(String(item.id || ""))
+            }))
+            : [];
+        return normalized;
+    }
+
+    function fromBase64Url(value) {
+        const base64 = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
+        const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+        const binary = atob(padded);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes.buffer;
+    }
+
+    function toBase64Url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        bytes.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+
+        return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    }
 })();
 </script>
 </body>

@@ -12,5 +12,7 @@ require_once __DIR__ . '/Storage/EnrollmentRepository.php';
 require_once __DIR__ . '/Storage/InventoryRepository.php';
 require_once __DIR__ . '/Storage/EventRepository.php';
 require_once __DIR__ . '/Storage/JobRepository.php';
+require_once __DIR__ . '/Storage/AutomationProfileRepository.php';
+require_once __DIR__ . '/Storage/AdminPasskeyRepository.php';
 require_once __DIR__ . '/Support/Json.php';
 require_once __DIR__ . '/Support/Path.php';

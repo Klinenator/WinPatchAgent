@@ -294,6 +294,35 @@
             color: var(--red);
         }
 
+        .passkey-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .passkey-item {
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
+            background: #f8fbfd;
+            padding: 9px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .passkey-title {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .passkey-meta {
+            margin: 2px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
         @keyframes rise {
             0% {
                 opacity: 0;
@@ -335,6 +364,7 @@
         </div>
         <nav class="side-nav">
             <a href="/admin" class="side-link">Main</a>
+            <a href="/admin/automation" class="side-link">Automation</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
             <a href="/admin/settings" class="side-link active">Admin</a>
@@ -377,6 +407,23 @@
                 <h2>Auth Status</h2>
                 <p id="authSummary" class="hint">Checking authentication mode...</p>
             </section>
+
+            <section class="panel" style="margin-top: 12px;">
+                <h2>Passkeys (Touch ID)</h2>
+                <p class="hint">Register a passkey from this device to use Touch ID/passkey as a second factor instead of Authy code entry.</p>
+                <div class="field-block">
+                    <label for="passkeyName">Passkey Label</label>
+                    <input id="passkeyName" type="text" placeholder="Sean MacBook Touch ID" maxlength="80">
+                </div>
+                <div class="actions">
+                    <button id="registerPasskeyBtn" type="button" class="btn primary">Register Passkey</button>
+                    <button id="refreshPasskeysBtn" type="button" class="btn subtle">Refresh Passkeys</button>
+                </div>
+                <div id="passkeyStatus" class="status-line"></div>
+                <div id="passkeyList" class="passkey-list">
+                    <p class="hint">Sign in with OAuth to manage passkeys.</p>
+                </div>
+            </section>
         </section>
     </main>
 </div>
@@ -388,13 +435,19 @@
     const pageStatus = document.getElementById("pageStatus");
     const tokenStatus = document.getElementById("tokenStatus");
     const tokenInput = document.getElementById("adminToken");
+    const passkeyNameInput = document.getElementById("passkeyName");
+    const passkeyStatus = document.getElementById("passkeyStatus");
+    const passkeyList = document.getElementById("passkeyList");
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshStatusBtn = document.getElementById("refreshStatusBtn");
     const saveTokenBtn = document.getElementById("saveTokenBtn");
     const clearTokenBtn = document.getElementById("clearTokenBtn");
+    const registerPasskeyBtn = document.getElementById("registerPasskeyBtn");
+    const refreshPasskeysBtn = document.getElementById("refreshPasskeysBtn");
 
     const STORAGE_KEY = "patchagent_admin_token";
+    let authState = null;
 
     const savedToken = localStorage.getItem(STORAGE_KEY);
     if (savedToken) {
@@ -427,9 +480,8 @@
 
     logoutBtn.addEventListener("click", async () => {
         try {
-            await fetch("/v1/admin/auth/logout", {
+            await apiFetch("/v1/admin/auth/logout", {
                 method: "POST",
-                headers: { "Accept": "application/json" }
             });
         } catch {
         }
@@ -437,20 +489,86 @@
         window.location.href = "/admin/login";
     });
 
+    refreshPasskeysBtn.addEventListener("click", async () => {
+        await loadPasskeys();
+    });
+
+    registerPasskeyBtn.addEventListener("click", async () => {
+        if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) {
+            setStatus(passkeyStatus, "This browser does not support passkeys.", "error");
+            return;
+        }
+
+        if (!authState || authState.logged_in !== true) {
+            setStatus(passkeyStatus, "Sign in with OAuth first, then register a passkey.", "error");
+            return;
+        }
+
+        registerPasskeyBtn.disabled = true;
+        try {
+            const label = String(passkeyNameInput.value || "").trim();
+            const beginPayload = await apiFetch("/v1/admin/auth/passkey/register/options", {
+                method: "POST",
+                body: JSON.stringify({ name: label })
+            });
+
+            const creationOptions = normalizeCreationOptions(beginPayload?.publicKey || {});
+            const credential = await navigator.credentials.create({ publicKey: creationOptions });
+            if (!credential) {
+                throw new Error("Passkey registration was cancelled.");
+            }
+
+            const attestation = credential.response;
+            if (!attestation || typeof attestation.getPublicKey !== "function") {
+                throw new Error("This browser cannot export the passkey public key. Use current Chrome, Edge, or Safari.");
+            }
+
+            const publicKeyBuffer = attestation.getPublicKey();
+            if (!publicKeyBuffer) {
+                throw new Error("Could not access passkey public key.");
+            }
+
+            const authenticatorDataBuffer = typeof attestation.getAuthenticatorData === "function"
+                ? attestation.getAuthenticatorData()
+                : null;
+            const transports = typeof attestation.getTransports === "function"
+                ? attestation.getTransports()
+                : [];
+
+            await apiFetch("/v1/admin/auth/passkey/register/complete", {
+                method: "POST",
+                body: JSON.stringify({
+                    name: label,
+                    credential_id: toBase64Url(credential.rawId),
+                    client_data_json: toBase64Url(attestation.clientDataJSON),
+                    authenticator_data: authenticatorDataBuffer ? toBase64Url(authenticatorDataBuffer) : "",
+                    public_key_spki: toBase64Url(publicKeyBuffer),
+                    transports: Array.isArray(transports) ? transports : []
+                })
+            });
+
+            setStatus(passkeyStatus, "Passkey registered. Touch ID can now be used for 2FA.", "success");
+            await loadAuthStatus();
+            await loadPasskeys();
+        } catch (error) {
+            setStatus(passkeyStatus, String(error.message || error), "error");
+        } finally {
+            registerPasskeyBtn.disabled = false;
+        }
+    });
+
     async function loadAuthStatus() {
         try {
-            const response = await fetch("/v1/admin/auth/status", {
-                method: "GET",
-                headers: { "Accept": "application/json" }
-            });
-            const data = await response.json();
+            const data = await apiFetch("/v1/admin/auth/status", { method: "GET" });
+            authState = data;
 
             const user = data && typeof data.user === "object" ? data.user : null;
             if (data.logged_in === true && user) {
                 const email = String(user.email || "").trim();
                 const name = String(user.name || "").trim();
                 authUser.textContent = name ? (name + " <" + email + ">") : email;
-                authSummary.textContent = "OAuth session is active.";
+                const passkeyCount = Number.parseInt(String(data.passkey_count || "0"), 10) || 0;
+                authSummary.textContent = "OAuth session is active. Registered passkeys: " + passkeyCount + ".";
                 setStatus(pageStatus, "Authenticated session is active.", "success");
                 return;
             }
@@ -459,17 +577,116 @@
                 authUser.textContent = "Not signed in";
                 authSummary.textContent = "OAuth is enabled, but there is no active admin session.";
                 setStatus(pageStatus, "Sign in via Google OAuth or rely on bearer token.", "");
+                passkeyList.innerHTML = "<p class=\"hint\">Sign in with OAuth to manage passkeys.</p>";
+                setStatus(passkeyStatus, "", "");
                 return;
             }
 
             authUser.textContent = "OAuth not configured";
             authSummary.textContent = "Google OAuth is disabled on this server.";
             setStatus(pageStatus, "Bearer token auth can still be used for API requests.", "");
+            passkeyList.innerHTML = "<p class=\"hint\">Passkeys require OAuth session login.</p>";
+            setStatus(passkeyStatus, "", "");
         } catch {
             authUser.textContent = "Unknown";
             authSummary.textContent = "Could not determine auth state.";
             setStatus(pageStatus, "Could not load auth status.", "error");
+            setStatus(passkeyStatus, "Could not load passkey status.", "error");
         }
+    }
+
+    async function loadPasskeys() {
+        if (!authState || authState.logged_in !== true) {
+            passkeyList.innerHTML = "<p class=\"hint\">Sign in with OAuth to manage passkeys.</p>";
+            return;
+        }
+
+        try {
+            const payload = await apiFetch("/v1/admin/auth/passkeys", { method: "GET" });
+            const passkeys = Array.isArray(payload.passkeys) ? payload.passkeys : [];
+            if (!passkeys.length) {
+                passkeyList.innerHTML = "<p class=\"hint\">No passkeys registered yet.</p>";
+                return;
+            }
+
+            passkeyList.innerHTML = passkeys.map((passkey) => {
+                const id = String(passkey.credential_id || "");
+                const name = escapeHtml(String(passkey.name || "Passkey"));
+                const lastUsed = formatTimestamp(passkey.last_used_at);
+                const created = formatTimestamp(passkey.created_at);
+                return "<div class=\"passkey-item\">"
+                    + "<div>"
+                    + "<p class=\"passkey-title\">" + name + "</p>"
+                    + "<p class=\"passkey-meta\">Created: " + escapeHtml(created) + " • Last used: " + escapeHtml(lastUsed) + "</p>"
+                    + "</div>"
+                    + "<button type=\"button\" class=\"btn danger\" data-passkey-id=\"" + escapeAttribute(id) + "\">Delete</button>"
+                    + "</div>";
+            }).join("");
+
+            passkeyList.querySelectorAll("button[data-passkey-id]").forEach((button) => {
+                button.addEventListener("click", async () => {
+                    const passkeyId = String(button.getAttribute("data-passkey-id") || "");
+                    if (!passkeyId) {
+                        return;
+                    }
+
+                    if (!window.confirm("Delete this passkey?")) {
+                        return;
+                    }
+
+                    try {
+                        await apiFetch("/v1/admin/auth/passkeys/" + encodeURIComponent(passkeyId) + "/delete", {
+                            method: "POST"
+                        });
+                        setStatus(passkeyStatus, "Passkey deleted.", "success");
+                        await loadAuthStatus();
+                        await loadPasskeys();
+                    } catch (error) {
+                        setStatus(passkeyStatus, String(error.message || error), "error");
+                    }
+                });
+            });
+        } catch (error) {
+            passkeyList.innerHTML = "<p class=\"hint\">Could not load passkeys.</p>";
+            setStatus(passkeyStatus, String(error.message || error), "error");
+        }
+    }
+
+    async function apiFetch(path, options) {
+        const headers = new Headers(options?.headers || {});
+        headers.set("Accept", "application/json");
+
+        const token = String(localStorage.getItem(STORAGE_KEY) || "").trim();
+        if (token) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+
+        if (options?.body) {
+            headers.set("Content-Type", "application/json");
+        }
+
+        const response = await fetch(path, {
+            method: options?.method || "GET",
+            headers: headers,
+            body: options?.body
+        });
+
+        const raw = await response.text();
+        let data = {};
+        if (raw.trim() !== "") {
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                throw new Error("Server returned non-JSON response.");
+            }
+        }
+
+        if (!response.ok) {
+            const message = data?.error?.message || ("Request failed with status " + response.status);
+            throw new Error(message);
+        }
+
+        return data;
     }
 
     function setStatus(element, message, kind) {
@@ -477,8 +694,73 @@
         element.className = "status-line" + (kind ? " " + kind : "");
     }
 
+    function normalizeCreationOptions(options) {
+        const normalized = { ...options };
+        normalized.challenge = fromBase64Url(String(options.challenge || ""));
+        normalized.user = {
+            ...options.user,
+            id: fromBase64Url(String(options?.user?.id || ""))
+        };
+        normalized.excludeCredentials = Array.isArray(options.excludeCredentials)
+            ? options.excludeCredentials.map((item) => ({
+                ...item,
+                id: fromBase64Url(String(item.id || ""))
+            }))
+            : [];
+        return normalized;
+    }
+
+    function fromBase64Url(value) {
+        const base64 = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
+        const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+        const binary = atob(padded);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes.buffer;
+    }
+
+    function toBase64Url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        bytes.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+
+        return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    }
+
+    function formatTimestamp(value) {
+        const text = String(value || "").trim();
+        if (!text) {
+            return "-";
+        }
+
+        const parsed = Date.parse(text);
+        if (Number.isNaN(parsed)) {
+            return text;
+        }
+
+        return new Date(parsed).toLocaleString();
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#39;");
+    }
+
+    function escapeAttribute(value) {
+        return escapeHtml(value).replaceAll("`", "&#96;");
+    }
+
     async function initialize() {
         await loadAuthStatus();
+        await loadPasskeys();
     }
 
     initialize();

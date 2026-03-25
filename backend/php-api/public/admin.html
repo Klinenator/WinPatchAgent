@@ -614,6 +614,7 @@
         </div>
         <nav class="side-nav">
             <a href="/admin" class="side-link active">Main</a>
+            <a href="/admin/automation" class="side-link">Automation</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
             <a href="/admin/settings" class="side-link">Admin</a>
@@ -1271,7 +1272,12 @@
 
         if (deviceType === "linux") {
             const linux = getLinuxSection(agent);
-            const count = Number.parseInt(String(linux.available_packages_count || ""), 10);
+            const count = Number.parseInt(String(
+                linux.available_packages_count
+                || linux.availablePackagesCount
+                || linux.AvailablePackagesCount
+                || ""
+            ), 10);
             if (Number.isFinite(count) && count >= 0) {
                 return count;
             }
@@ -1280,22 +1286,41 @@
                 return linux.available_packages.length;
             }
 
-            return linux.package_updates_available ? 1 : 0;
+            if (Array.isArray(linux.availablePackages)) {
+                return linux.availablePackages.length;
+            }
+
+            return (
+                linux.package_updates_available
+                || linux.packageUpdatesAvailable
+                || linux.PackageUpdatesAvailable
+            ) ? 1 : 0;
         }
 
         if (deviceType === "mac") {
             const macOs = getMacOsSection(agent);
-            const count = Number.parseInt(String(macOs.available_updates_count || ""), 10);
+            const count = Number.parseInt(String(
+                macOs.available_updates_count
+                || macOs.availableUpdatesCount
+                || macOs.AvailableUpdatesCount
+                || ""
+            ), 10);
             if (Number.isFinite(count) && count >= 0) {
                 return count;
             }
 
-            const labels = Array.isArray(macOs.available_update_labels) ? macOs.available_update_labels : [];
+            const labels = Array.isArray(macOs.available_update_labels)
+                ? macOs.available_update_labels
+                : (Array.isArray(macOs.availableUpdateLabels) ? macOs.availableUpdateLabels : []);
             if (labels.length > 0) {
                 return labels.length;
             }
 
-            return macOs.software_update_available ? 1 : 0;
+            return (
+                macOs.software_update_available
+                || macOs.softwareUpdateAvailable
+                || macOs.SoftwareUpdateAvailable
+            ) ? 1 : 0;
         }
 
         return 0;

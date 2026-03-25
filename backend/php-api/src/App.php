@@ -12,6 +12,8 @@ use PatchAgent\Api\Storage\EventRepository;
 use PatchAgent\Api\Storage\FileStore;
 use PatchAgent\Api\Storage\InventoryRepository;
 use PatchAgent\Api\Storage\JobRepository;
+use PatchAgent\Api\Storage\AutomationProfileRepository;
+use PatchAgent\Api\Storage\AdminPasskeyRepository;
 use RuntimeException;
 use Throwable;
 
@@ -28,6 +30,8 @@ final class App
     private const OAUTH_SESSION_STARTED_AT_KEY = 'google_oauth_started_at';
     private const ADMIN_SESSION_USER_KEY = 'admin_user';
     private const ADMIN_SESSION_TOTP_PENDING_KEY = 'admin_totp_pending';
+    private const ADMIN_SESSION_PASSKEY_ASSERTION_KEY = 'admin_passkey_assertion_pending';
+    private const ADMIN_SESSION_PASSKEY_REGISTRATION_KEY = 'admin_passkey_registration_pending';
 
     private Config $config;
     private AgentRepository $agents;
@@ -35,6 +39,8 @@ final class App
     private InventoryRepository $inventory;
     private EventRepository $events;
     private JobRepository $jobs;
+    private AutomationProfileRepository $automations;
+    private AdminPasskeyRepository $passkeys;
 
     public function __construct()
     {
@@ -46,6 +52,8 @@ final class App
         $this->inventory = new InventoryRepository($store);
         $this->events = new EventRepository($store);
         $this->jobs = new JobRepository($store);
+        $this->automations = new AutomationProfileRepository($store);
+        $this->passkeys = new AdminPasskeyRepository($store);
     }
 
     public function run(): void
@@ -70,6 +78,11 @@ final class App
 
             if ($method === 'GET' && ($path === '/admin' || $path === '/admin/')) {
                 $this->handleAdminView();
+                return;
+            }
+
+            if ($method === 'GET' && ($path === '/admin/automation' || $path === '/admin/automation/')) {
+                $this->handleAdminAutomationView();
                 return;
             }
 
@@ -98,6 +111,12 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && $path === '/v1/admin/auth/passkeys') {
+                $this->requireAdmin($request);
+                $this->handleListAdminPasskeys();
+                return;
+            }
+
             if ($method === 'GET' && $path === '/v1/admin/auth/google/start') {
                 $this->handleGoogleAuthStart();
                 return;
@@ -111,6 +130,12 @@ final class App
             if ($method === 'GET' && $path === '/v1/admin/jobs') {
                 $this->requireAdmin($request);
                 $this->handleListJobs();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/automations') {
+                $this->requireAdmin($request);
+                $this->handleListAutomations();
                 return;
             }
 
@@ -169,6 +194,46 @@ final class App
                 return;
             }
 
+            if ($method === 'POST' && $path === '/v1/admin/auth/passkey/challenge') {
+                $this->handlePasskeyAssertionBegin();
+                return;
+            }
+
+            if ($method === 'POST' && $path === '/v1/admin/auth/passkey/verify') {
+                $this->handlePasskeyAssertionVerify($request);
+                return;
+            }
+
+            if ($method === 'POST' && $path === '/v1/admin/auth/passkey/register/options') {
+                $this->requireAdmin($request);
+                $this->handlePasskeyRegistrationOptions($request);
+                return;
+            }
+
+            if ($method === 'POST' && $path === '/v1/admin/auth/passkey/register/complete') {
+                $this->requireAdmin($request);
+                $this->handlePasskeyRegistrationComplete($request);
+                return;
+            }
+
+            if ($method === 'POST' && preg_match('#^/v1/admin/auth/passkeys/([^/]+)/delete$#', $path, $matches) === 1) {
+                $this->requireAdmin($request);
+                $this->handleDeleteAdminPasskey(rawurldecode($matches[1]));
+                return;
+            }
+
+            if ($method === 'POST' && preg_match('#^/v1/admin/automations/([^/]+)/run$#', $path, $matches) === 1) {
+                $this->requireAdmin($request);
+                $this->handleRunAutomation(rawurldecode($matches[1]));
+                return;
+            }
+
+            if ($method === 'POST' && preg_match('#^/v1/admin/automations/([^/]+)/delete$#', $path, $matches) === 1) {
+                $this->requireAdmin($request);
+                $this->handleDeleteAutomation(rawurldecode($matches[1]));
+                return;
+            }
+
             if ($method !== 'POST') {
                 JsonResponse::error(405, 'method_not_allowed', 'The requested route does not support this HTTP method.');
                 return;
@@ -202,6 +267,11 @@ final class App
                 case '/v1/admin/jobs':
                     $this->requireAdmin($request);
                     $this->handleCreateJob($request);
+                    return;
+
+                case '/v1/admin/automations':
+                    $this->requireAdmin($request);
+                    $this->handleUpsertAutomation($request);
                     return;
 
                 case '/v1/admin/enrollments':
@@ -262,6 +332,12 @@ final class App
             )),
         ]);
 
+        try {
+            $this->queueAutomationsForNewAgent($record);
+        } catch (\Throwable) {
+            // Do not block registration if automation fan-out fails.
+        }
+
         JsonResponse::ok([
             'agent_record_id' => $record['agent_record_id'],
             'agent_token' => $record['agent_token'],
@@ -281,6 +357,8 @@ final class App
             'system_state' => is_array($body['system_state'] ?? null) ? $body['system_state'] : [],
             'current_job' => is_array($body['current_job'] ?? null) ? $body['current_job'] : null,
         ]);
+
+        $this->processDueAutomations();
 
         JsonResponse::ok([
             'server_time' => gmdate(DATE_ATOM),
@@ -453,19 +531,340 @@ final class App
 
     private function handleListJobs(): void
     {
+        $this->processDueAutomations();
+
         JsonResponse::ok([
             'jobs' => $this->jobs->listJobs(),
         ]);
     }
 
+    private function handleListAutomations(): void
+    {
+        $this->processDueAutomations();
+
+        JsonResponse::ok([
+            'profiles' => $this->automations->listProfiles(),
+        ]);
+    }
+
+    private function handleUpsertAutomation(Request $request): void
+    {
+        $body = $request->json();
+        $profileInput = is_array($body['profile'] ?? null) ? $body['profile'] : $body;
+        if (!is_array($profileInput)) {
+            throw new ApiException(422, 'invalid_request', 'Automation payload must be a JSON object.');
+        }
+
+        $saved = $this->automations->saveProfile($profileInput);
+        JsonResponse::ok([
+            'profile' => $saved,
+        ]);
+    }
+
+    private function handleRunAutomation(string $profileId): void
+    {
+        $profile = $this->automations->findProfile($profileId);
+        if ($profile === null) {
+            throw new ApiException(404, 'automation_not_found', 'The requested automation profile was not found.');
+        }
+
+        $summary = $this->enqueueAutomationJobs($profile, $this->agents->listAgents(), 'manual');
+        $updated = $this->automations->recordExecution($profileId, 'manual', $summary) ?? $profile;
+
+        JsonResponse::ok([
+            'ran' => true,
+            'profile' => $updated,
+            'summary' => $summary,
+        ]);
+    }
+
+    private function handleDeleteAutomation(string $profileId): void
+    {
+        if (!$this->automations->deleteProfile($profileId)) {
+            throw new ApiException(404, 'automation_not_found', 'The requested automation profile was not found.');
+        }
+
+        JsonResponse::ok([
+            'deleted' => true,
+            'profile_id' => $profileId,
+        ]);
+    }
+
+    private function processDueAutomations(): void
+    {
+        $dueProfiles = $this->automations->claimDueProfiles(gmdate(DATE_ATOM));
+        if (count($dueProfiles) === 0) {
+            return;
+        }
+
+        $agents = $this->agents->listAgents();
+        foreach ($dueProfiles as $profile) {
+            if (!is_array($profile)) {
+                continue;
+            }
+
+            $profileId = trim((string) ($profile['profile_id'] ?? ''));
+            if ($profileId === '') {
+                continue;
+            }
+
+            $summary = $this->enqueueAutomationJobs($profile, $agents, 'scheduled');
+            $this->automations->recordExecution($profileId, 'scheduled', $summary);
+        }
+    }
+
+    private function queueAutomationsForNewAgent(array $agent): void
+    {
+        $agentRecordId = trim((string) ($agent['agent_record_id'] ?? ''));
+        if ($agentRecordId === '') {
+            return;
+        }
+
+        $platform = $this->detectAgentPlatform($agent);
+        if ($platform === 'unknown') {
+            return;
+        }
+
+        $profiles = $this->automations->listProfiles();
+        foreach ($profiles as $profile) {
+            if (!is_array($profile)) {
+                continue;
+            }
+
+            if (!$this->toBool($profile['active'] ?? false) || !$this->toBool($profile['run_on_new_agents'] ?? false)) {
+                continue;
+            }
+
+            if (!$this->profileTargetsPlatform($profile, $platform)) {
+                continue;
+            }
+
+            $profileId = trim((string) ($profile['profile_id'] ?? ''));
+            if ($profileId === '') {
+                continue;
+            }
+
+            if (!$this->automations->markAppliedToAgent($profileId, $agentRecordId)) {
+                continue;
+            }
+
+            $summary = $this->enqueueAutomationJobs($profile, [$agent], 'new_agent');
+            if ((int) ($summary['jobs_queued'] ?? 0) > 0) {
+                $this->automations->recordExecution($profileId, 'new_agent', $summary);
+            }
+        }
+    }
+
+    private function enqueueAutomationJobs(array $profile, array $agents, string $trigger): array
+    {
+        $profileId = trim((string) ($profile['profile_id'] ?? ''));
+        $profileName = trim((string) ($profile['name'] ?? 'automation'));
+        $tasks = is_array($profile['tasks'] ?? null) ? $profile['tasks'] : [];
+        $windowsTask = is_array($tasks['windows'] ?? null) ? $tasks['windows'] : [];
+        $linuxTask = is_array($tasks['linux'] ?? null) ? $tasks['linux'] : [];
+        $macTask = is_array($tasks['mac'] ?? null) ? $tasks['mac'] : [];
+        $windowsScripts = is_array($tasks['windows_scripts'] ?? null) ? $tasks['windows_scripts'] : [];
+
+        $jobsQueued = 0;
+        $agentsTargeted = 0;
+
+        foreach ($agents as $agent) {
+            if (!is_array($agent)) {
+                continue;
+            }
+
+            $targetAgentId = trim((string) ($agent['agent_record_id'] ?? ''));
+            if ($targetAgentId === '') {
+                continue;
+            }
+
+            $targetDeviceId = trim((string) ($agent['device_id'] ?? ''));
+            $platform = $this->detectAgentPlatform($agent);
+            if (!$this->profileTargetsPlatform($profile, $platform)) {
+                continue;
+            }
+
+            $agentJobsQueued = 0;
+            $correlationPrefix = sprintf(
+                'auto-%s-%s-%s-%s',
+                $profileId !== '' ? $profileId : 'profile',
+                trim($trigger) === '' ? 'manual' : trim($trigger),
+                $targetAgentId,
+                gmdate('YmdHis')
+            );
+
+            if ($platform === 'windows' && $this->toBool($windowsTask['install_all_updates'] ?? false)) {
+                $this->jobs->createJob([
+                    'type' => 'windows_update_install',
+                    'correlation_id' => $correlationPrefix . '-win-patch',
+                    'target_agent_id' => $targetAgentId,
+                    'target_device_id' => $targetDeviceId,
+                    'payload' => [
+                        'windows_update' => [
+                            'install_all' => true,
+                            'kbs' => [],
+                        ],
+                    ],
+                    'policy' => [],
+                ]);
+                $jobsQueued++;
+                $agentJobsQueued++;
+            }
+
+            if ($platform === 'linux' && $this->toBool($linuxTask['upgrade_all'] ?? false)) {
+                $this->jobs->createJob([
+                    'type' => 'ubuntu_apt_upgrade',
+                    'correlation_id' => $correlationPrefix . '-linux-apt',
+                    'target_agent_id' => $targetAgentId,
+                    'target_device_id' => $targetDeviceId,
+                    'payload' => [
+                        'apt' => [
+                            'upgrade_all' => true,
+                            'packages' => [],
+                        ],
+                    ],
+                    'policy' => [],
+                ]);
+                $jobsQueued++;
+                $agentJobsQueued++;
+            }
+
+            if ($platform === 'mac' && $this->toBool($macTask['install_all_updates'] ?? false)) {
+                $this->jobs->createJob([
+                    'type' => 'macos_software_update',
+                    'correlation_id' => $correlationPrefix . '-mac-update',
+                    'target_agent_id' => $targetAgentId,
+                    'target_device_id' => $targetDeviceId,
+                    'payload' => [
+                        'macos_update' => [
+                            'install_all' => true,
+                            'labels' => [],
+                        ],
+                    ],
+                    'policy' => [],
+                ]);
+                $jobsQueued++;
+                $agentJobsQueued++;
+            }
+
+            if ($platform === 'windows') {
+                foreach ($windowsScripts as $index => $script) {
+                    if (!is_array($script)) {
+                        continue;
+                    }
+
+                    if (!$this->toBool($script['enabled'] ?? true)) {
+                        continue;
+                    }
+
+                    $scriptBody = trim((string) ($script['script'] ?? ''));
+                    $scriptUrl = trim((string) ($script['script_url'] ?? ''));
+                    if ($scriptBody === '' && $scriptUrl === '') {
+                        continue;
+                    }
+
+                    $payload = [
+                        'windows_script' => [],
+                    ];
+
+                    if ($scriptBody !== '') {
+                        $payload['windows_script']['script'] = $scriptBody;
+                    }
+
+                    if ($scriptBody === '' && $scriptUrl !== '') {
+                        $payload['windows_script']['script_url'] = $scriptUrl;
+                    }
+
+                    $this->jobs->createJob([
+                        'type' => 'windows_powershell_script',
+                        'correlation_id' => sprintf('%s-win-script-%d', $correlationPrefix, $index + 1),
+                        'target_agent_id' => $targetAgentId,
+                        'target_device_id' => $targetDeviceId,
+                        'payload' => $payload,
+                        'policy' => [],
+                    ]);
+                    $jobsQueued++;
+                    $agentJobsQueued++;
+                }
+            }
+
+            if ($agentJobsQueued > 0) {
+                $agentsTargeted++;
+            }
+        }
+
+        return [
+            'profile_id' => $profileId,
+            'profile_name' => $profileName,
+            'trigger' => trim($trigger) === '' ? 'manual' : trim($trigger),
+            'jobs_queued' => $jobsQueued,
+            'agents_targeted' => $agentsTargeted,
+        ];
+    }
+
+    private function profileTargetsPlatform(array $profile, string $platform): bool
+    {
+        $targets = is_array($profile['targets'] ?? null) ? $profile['targets'] : [];
+
+        return match ($platform) {
+            'windows' => $this->toBool($targets['windows'] ?? true),
+            'linux' => $this->toBool($targets['linux'] ?? true),
+            'mac' => $this->toBool($targets['mac'] ?? true),
+            default => false,
+        };
+    }
+
+    private function detectAgentPlatform(array $agent): string
+    {
+        $os = is_array($agent['os'] ?? null) ? $agent['os'] : [];
+        $family = strtolower(trim((string) ($os['family'] ?? '')));
+        $description = strtolower(trim((string) ($os['description'] ?? '')));
+        $combined = trim($family . ' ' . $description);
+
+        if ($family === 'windows' || str_contains($combined, 'windows')) {
+            return 'windows';
+        }
+
+        if (
+            $family === 'linux'
+            || str_contains($combined, 'linux')
+            || str_contains($combined, 'ubuntu')
+            || str_contains($combined, 'debian')
+        ) {
+            return 'linux';
+        }
+
+        if (
+            $family === 'mac'
+            || $family === 'darwin'
+            || $family === 'osx'
+            || str_contains($combined, 'mac')
+            || str_contains($combined, 'darwin')
+        ) {
+            return 'mac';
+        }
+
+        return 'unknown';
+    }
+
     private function handleListAgents(): void
     {
+        $this->processDueAutomations();
+
         $agents = $this->agents->listAgents();
         foreach ($agents as $index => $agent) {
             $inventory = $this->inventory->loadSnapshot((string) ($agent['agent_record_id'] ?? ''));
             if ($inventory !== null) {
                 $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
                     is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
+                );
+                $inventory['linux'] = $this->normalizeLinuxInventory(
+                    is_array($inventory['linux'] ?? null) ? $inventory['linux'] : []
+                );
+                $inventory['mac_os'] = $this->normalizeMacOsInventory(
+                    is_array($inventory['mac_os'] ?? null)
+                        ? $inventory['mac_os']
+                        : (is_array($inventory['macos'] ?? null) ? $inventory['macos'] : [])
                 );
             }
 
@@ -486,6 +885,14 @@ final class App
 
         $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
             is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
+        );
+        $inventory['linux'] = $this->normalizeLinuxInventory(
+            is_array($inventory['linux'] ?? null) ? $inventory['linux'] : []
+        );
+        $inventory['mac_os'] = $this->normalizeMacOsInventory(
+            is_array($inventory['mac_os'] ?? null)
+                ? $inventory['mac_os']
+                : (is_array($inventory['macos'] ?? null) ? $inventory['macos'] : [])
         );
 
         JsonResponse::ok([
@@ -516,6 +923,11 @@ final class App
     private function handleAdminView(): void
     {
         $this->handleAdminProtectedView('admin.html', 'Admin page is missing.');
+    }
+
+    private function handleAdminAutomationView(): void
+    {
+        $this->handleAdminProtectedView('admin-automation.html', 'Admin automation page is missing.');
     }
 
     private function handleAdminSeedJobsView(): void
@@ -562,6 +974,20 @@ final class App
     {
         $user = $this->currentAdminUser();
         $pendingTotpUser = $this->currentPendingTotpUser();
+        $pendingPasskeyCount = 0;
+        if ($pendingTotpUser !== null) {
+            $pendingEmail = strtolower(trim((string) ($pendingTotpUser['email'] ?? '')));
+            if ($pendingEmail !== '') {
+                $pendingPasskeyCount = $this->passkeys->countForUser($pendingEmail);
+            }
+        }
+
+        $activePasskeyCount = 0;
+        if ($user !== null) {
+            $activePasskeyCount = $this->passkeys->countForUser((string) ($user['email'] ?? ''));
+        }
+
+        $effectivePasskeyCount = $user !== null ? $activePasskeyCount : $pendingPasskeyCount;
 
         JsonResponse::ok([
             'oauth_enabled' => $this->isGoogleOAuthEnabled(),
@@ -574,6 +1000,14 @@ final class App
             'totp_user' => $pendingTotpUser,
             'totp_verify_url' => '/v1/admin/auth/totp/verify',
             'totp_issuer' => $this->config->adminTotpIssuer,
+            'passkey_supported' => $this->isPasskeySupported(),
+            'passkey_available' => $effectivePasskeyCount > 0,
+            'passkey_count' => $effectivePasskeyCount,
+            'passkey_challenge_url' => '/v1/admin/auth/passkey/challenge',
+            'passkey_verify_url' => '/v1/admin/auth/passkey/verify',
+            'passkey_register_options_url' => '/v1/admin/auth/passkey/register/options',
+            'passkey_register_complete_url' => '/v1/admin/auth/passkey/register/complete',
+            'passkey_list_url' => '/v1/admin/auth/passkeys',
             'redirect_uri' => $this->googleRedirectUri(),
             'hosted_domain' => $this->config->googleHostedDomain,
         ]);
@@ -586,7 +1020,11 @@ final class App
         }
 
         $this->startAdminSession();
-        unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+        unset(
+            $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY]
+        );
 
         $state = bin2hex(random_bytes(24));
         $nonce = bin2hex(random_bytes(24));
@@ -636,7 +1074,8 @@ final class App
             unset(
                 $_SESSION[self::OAUTH_SESSION_STATE_KEY],
                 $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
-                $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+                $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY],
+                $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
             );
             $this->redirect('/admin/login?error=invalid_state');
             return;
@@ -660,7 +1099,8 @@ final class App
             unset(
                 $_SESSION[self::OAUTH_SESSION_STATE_KEY],
                 $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
-                $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+                $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY],
+                $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
             );
             $this->redirect('/admin/login?error=oauth_failed&reason=' . rawurlencode($exception->getMessage()));
             return;
@@ -669,7 +1109,8 @@ final class App
         unset(
             $_SESSION[self::OAUTH_SESSION_STATE_KEY],
             $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
-            $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
+            $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
         );
 
         if ($this->isAdminTotpEnabled()) {
@@ -689,6 +1130,8 @@ final class App
         unset(
             $_SESSION[self::ADMIN_SESSION_USER_KEY],
             $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY],
             $_SESSION[self::OAUTH_SESSION_STATE_KEY],
             $_SESSION[self::OAUTH_SESSION_NONCE_KEY],
             $_SESSION[self::OAUTH_SESSION_STARTED_AT_KEY]
@@ -731,6 +1174,390 @@ final class App
         ]);
     }
 
+    private function handleListAdminPasskeys(): void
+    {
+        $user = $this->currentAdminUser();
+        if ($user === null) {
+            throw new ApiException(401, 'admin_session_required', 'An authenticated admin session is required.');
+        }
+
+        $email = (string) ($user['email'] ?? '');
+        $passkeys = $this->passkeys->listForUser($email);
+
+        JsonResponse::ok([
+            'passkeys' => array_map(static function (array $passkey): array {
+                unset($passkey['public_key_pem']);
+                return $passkey;
+            }, $passkeys),
+        ]);
+    }
+
+    private function handleDeleteAdminPasskey(string $credentialId): void
+    {
+        $user = $this->currentAdminUser();
+        if ($user === null) {
+            throw new ApiException(401, 'admin_session_required', 'An authenticated admin session is required.');
+        }
+
+        $email = (string) ($user['email'] ?? '');
+        if (!$this->passkeys->deleteForUser($email, $credentialId)) {
+            throw new ApiException(404, 'passkey_not_found', 'The requested passkey was not found.');
+        }
+
+        JsonResponse::ok([
+            'deleted' => true,
+            'credential_id' => $credentialId,
+        ]);
+    }
+
+    private function handlePasskeyRegistrationOptions(Request $request): void
+    {
+        if (!$this->isPasskeySupported()) {
+            throw new ApiException(409, 'passkey_not_supported', 'Passkeys are not supported on this server.');
+        }
+
+        $user = $this->currentAdminUser();
+        if ($user === null) {
+            throw new ApiException(401, 'admin_session_required', 'An authenticated admin session is required.');
+        }
+
+        $body = $request->json();
+        $label = trim((string) ($body['name'] ?? ''));
+        if ($label === '') {
+            $label = 'Passkey';
+        }
+        if (strlen($label) > 80) {
+            $label = substr($label, 0, 80);
+        }
+
+        $email = strtolower(trim((string) ($user['email'] ?? '')));
+        $name = trim((string) ($user['name'] ?? ''));
+        $challenge = $this->base64UrlEncode(random_bytes(32));
+        $rpId = $this->webAuthnRpId();
+        $origin = $this->webAuthnOrigin();
+        $userHandle = $this->base64UrlEncode(substr(hash('sha256', $email, true), 0, 16));
+
+        $exclude = [];
+        foreach ($this->passkeys->listForUser($email) as $passkey) {
+            $credentialId = trim((string) ($passkey['credential_id'] ?? ''));
+            if ($credentialId === '') {
+                continue;
+            }
+
+            $exclude[] = [
+                'type' => 'public-key',
+                'id' => $credentialId,
+                'transports' => is_array($passkey['transports'] ?? null) ? $passkey['transports'] : [],
+            ];
+        }
+
+        $this->startAdminSession();
+        $_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY] = [
+            'email' => $email,
+            'challenge' => $challenge,
+            'rp_id' => $rpId,
+            'origin' => $origin,
+            'label' => $label,
+            'expires_at' => time() + 300,
+        ];
+
+        JsonResponse::ok([
+            'publicKey' => [
+                'challenge' => $challenge,
+                'rp' => [
+                    'name' => 'PatchAgent Admin',
+                    'id' => $rpId,
+                ],
+                'user' => [
+                    'id' => $userHandle,
+                    'name' => $email,
+                    'displayName' => $name !== '' ? $name : $email,
+                ],
+                'pubKeyCredParams' => [
+                    ['type' => 'public-key', 'alg' => -7],
+                    ['type' => 'public-key', 'alg' => -257],
+                ],
+                'timeout' => 60000,
+                'attestation' => 'none',
+                'authenticatorSelection' => [
+                    'userVerification' => 'required',
+                    'residentKey' => 'preferred',
+                ],
+                'excludeCredentials' => $exclude,
+            ],
+        ]);
+    }
+
+    private function handlePasskeyRegistrationComplete(Request $request): void
+    {
+        if (!$this->isPasskeySupported()) {
+            throw new ApiException(409, 'passkey_not_supported', 'Passkeys are not supported on this server.');
+        }
+
+        $user = $this->currentAdminUser();
+        if ($user === null) {
+            throw new ApiException(401, 'admin_session_required', 'An authenticated admin session is required.');
+        }
+
+        $this->startAdminSession();
+        $pending = $_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY] ?? null;
+        if (!is_array($pending)) {
+            throw new ApiException(401, 'passkey_registration_not_pending', 'No pending passkey registration was found.');
+        }
+
+        $expiresAt = (int) ($pending['expires_at'] ?? 0);
+        if ($expiresAt <= time()) {
+            unset($_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY]);
+            throw new ApiException(401, 'passkey_registration_expired', 'Passkey registration has expired. Start again.');
+        }
+
+        $email = strtolower(trim((string) ($user['email'] ?? '')));
+        $pendingEmail = strtolower(trim((string) ($pending['email'] ?? '')));
+        if ($email === '' || $pendingEmail === '' || !hash_equals($pendingEmail, $email)) {
+            unset($_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY]);
+            throw new ApiException(401, 'passkey_registration_user_mismatch', 'Passkey registration user mismatch.');
+        }
+
+        $body = $request->json();
+        $credentialId = trim((string) ($body['credential_id'] ?? $body['id'] ?? ''));
+        if ($credentialId === '' || preg_match('/^[A-Za-z0-9_-]+$/', $credentialId) !== 1) {
+            throw new ApiException(422, 'invalid_request', 'Field "credential_id" is required.');
+        }
+        $clientDataJsonRaw = $this->base64UrlDecode((string) ($body['client_data_json'] ?? ''));
+        if ($clientDataJsonRaw === null) {
+            throw new ApiException(422, 'invalid_request', 'Field "client_data_json" is required.');
+        }
+
+        $clientData = json_decode($clientDataJsonRaw, true);
+        if (!is_array($clientData)) {
+            throw new ApiException(422, 'invalid_request', 'Invalid WebAuthn client_data_json payload.');
+        }
+
+        $clientType = trim((string) ($clientData['type'] ?? ''));
+        if ($clientType !== 'webauthn.create') {
+            throw new ApiException(422, 'invalid_request', 'Unexpected WebAuthn client data type for registration.');
+        }
+
+        $expectedChallenge = trim((string) ($pending['challenge'] ?? ''));
+        $receivedChallenge = trim((string) ($clientData['challenge'] ?? ''));
+        if ($expectedChallenge === '' || $receivedChallenge === '' || !hash_equals($expectedChallenge, $receivedChallenge)) {
+            throw new ApiException(401, 'invalid_passkey_challenge', 'Passkey challenge validation failed.');
+        }
+
+        $expectedOrigin = trim((string) ($pending['origin'] ?? ''));
+        $receivedOrigin = trim((string) ($clientData['origin'] ?? ''));
+        if ($expectedOrigin === '' || $receivedOrigin === '' || !hash_equals($expectedOrigin, $receivedOrigin)) {
+            throw new ApiException(401, 'invalid_passkey_origin', 'Passkey origin validation failed.');
+        }
+
+        $publicKeySpkiRaw = $this->base64UrlDecode((string) ($body['public_key_spki'] ?? ''));
+        if ($publicKeySpkiRaw === null || $publicKeySpkiRaw === '') {
+            throw new ApiException(422, 'invalid_request', 'Field "public_key_spki" is required.');
+        }
+
+        $publicKeyPem = $this->spkiBinaryToPem($publicKeySpkiRaw);
+        if (openssl_pkey_get_public($publicKeyPem) === false) {
+            throw new ApiException(422, 'invalid_request', 'Field "public_key_spki" is not a valid public key.');
+        }
+
+        $authenticatorDataRaw = $this->base64UrlDecode((string) ($body['authenticator_data'] ?? ''));
+        $rpId = trim((string) ($pending['rp_id'] ?? ''));
+        if ($authenticatorDataRaw !== null && $authenticatorDataRaw !== '') {
+            $parsedAuth = $this->parseAuthenticatorData($authenticatorDataRaw, $rpId);
+            if (($parsedAuth['user_present'] ?? false) !== true) {
+                throw new ApiException(401, 'passkey_user_presence_required', 'Passkey user presence is required.');
+            }
+            if (($parsedAuth['user_verified'] ?? false) !== true) {
+                throw new ApiException(401, 'passkey_user_verification_required', 'Passkey user verification is required.');
+            }
+        }
+
+        $label = trim((string) ($body['name'] ?? (string) ($pending['label'] ?? 'Passkey')));
+        $transports = is_array($body['transports'] ?? null) ? $body['transports'] : [];
+
+        try {
+            $saved = $this->passkeys->saveForUser($email, [
+                'credential_id' => $credentialId,
+                'name' => $label,
+                'public_key_pem' => $publicKeyPem,
+                'counter' => 0,
+                'transports' => $transports,
+            ]);
+        } catch (\RuntimeException $exception) {
+            throw new ApiException(422, 'invalid_request', $exception->getMessage());
+        }
+
+        unset($_SESSION[self::ADMIN_SESSION_PASSKEY_REGISTRATION_KEY]);
+
+        $publicView = $saved;
+        unset($publicView['public_key_pem']);
+        JsonResponse::ok([
+            'registered' => true,
+            'passkey' => $publicView,
+        ]);
+    }
+
+    private function handlePasskeyAssertionBegin(): void
+    {
+        if (!$this->isPasskeySupported()) {
+            throw new ApiException(409, 'passkey_not_supported', 'Passkeys are not supported on this server.');
+        }
+
+        $pendingClaims = $this->currentPendingTotpClaims();
+        if ($pendingClaims === null) {
+            throw new ApiException(401, 'passkey_not_pending', 'No pending passkey challenge was found. Start login again.');
+        }
+
+        $email = strtolower(trim((string) ($pendingClaims['email'] ?? '')));
+        $passkeys = $this->passkeys->listForUser($email);
+        if (count($passkeys) === 0) {
+            throw new ApiException(404, 'passkey_not_enrolled', 'No passkeys are registered for this user.');
+        }
+
+        $challenge = $this->base64UrlEncode(random_bytes(32));
+        $rpId = $this->webAuthnRpId();
+        $origin = $this->webAuthnOrigin();
+        $allowCredentials = [];
+
+        foreach ($passkeys as $passkey) {
+            $credentialId = trim((string) ($passkey['credential_id'] ?? ''));
+            if ($credentialId === '') {
+                continue;
+            }
+
+            $allowCredentials[] = [
+                'type' => 'public-key',
+                'id' => $credentialId,
+                'transports' => is_array($passkey['transports'] ?? null) ? $passkey['transports'] : [],
+            ];
+        }
+
+        $this->startAdminSession();
+        $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY] = [
+            'email' => $email,
+            'challenge' => $challenge,
+            'rp_id' => $rpId,
+            'origin' => $origin,
+            'expires_at' => time() + 300,
+        ];
+
+        JsonResponse::ok([
+            'publicKey' => [
+                'challenge' => $challenge,
+                'rpId' => $rpId,
+                'allowCredentials' => $allowCredentials,
+                'timeout' => 60000,
+                'userVerification' => 'required',
+            ],
+        ]);
+    }
+
+    private function handlePasskeyAssertionVerify(Request $request): void
+    {
+        if (!$this->isPasskeySupported()) {
+            throw new ApiException(409, 'passkey_not_supported', 'Passkeys are not supported on this server.');
+        }
+
+        $pendingClaims = $this->currentPendingTotpClaims();
+        if ($pendingClaims === null) {
+            throw new ApiException(401, 'passkey_not_pending', 'No pending passkey challenge was found. Start login again.');
+        }
+
+        $this->startAdminSession();
+        $pending = $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY] ?? null;
+        if (!is_array($pending)) {
+            throw new ApiException(401, 'passkey_not_pending', 'No pending passkey challenge was found. Start login again.');
+        }
+
+        $expiresAt = (int) ($pending['expires_at'] ?? 0);
+        if ($expiresAt <= time()) {
+            unset($_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]);
+            throw new ApiException(401, 'passkey_challenge_expired', 'Passkey challenge has expired. Start login again.');
+        }
+
+        $email = strtolower(trim((string) ($pendingClaims['email'] ?? '')));
+        $pendingEmail = strtolower(trim((string) ($pending['email'] ?? '')));
+        if ($email === '' || $pendingEmail === '' || !hash_equals($pendingEmail, $email)) {
+            unset($_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]);
+            throw new ApiException(401, 'passkey_user_mismatch', 'Passkey user mismatch.');
+        }
+
+        $body = $request->json();
+        $credentialId = trim((string) ($body['credential_id'] ?? $body['id'] ?? ''));
+        if ($credentialId === '' || preg_match('/^[A-Za-z0-9_-]+$/', $credentialId) !== 1) {
+            throw new ApiException(422, 'invalid_request', 'Field "credential_id" is required.');
+        }
+
+        $credential = $this->passkeys->findForUserByCredentialId($email, $credentialId);
+        if ($credential === null) {
+            throw new ApiException(404, 'passkey_not_found', 'The passkey credential was not found.');
+        }
+
+        $clientDataJsonRaw = $this->base64UrlDecode((string) ($body['client_data_json'] ?? ''));
+        $authenticatorDataRaw = $this->base64UrlDecode((string) ($body['authenticator_data'] ?? ''));
+        $signatureRaw = $this->base64UrlDecode((string) ($body['signature'] ?? ''));
+        if ($clientDataJsonRaw === null || $authenticatorDataRaw === null || $signatureRaw === null) {
+            throw new ApiException(422, 'invalid_request', 'Passkey verification payload is incomplete.');
+        }
+
+        $clientData = json_decode($clientDataJsonRaw, true);
+        if (!is_array($clientData)) {
+            throw new ApiException(422, 'invalid_request', 'Invalid WebAuthn client_data_json payload.');
+        }
+
+        $clientType = trim((string) ($clientData['type'] ?? ''));
+        if ($clientType !== 'webauthn.get') {
+            throw new ApiException(422, 'invalid_request', 'Unexpected WebAuthn client data type for assertion.');
+        }
+
+        $expectedChallenge = trim((string) ($pending['challenge'] ?? ''));
+        $receivedChallenge = trim((string) ($clientData['challenge'] ?? ''));
+        if ($expectedChallenge === '' || $receivedChallenge === '' || !hash_equals($expectedChallenge, $receivedChallenge)) {
+            throw new ApiException(401, 'invalid_passkey_challenge', 'Passkey challenge validation failed.');
+        }
+
+        $expectedOrigin = trim((string) ($pending['origin'] ?? ''));
+        $receivedOrigin = trim((string) ($clientData['origin'] ?? ''));
+        if ($expectedOrigin === '' || $receivedOrigin === '' || !hash_equals($expectedOrigin, $receivedOrigin)) {
+            throw new ApiException(401, 'invalid_passkey_origin', 'Passkey origin validation failed.');
+        }
+
+        $rpId = trim((string) ($pending['rp_id'] ?? ''));
+        $parsedAuth = $this->parseAuthenticatorData($authenticatorDataRaw, $rpId);
+        if (($parsedAuth['user_present'] ?? false) !== true) {
+            throw new ApiException(401, 'passkey_user_presence_required', 'Passkey user presence is required.');
+        }
+        if (($parsedAuth['user_verified'] ?? false) !== true) {
+            throw new ApiException(401, 'passkey_user_verification_required', 'Passkey user verification is required.');
+        }
+
+        $clientHash = hash('sha256', $clientDataJsonRaw, true);
+        $signedData = $authenticatorDataRaw . $clientHash;
+        $publicKeyPem = (string) ($credential['public_key_pem'] ?? '');
+        $verify = openssl_verify($signedData, $signatureRaw, $publicKeyPem, OPENSSL_ALGO_SHA256);
+        if ($verify !== 1) {
+            throw new ApiException(401, 'invalid_passkey_signature', 'Passkey signature validation failed.');
+        }
+
+        $previousCounter = max(0, (int) ($credential['counter'] ?? 0));
+        $currentCounter = max(0, (int) ($parsedAuth['counter'] ?? 0));
+        if ($previousCounter > 0 && $currentCounter > 0 && $currentCounter <= $previousCounter) {
+            throw new ApiException(401, 'invalid_passkey_counter', 'Passkey sign counter did not advance.');
+        }
+
+        $this->passkeys->updateCounterAndLastUsed($email, $credentialId, $currentCounter);
+        unset($_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]);
+
+        $this->authenticateAdminUser($pendingClaims);
+
+        JsonResponse::ok([
+            'verified' => true,
+            'logged_in' => true,
+            'user' => $this->currentAdminUser(),
+            'redirect' => '/admin',
+        ]);
+    }
+
     private function authenticateAdminUser(array $claims): void
     {
         $sessionTtl = max(300, $this->config->adminSessionTtlSeconds);
@@ -743,7 +1570,10 @@ final class App
             'authenticated_at' => gmdate(DATE_ATOM),
             'expires_at' => time() + $sessionTtl,
         ];
-        unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+        unset(
+            $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
+        );
         session_regenerate_id(true);
     }
 
@@ -759,7 +1589,10 @@ final class App
             'started_at' => time(),
             'challenge_expires_at' => time() + $challengeTtl,
         ];
-        unset($_SESSION[self::ADMIN_SESSION_USER_KEY]);
+        unset(
+            $_SESSION[self::ADMIN_SESSION_USER_KEY],
+            $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
+        );
         session_regenerate_id(true);
     }
 
@@ -788,13 +1621,19 @@ final class App
 
         $email = strtolower(trim((string) ($pending['email'] ?? '')));
         if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+            unset(
+                $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY],
+                $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
+            );
             return null;
         }
 
         $expiresAt = (int) ($pending['challenge_expires_at'] ?? 0);
         if ($expiresAt <= time()) {
-            unset($_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY]);
+            unset(
+                $_SESSION[self::ADMIN_SESSION_TOTP_PENDING_KEY],
+                $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
+            );
             return null;
         }
 
@@ -889,6 +1728,86 @@ final class App
         }
 
         return $output;
+    }
+
+    private function isPasskeySupported(): bool
+    {
+        return function_exists('openssl_verify')
+            && function_exists('openssl_pkey_get_public')
+            && function_exists('random_bytes');
+    }
+
+    private function webAuthnOrigin(): string
+    {
+        return $this->baseUrlFromServer();
+    }
+
+    private function webAuthnRpId(): string
+    {
+        $host = (string) parse_url($this->baseUrlFromServer(), PHP_URL_HOST);
+        $host = strtolower(trim($host));
+        if ($host === '') {
+            throw new ApiException(500, 'server_error', 'Unable to resolve WebAuthn RP ID for this request.');
+        }
+
+        return $host;
+    }
+
+    private function parseAuthenticatorData(string $authenticatorData, string $rpId): array
+    {
+        if (strlen($authenticatorData) < 37) {
+            throw new ApiException(422, 'invalid_request', 'Authenticator data is invalid.');
+        }
+
+        $rpIdHash = substr($authenticatorData, 0, 32);
+        $expectedRpIdHash = hash('sha256', $rpId, true);
+        if (!hash_equals($expectedRpIdHash, $rpIdHash)) {
+            throw new ApiException(401, 'invalid_passkey_rp_id', 'Passkey RP ID validation failed.');
+        }
+
+        $flags = ord($authenticatorData[32]);
+        $counterData = substr($authenticatorData, 33, 4);
+        $counterParts = unpack('Ncounter', $counterData);
+        $counter = is_array($counterParts) ? (int) ($counterParts['counter'] ?? 0) : 0;
+
+        return [
+            'flags' => $flags,
+            'counter' => max(0, $counter),
+            'user_present' => ($flags & 0x01) === 0x01,
+            'user_verified' => ($flags & 0x04) === 0x04,
+        ];
+    }
+
+    private function spkiBinaryToPem(string $binary): string
+    {
+        $encoded = chunk_split(base64_encode($binary), 64, "\n");
+        return "-----BEGIN PUBLIC KEY-----\n" . $encoded . "-----END PUBLIC KEY-----\n";
+    }
+
+    private function base64UrlEncode(string $binary): string
+    {
+        return rtrim(strtr(base64_encode($binary), '+/', '-_'), '=');
+    }
+
+    private function base64UrlDecode(string $value): ?string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match('/^[A-Za-z0-9+\/_=-]+$/', $trimmed) !== 1) {
+            return null;
+        }
+
+        $normalized = str_replace(['-', '_'], ['+', '/'], $trimmed);
+        $padding = strlen($normalized) % 4;
+        if ($padding > 0) {
+            $normalized .= str_repeat('=', 4 - $padding);
+        }
+
+        $decoded = base64_decode($normalized, true);
+        return is_string($decoded) ? $decoded : null;
     }
 
     private function servePublicHtmlFile(string $filename, string $missingMessage): void
@@ -1260,6 +2179,172 @@ BASH;
         $windowsUpdate['available_patches'] = array_slice($normalizedAvailable, 0, 300);
         $windowsUpdate['available_patches_count'] = count($normalizedAvailable);
         return $windowsUpdate;
+    }
+
+    private function normalizeLinuxInventory(array $linux): array
+    {
+        $availablePackagesSource = null;
+        foreach (['available_packages', 'availablePackages', 'AvailablePackages', 'packages', 'Packages'] as $key) {
+            if (is_array($linux[$key] ?? null)) {
+                $availablePackagesSource = $linux[$key];
+                break;
+            }
+        }
+
+        $normalizedPackages = [];
+        if (is_array($availablePackagesSource)) {
+            foreach ($availablePackagesSource as $package) {
+                if (!is_string($package)) {
+                    continue;
+                }
+
+                $trimmed = trim($package);
+                if ($trimmed === '') {
+                    continue;
+                }
+
+                $normalizedPackages[$trimmed] = true;
+            }
+        }
+
+        $normalizedPackageList = array_values(array_keys($normalizedPackages));
+        sort($normalizedPackageList, SORT_STRING);
+
+        $count = null;
+        foreach ([
+            'available_packages_count',
+            'availablePackagesCount',
+            'AvailablePackagesCount',
+            'package_updates_count',
+            'packageUpdatesCount',
+            'PackageUpdatesCount',
+        ] as $key) {
+            if (!array_key_exists($key, $linux)) {
+                continue;
+            }
+
+            $parsed = filter_var($linux[$key], FILTER_VALIDATE_INT);
+            if ($parsed !== false && (int) $parsed >= 0) {
+                $count = (int) $parsed;
+                break;
+            }
+        }
+
+        if ($count === null) {
+            $count = count($normalizedPackageList);
+        }
+
+        $updatesAvailable = $this->toBool($linux['package_updates_available'] ?? false)
+            || $this->toBool($linux['packageUpdatesAvailable'] ?? false)
+            || $this->toBool($linux['PackageUpdatesAvailable'] ?? false)
+            || $this->toBool($linux['updates_available'] ?? false)
+            || $this->toBool($linux['updatesAvailable'] ?? false)
+            || $count > 0;
+
+        if ($count <= 0 && $updatesAvailable) {
+            $count = count($normalizedPackageList) > 0 ? count($normalizedPackageList) : 1;
+        }
+
+        return [
+            'distro_id' => trim((string) (
+                $linux['distro_id']
+                ?? $linux['distroId']
+                ?? $linux['DistroId']
+                ?? ''
+            )),
+            'distro_version_id' => trim((string) (
+                $linux['distro_version_id']
+                ?? $linux['distroVersionId']
+                ?? $linux['DistroVersionId']
+                ?? ''
+            )),
+            'kernel_version' => trim((string) (
+                $linux['kernel_version']
+                ?? $linux['kernelVersion']
+                ?? $linux['KernelVersion']
+                ?? ''
+            )),
+            'apt_available' => $this->toBool($linux['apt_available'] ?? false)
+                || $this->toBool($linux['aptAvailable'] ?? false)
+                || $this->toBool($linux['AptAvailable'] ?? false),
+            'package_updates_available' => $updatesAvailable,
+            'available_packages' => array_slice($normalizedPackageList, 0, 500),
+            'available_packages_count' => max(0, $count),
+        ];
+    }
+
+    private function normalizeMacOsInventory(array $macOs): array
+    {
+        $labelsSource = null;
+        foreach (['available_update_labels', 'availableUpdateLabels', 'AvailableUpdateLabels', 'labels', 'Labels'] as $key) {
+            if (is_array($macOs[$key] ?? null)) {
+                $labelsSource = $macOs[$key];
+                break;
+            }
+        }
+
+        $normalizedLabels = [];
+        if (is_array($labelsSource)) {
+            foreach ($labelsSource as $label) {
+                if (!is_string($label)) {
+                    continue;
+                }
+
+                $trimmed = trim($label);
+                if ($trimmed === '') {
+                    continue;
+                }
+
+                $normalizedLabels[$trimmed] = true;
+            }
+        }
+
+        $labels = array_values(array_keys($normalizedLabels));
+        sort($labels, SORT_STRING);
+
+        $count = null;
+        foreach (['available_updates_count', 'availableUpdatesCount', 'AvailableUpdatesCount'] as $key) {
+            if (!array_key_exists($key, $macOs)) {
+                continue;
+            }
+
+            $parsed = filter_var($macOs[$key], FILTER_VALIDATE_INT);
+            if ($parsed !== false && (int) $parsed >= 0) {
+                $count = (int) $parsed;
+                break;
+            }
+        }
+
+        if ($count === null) {
+            $count = count($labels);
+        }
+
+        $updateAvailable = $this->toBool($macOs['software_update_available'] ?? false)
+            || $this->toBool($macOs['softwareUpdateAvailable'] ?? false)
+            || $this->toBool($macOs['SoftwareUpdateAvailable'] ?? false)
+            || $count > 0;
+
+        if ($count <= 0 && $updateAvailable) {
+            $count = count($labels) > 0 ? count($labels) : 1;
+        }
+
+        return [
+            'product_version' => trim((string) (
+                $macOs['product_version']
+                ?? $macOs['productVersion']
+                ?? $macOs['ProductVersion']
+                ?? ''
+            )),
+            'build_version' => trim((string) (
+                $macOs['build_version']
+                ?? $macOs['buildVersion']
+                ?? $macOs['BuildVersion']
+                ?? ''
+            )),
+            'software_update_available' => $updateAvailable,
+            'available_update_labels' => array_slice($labels, 0, 500),
+            'available_updates_count' => max(0, $count),
+        ];
     }
 
     private function powershellLiteral(string $value): string
@@ -1647,6 +2732,29 @@ BASH;
         }
 
         return trim($value);
+    }
+
+    private function toBool(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return ((int) $value) !== 0;
+        }
+
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+                return true;
+            }
+            if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private function pollIntervals(): array
