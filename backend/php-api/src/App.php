@@ -892,6 +892,11 @@ final class App
     private function detectAgentPlatform(array $agent): string
     {
         $os = is_array($agent['os'] ?? null) ? $agent['os'] : [];
+        return $this->detectOsFamily($os);
+    }
+
+    private function detectOsFamily(array $os): string
+    {
         $family = strtolower(trim((string) ($os['family'] ?? '')));
         $description = strtolower(trim((string) ($os['description'] ?? '')));
         $combined = trim($family . ' ' . $description);
