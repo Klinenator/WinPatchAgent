@@ -2072,7 +2072,68 @@ function Require-Command {
     }
 }
 
-Require-Command "dotnet" "Install .NET SDK 8+ and rerun."
+function Get-DotnetCommand {
+    \$cmd = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (\$cmd) {
+        return \$cmd.Source
+    }
+
+    \$fallback = "C:\\Program Files\\dotnet\\dotnet.exe"
+    if (Test-Path \$fallback) {
+        return \$fallback
+    }
+
+    return \$null
+}
+
+function Get-DotnetSdkMajorVersions {
+    param([string]\$DotnetExe)
+
+    if ([string]::IsNullOrWhiteSpace(\$DotnetExe)) {
+        return @()
+    }
+
+    try {
+        \$lines = & \$DotnetExe --list-sdks 2>\$null
+    } catch {
+        return @()
+    }
+
+    \$majors = @()
+    foreach (\$line in \$lines) {
+        if (\$line -match "^\\s*(\\d+)\\.") {
+            \$majors += [int]\$Matches[1]
+        }
+    }
+    return \$majors
+}
+
+function Ensure-DotnetSdk8 {
+    \$dotnetExe = Get-DotnetCommand
+    \$majors = Get-DotnetSdkMajorVersions -DotnetExe \$dotnetExe
+    if (\$majors | Where-Object { \$_ -ge 8 }) {
+        return \$dotnetExe
+    }
+
+    Write-Host ".NET SDK 8+ not found. Installing .NET SDK 8..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    \$installerPath = Join-Path \$env:TEMP ("dotnet-install-" + [guid]::NewGuid().ToString("N") + ".ps1")
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile \$installerPath
+        & powershell -NoProfile -ExecutionPolicy Bypass -File \$installerPath -Channel "8.0" -InstallDir "C:\\Program Files\\dotnet" -Architecture "x64"
+    } finally {
+        Remove-Item -Path \$installerPath -Force -ErrorAction SilentlyContinue
+    }
+
+    \$env:PATH = "C:\\Program Files\\dotnet;" + \$env:PATH
+    \$dotnetExe = Get-DotnetCommand
+    \$majors = Get-DotnetSdkMajorVersions -DotnetExe \$dotnetExe
+    if (-not (\$majors | Where-Object { \$_ -ge 8 })) {
+        throw "Failed to install .NET SDK 8."
+    }
+
+    return \$dotnetExe
+}
 
 function Normalize-RepoHttpUrl {
     param([string]\$RawUrl)
@@ -2141,7 +2202,8 @@ try {
 }
 
 \$ProjectPath = Join-Path \$WorkDir "src\\PatchAgent.Service\\PatchAgent.Service.csproj"
-dotnet publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
+\$DotnetExe = Ensure-DotnetSdk8
+& \$DotnetExe publish \$ProjectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
 
 \$ConfigPath = Join-Path \$InstallDir "appsettings.Production.json"
 \$ConfigObject = @{
