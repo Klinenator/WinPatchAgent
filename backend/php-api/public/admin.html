@@ -427,6 +427,110 @@
             max-height: 300px;
         }
 
+        .patch-browser {
+            margin-top: 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            overflow: hidden;
+        }
+
+        .patch-browser-head {
+            padding: 12px 12px 6px;
+            border-bottom: 1px solid #d9e7f0;
+            background: #f4f9fc;
+        }
+
+        .patch-browser-head h3 {
+            margin: 0;
+            font-size: 16px;
+            letter-spacing: 0.01em;
+            text-transform: none;
+            color: #22384e;
+        }
+
+        .patch-tabs {
+            display: flex;
+            gap: 12px;
+            padding: 0 12px;
+            border-bottom: 1px solid #d9e7f0;
+            background: #fff;
+        }
+
+        .patch-tab {
+            appearance: none;
+            border: none;
+            background: transparent;
+            color: #526173;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 10px 2px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -1px;
+        }
+
+        .patch-tab.active {
+            color: #17344e;
+            border-bottom-color: #f43f8c;
+        }
+
+        .patch-toolbar {
+            padding: 10px 12px;
+            border-bottom: 1px solid #d9e7f0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            background: #fff;
+        }
+
+        .patch-toolbar-right {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .patch-actions {
+            padding: 10px 12px;
+            border-bottom: 1px solid #d9e7f0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            background: #fff;
+        }
+
+        .patch-select-all {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #334e68;
+        }
+
+        .patch-table-wrap {
+            border: none;
+            border-radius: 0;
+            background: #fff;
+            max-height: 360px;
+        }
+
+        .patch-checkbox-col {
+            width: 56px;
+        }
+
+        .patch-status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            margin-right: 6px;
+            vertical-align: middle;
+            background: #2d82da;
+        }
+
         table {
             width: 100%;
             border-collapse: separate;
@@ -592,6 +696,14 @@
             .toolbar-row {
                 grid-template-columns: 1fr;
             }
+
+            .patch-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .patch-toolbar-right {
+                justify-content: flex-start;
+            }
         }
 
         @media (max-width: 560px) {
@@ -722,20 +834,56 @@
 
                 <div class="field-grid">
                     <div class="field-block">
-                        <label for="updateIdsInput">Package IDs (comma-separated)</label>
-                        <input id="updateIdsInput" type="text" placeholder="pkg-security-2026-03, KB5035853">
-                    </div>
-                    <div class="field-block">
                         <label for="updateCorrelationId">Package Correlation ID (optional)</label>
                         <input id="updateCorrelationId" type="text" placeholder="package-rollout-001">
                     </div>
                 </div>
 
-                <div class="button-row">
-                    <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Listed Packages</button>
-                    <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                <div class="patch-browser">
+                    <div class="patch-browser-head">
+                        <h3>Patch Management</h3>
+                        <p id="patchInventoryMeta" class="hint">Select an agent to view patch details.</p>
+                    </div>
+                    <div class="patch-tabs" role="tablist" aria-label="Patch views">
+                        <button id="availablePackagesTabBtn" type="button" class="patch-tab active" role="tab" aria-selected="true">Available Packages (0)</button>
+                        <button id="installedPackagesTabBtn" type="button" class="patch-tab" role="tab" aria-selected="false">Installed Packages (0)</button>
+                    </div>
+                    <div class="patch-toolbar">
+                        <input id="patchSearchInput" type="search" placeholder="Search package name, title, label, or source">
+                        <div class="patch-toolbar-right">
+                            <span id="patchLastUpdatedCopy" class="hint">Last updated: n/a</span>
+                            <button id="refreshSelectedInventoryBtn" type="button" class="btn subtle">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="patch-actions">
+                        <label class="patch-select-all">
+                            <input id="selectAllVisiblePatches" type="checkbox">
+                            Select visible
+                        </label>
+                        <span id="selectedPackagesCount" class="hint">0 selected</span>
+                        <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Selected Packages</button>
+                        <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                    </div>
+                    <div class="table-wrap compact patch-table-wrap">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th class="patch-checkbox-col">Pick</th>
+                                <th>Name</th>
+                                <th>Label</th>
+                                <th>Classification</th>
+                                <th>Source</th>
+                                <th>Status</th>
+                            </tr>
+                            </thead>
+                            <tbody id="patchPackagesTableBody">
+                            <tr><td colspan="6" class="hint">Select an agent to view package details.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
+                <h3>Windows Script Jobs</h3>
                 <div class="field-grid">
                     <div class="field-block">
                         <label for="windowsScriptCorrelationId">Script Correlation ID (optional)</label>
@@ -753,42 +901,8 @@
                 <div class="button-row">
                     <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue PowerShell Script</button>
                     <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
-                    <button id="refreshSelectedInventoryBtn" type="button" class="btn subtle">Refresh Inventory Snapshot</button>
                 </div>
                 <div id="agentActionStatus" class="status-line"></div>
-
-                <h3>Installed Packages</h3>
-                <div class="table-wrap compact">
-                    <table>
-                        <thead>
-                        <tr>
-                            <th>Package ID</th>
-                            <th>Title</th>
-                            <th>Installed At</th>
-                        </tr>
-                        </thead>
-                        <tbody id="installedUpdatesTableBody">
-                        <tr><td colspan="3" class="hint">Select an agent to view installed packages.</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <h3>Available Packages</h3>
-                <p id="availablePackagesSummary" class="hint">Select an agent to view available packages.</p>
-                <div class="table-wrap compact">
-                    <table>
-                        <thead>
-                        <tr>
-                            <th>Package ID</th>
-                            <th>Title / Label</th>
-                            <th>Source</th>
-                        </tr>
-                        </thead>
-                        <tbody id="availablePackagesTableBody">
-                        <tr><td colspan="3" class="hint">Select an agent to view available packages.</td></tr>
-                        </tbody>
-                    </table>
-                </div>
             </section>
         </section>
 
@@ -824,9 +938,14 @@
     const tokenStatus = document.getElementById("tokenStatus");
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
-    const installedUpdatesTableBody = document.getElementById("installedUpdatesTableBody");
-    const availablePackagesTableBody = document.getElementById("availablePackagesTableBody");
-    const availablePackagesSummary = document.getElementById("availablePackagesSummary");
+    const patchPackagesTableBody = document.getElementById("patchPackagesTableBody");
+    const patchInventoryMeta = document.getElementById("patchInventoryMeta");
+    const patchLastUpdatedCopy = document.getElementById("patchLastUpdatedCopy");
+    const availablePackagesTabBtn = document.getElementById("availablePackagesTabBtn");
+    const installedPackagesTabBtn = document.getElementById("installedPackagesTabBtn");
+    const patchSearchInput = document.getElementById("patchSearchInput");
+    const selectAllVisiblePatches = document.getElementById("selectAllVisiblePatches");
+    const selectedPackagesCount = document.getElementById("selectedPackagesCount");
     const agentActionStatus = document.getElementById("agentActionStatus");
     const selectedAgentHint = document.getElementById("selectedAgentHint");
     const agentsSummary = document.getElementById("agentsSummary");
@@ -849,7 +968,6 @@
 
     const selectedAgentIdInput = document.getElementById("selectedAgentId");
     const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
-    const updateIdsInput = document.getElementById("updateIdsInput");
     const updateCorrelationIdInput = document.getElementById("updateCorrelationId");
     const windowsScriptCorrelationIdInput = document.getElementById("windowsScriptCorrelationId");
     const windowsScriptUrlInput = document.getElementById("windowsScriptUrlInput");
@@ -861,6 +979,8 @@
     let latestAgents = [];
     let latestJobs = [];
     let selectedAgentId = "";
+    let selectedAvailablePackageIds = new Set();
+    let activePatchTab = "available";
 
     logoutBtn.addEventListener("click", async () => {
         try {
@@ -881,6 +1001,22 @@
 
     availabilityFilterInput.addEventListener("change", () => {
         renderAgents(latestAgents);
+    });
+
+    availablePackagesTabBtn.addEventListener("click", () => {
+        switchPatchTab("available");
+    });
+
+    installedPackagesTabBtn.addEventListener("click", () => {
+        switchPatchTab("installed");
+    });
+
+    patchSearchInput.addEventListener("input", () => {
+        renderPatchTableForSelectedAgent();
+    });
+
+    selectAllVisiblePatches.addEventListener("change", () => {
+        toggleSelectVisibleAvailablePatches(selectAllVisiblePatches.checked);
     });
 
     renameAgentBtn.addEventListener("click", async () => {
@@ -919,10 +1055,13 @@
             return;
         }
 
-        const deviceType = getDeviceType(selectedAgent).value;
-        const updateIds = parsePackageIds(updateIdsInput.value, deviceType === "windows");
+        const availableRows = getAvailablePatchRows(selectedAgent);
+        const updateIds = availableRows
+            .filter((row) => selectedAvailablePackageIds.has(row.install_id))
+            .map((row) => row.install_id);
+
         if (!updateIds.length) {
-            setStatus(agentActionStatus, "Provide at least one package ID.", "error");
+            setStatus(agentActionStatus, "Select one or more available packages first.", "error");
             return;
         }
 
@@ -930,6 +1069,8 @@
             const queued = await queuePackageInstallJob(selectedAgent, false, updateIds);
             const response = queued.response;
             const jobId = response?.job?.job_id || "(unknown)";
+            selectedAvailablePackageIds = new Set();
+            renderPatchTableForSelectedAgent();
             setStatus(agentActionStatus, "Package install job queued (" + queued.type + "): " + jobId, "success");
             await loadDashboard();
         } catch (error) {
@@ -1098,6 +1239,7 @@
             renderMetrics([], []);
             renderAgents([]);
             renderJobs([]);
+            syncSelectedAgent();
             setStatus(tokenStatus, String(error.message || error), "error");
         }
     }
@@ -1211,11 +1353,17 @@
             return;
         }
 
-        selectedAgentId = String(agent.agent_record_id || "");
+        const nextSelectedAgentId = String(agent.agent_record_id || "");
+        if (selectedAgentId !== nextSelectedAgentId) {
+            selectedAvailablePackageIds = new Set();
+            activePatchTab = "available";
+            patchSearchInput.value = "";
+        }
+
+        selectedAgentId = nextSelectedAgentId;
         selectedAgentIdInput.value = selectedAgentId;
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
-        renderInstalledUpdates(getInstalledUpdates(agent));
-        renderAvailablePackages(agent);
+        renderPatchTableForSelectedAgent();
         selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         setStatus(agentActionStatus, "Selected " + selectedAgentDisplayNameInput.value + ".", "");
         renderAgents(latestAgents);
@@ -1224,6 +1372,7 @@
     function syncSelectedAgent() {
         if (!selectedAgentId) {
             selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, or run scripts.";
+            renderPatchTableForSelectedAgent();
             return;
         }
 
@@ -1232,8 +1381,8 @@
             selectedAgentId = "";
             selectedAgentIdInput.value = "";
             selectedAgentDisplayNameInput.value = "";
-            renderInstalledUpdates([]);
-            renderAvailablePackages(null);
+            selectedAvailablePackageIds = new Set();
+            renderPatchTableForSelectedAgent();
             selectedAgentHint.textContent = "Selected agent is no longer present.";
             setStatus(agentActionStatus, "Selected agent is no longer present.", "error");
             renderAgents(latestAgents);
@@ -1241,8 +1390,7 @@
         }
 
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
-        renderInstalledUpdates(getInstalledUpdates(agent));
-        renderAvailablePackages(agent);
+        renderPatchTableForSelectedAgent();
         selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         renderAgents(latestAgents);
     }
@@ -1276,20 +1424,38 @@
             : {};
     }
 
-    function getInstalledUpdates(agent) {
-        const windowsUpdate = getWindowsUpdateSection(agent);
-        const installed = windowsUpdate.installed_patches;
-        if (!Array.isArray(installed)) {
+    function getInstalledPatchRows(agent) {
+        if (!agent) {
             return [];
         }
 
+        const deviceType = getDeviceType(agent).value;
+        if (deviceType !== "windows") {
+            return [];
+        }
+
+        const windowsUpdate = getWindowsUpdateSection(agent);
+        const installed = Array.isArray(windowsUpdate.installed_patches)
+            ? windowsUpdate.installed_patches
+            : [];
+
         return installed
             .filter((update) => typeof update === "object" && update !== null)
-            .map((update) => ({
-                update_id: String(update.kb || ""),
-                title: String(update.title || ""),
-                installed_at: String(update.installed_at || "")
-            }));
+            .map((update, index) => {
+                const packageId = String(update.kb || update.update_id || "").trim();
+                const title = String(update.title || "").trim();
+                const installedAt = String(update.installed_at || "").trim();
+                return {
+                    row_id: "installed-" + String(index),
+                    install_id: "",
+                    name: title || packageId || "Unnamed update",
+                    label: "Windows",
+                    classification: "Installed Update",
+                    source: installedAt || "Windows Update",
+                    status: "Installed",
+                    selectable: false
+                };
+            });
     }
 
     function countInstalledUpdates(agent) {
@@ -1299,7 +1465,7 @@
             return count;
         }
 
-        return getInstalledUpdates(agent).length;
+        return getInstalledPatchRows(agent).length;
     }
 
     function countAvailablePackages(agent) {
@@ -1400,22 +1566,7 @@
         return { value: "unknown", label: "Unknown" };
     }
 
-    function renderInstalledUpdates(updates) {
-        if (!updates.length) {
-            installedUpdatesTableBody.innerHTML = '<tr><td colspan="3" class="hint">No installed package data in latest inventory.</td></tr>';
-            return;
-        }
-
-        installedUpdatesTableBody.innerHTML = updates.map((update) => {
-            return "<tr>" +
-                "<td><code class=\"mono\">" + escapeHtml(String(update.update_id || "")) + "</code></td>" +
-                "<td>" + escapeHtml(String(update.title || "")) + "</td>" +
-                "<td>" + escapeHtml(String(update.installed_at || "")) + "</td>" +
-                "</tr>";
-        }).join("");
-    }
-
-    function getAvailablePackageEntries(agent) {
+    function getAvailablePatchRows(agent) {
         if (!agent) {
             return [];
         }
@@ -1426,12 +1577,21 @@
             const available = Array.isArray(windowsUpdate.available_patches) ? windowsUpdate.available_patches : [];
             return available
                 .filter((update) => typeof update === "object" && update !== null)
-                .map((update) => ({
-                    package_id: String(update.update_id || update.kb || ""),
-                    title: String(update.title || ""),
-                    source: "Windows Update"
-                }))
-                .filter((entry) => entry.package_id !== "" || entry.title !== "");
+                .map((update, index) => {
+                    const packageId = String(update.update_id || update.kb || "").trim();
+                    const title = String(update.title || "").trim();
+                    return {
+                        row_id: "available-win-" + String(index),
+                        install_id: packageId,
+                        name: title || packageId || "Unnamed update",
+                        label: "Windows",
+                        classification: "OS Update",
+                        source: "Windows Update",
+                        status: "Available",
+                        selectable: packageId !== ""
+                    };
+                })
+                .filter((entry) => entry.name !== "");
         }
 
         if (deviceType === "linux") {
@@ -1443,10 +1603,15 @@
                 .filter((pkg) => typeof pkg === "string")
                 .map((pkg) => pkg.trim())
                 .filter((pkg) => pkg !== "")
-                .map((pkg) => ({
-                    package_id: pkg,
-                    title: "",
-                    source: "APT"
+                .map((pkg, index) => ({
+                    row_id: "available-linux-" + String(index),
+                    install_id: pkg,
+                    name: pkg,
+                    label: "Linux",
+                    classification: "Package",
+                    source: "APT",
+                    status: "Available",
+                    selectable: true
                 }));
         }
 
@@ -1459,59 +1624,216 @@
                 .filter((label) => typeof label === "string")
                 .map((label) => label.trim())
                 .filter((label) => label !== "")
-                .map((label) => ({
-                    package_id: label,
-                    title: "",
-                    source: "softwareupdate"
+                .map((label, index) => ({
+                    row_id: "available-mac-" + String(index),
+                    install_id: label,
+                    name: label,
+                    label: "macOS",
+                    classification: "Upgrade",
+                    source: "softwareupdate",
+                    status: "Available",
+                    selectable: true
                 }));
         }
 
         return [];
     }
 
-    function inventorySnapshotCopy(agent) {
+    function getPatchRowsForActiveTab(agent) {
         if (!agent) {
-            return "";
+            return [];
+        }
+
+        return activePatchTab === "installed"
+            ? getInstalledPatchRows(agent)
+            : getAvailablePatchRows(agent);
+    }
+
+    function getFilteredPatchRows(agent) {
+        const rows = getPatchRowsForActiveTab(agent);
+        const query = patchSearchInput.value.trim().toLowerCase();
+        if (query === "") {
+            return rows;
+        }
+
+        return rows.filter((row) => {
+            const haystack = (
+                String(row.name || "") + " " +
+                String(row.label || "") + " " +
+                String(row.classification || "") + " " +
+                String(row.source || "") + " " +
+                String(row.status || "")
+            ).toLowerCase();
+            return haystack.includes(query);
+        });
+    }
+
+    function getInventorySnapshotTimestamp(agent) {
+        if (!agent) {
+            return null;
         }
 
         const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
         const snapshotTime = String(inventory.stored_at || inventory.collected_at || "").trim();
-        if (!snapshotTime) {
-            return "Snapshot time unavailable";
-        }
-
-        return "Snapshot " + describeLastSeen(snapshotTime) + " (" + snapshotTime + ")";
+        return snapshotTime || null;
     }
 
-    function renderAvailablePackages(agent) {
+    function setPatchTabButtons(availableCount, installedCount) {
+        availablePackagesTabBtn.textContent = "Available Packages (" + String(availableCount) + ")";
+        installedPackagesTabBtn.textContent = "Installed Packages (" + String(installedCount) + ")";
+        availablePackagesTabBtn.classList.toggle("active", activePatchTab === "available");
+        installedPackagesTabBtn.classList.toggle("active", activePatchTab === "installed");
+        availablePackagesTabBtn.setAttribute("aria-selected", activePatchTab === "available" ? "true" : "false");
+        installedPackagesTabBtn.setAttribute("aria-selected", activePatchTab === "installed" ? "true" : "false");
+    }
+
+    function updatePatchSelectionUi(agent, visibleRows) {
+        const selectedCount = selectedAvailablePackageIds.size;
+        selectedPackagesCount.textContent = String(selectedCount) + " selected";
+
+        const availableMode = activePatchTab === "available";
+        const availableCount = agent ? countAvailablePackages(agent) : 0;
+        installListedUpdatesBtn.disabled = !availableMode || selectedCount === 0;
+        installAllUpdatesBtn.disabled = !availableMode || availableCount <= 0;
+        selectAllVisiblePatches.disabled = !availableMode;
+
+        if (!availableMode) {
+            selectAllVisiblePatches.checked = false;
+            return;
+        }
+
+        const selectableVisible = visibleRows
+            .filter((row) => row.selectable && row.install_id !== "");
+
+        if (!selectableVisible.length) {
+            selectAllVisiblePatches.checked = false;
+            return;
+        }
+
+        const selectedVisibleCount = selectableVisible
+            .filter((row) => selectedAvailablePackageIds.has(row.install_id))
+            .length;
+        selectAllVisiblePatches.checked = selectedVisibleCount === selectableVisible.length;
+    }
+
+    function renderPatchTableForSelectedAgent() {
+        const agent = selectedAgentId ? findAgent(selectedAgentId) : null;
         if (!agent) {
-            availablePackagesSummary.textContent = "Select an agent to view available packages.";
-            availablePackagesTableBody.innerHTML = '<tr><td colspan="3" class="hint">Select an agent to view available packages.</td></tr>';
+            setPatchTabButtons(0, 0);
+            patchInventoryMeta.textContent = "Select an agent to view patch details.";
+            patchLastUpdatedCopy.textContent = "Last updated: n/a";
+            patchPackagesTableBody.innerHTML = '<tr><td colspan="6" class="hint">Select an agent to view package details.</td></tr>';
+            selectedPackagesCount.textContent = "0 selected";
+            installListedUpdatesBtn.disabled = true;
+            installAllUpdatesBtn.disabled = true;
+            selectAllVisiblePatches.disabled = true;
+            selectAllVisiblePatches.checked = false;
             return;
         }
 
-        const entries = getAvailablePackageEntries(agent);
-        const count = countAvailablePackages(agent);
-        const snapshot = inventorySnapshotCopy(agent);
-        availablePackagesSummary.textContent = count + " available package(s). " + snapshot + ".";
+        const availableCount = countAvailablePackages(agent);
+        const installedCount = countInstalledUpdates(agent);
+        setPatchTabButtons(availableCount, installedCount);
 
-        if (!entries.length) {
-            if (count > 0) {
-                availablePackagesTableBody.innerHTML = '<tr><td colspan="3" class="hint">Inventory reports available packages, but this snapshot did not include package names.</td></tr>';
-                return;
+        const validInstallIds = new Set(
+            getAvailablePatchRows(agent)
+                .map((row) => String(row.install_id || "").trim())
+                .filter((value) => value !== "")
+        );
+        selectedAvailablePackageIds = new Set(
+            Array.from(selectedAvailablePackageIds).filter((value) => validInstallIds.has(value))
+        );
+
+        const snapshotTimestamp = getInventorySnapshotTimestamp(agent);
+        patchLastUpdatedCopy.textContent = snapshotTimestamp
+            ? ("Last updated: " + describeLastSeen(snapshotTimestamp))
+            : "Last updated: unknown";
+
+        const agentName = String(agent.display_name || agent.hostname || "selected agent");
+        const viewName = activePatchTab === "available" ? "available packages" : "installed packages";
+        patchInventoryMeta.textContent = "Viewing " + viewName + " for " + agentName + ".";
+
+        const rows = getFilteredPatchRows(agent);
+
+        if (!rows.length) {
+            if (activePatchTab === "available" && availableCount > 0) {
+                patchPackagesTableBody.innerHTML = '<tr><td colspan="6" class="hint">Packages exist but did not match your search.</td></tr>';
+            } else if (activePatchTab === "installed" && installedCount > 0) {
+                patchPackagesTableBody.innerHTML = '<tr><td colspan="6" class="hint">Installed entries exist but did not match your search.</td></tr>';
+            } else if (activePatchTab === "installed") {
+                patchPackagesTableBody.innerHTML = '<tr><td colspan="6" class="hint">No installed package details were reported in this snapshot.</td></tr>';
+            } else {
+                patchPackagesTableBody.innerHTML = '<tr><td colspan="6" class="hint">No available packages were reported in this snapshot.</td></tr>';
             }
-
-            availablePackagesTableBody.innerHTML = '<tr><td colspan="3" class="hint">No available packages reported in latest inventory.</td></tr>';
+            updatePatchSelectionUi(agent, rows);
             return;
         }
 
-        availablePackagesTableBody.innerHTML = entries.map((entry) => {
+        patchPackagesTableBody.innerHTML = rows.map((row) => {
+            const selectable = activePatchTab === "available" && row.selectable && row.install_id !== "";
+            const checkbox = selectable
+                ? "<input type=\"checkbox\" class=\"patch-row-checkbox\" data-install-id=\"" + escapeHtml(row.install_id) + "\"" + (selectedAvailablePackageIds.has(row.install_id) ? " checked" : "") + ">"
+                : "";
             return "<tr>" +
-                "<td><code class=\"mono\">" + escapeHtml(String(entry.package_id || "")) + "</code></td>" +
-                "<td>" + escapeHtml(String(entry.title || "")) + "</td>" +
-                "<td>" + escapeHtml(String(entry.source || "")) + "</td>" +
+                "<td>" + checkbox + "</td>" +
+                "<td>" + escapeHtml(String(row.name || "")) + "</td>" +
+                "<td>" + escapeHtml(String(row.label || "")) + "</td>" +
+                "<td>" + escapeHtml(String(row.classification || "")) + "</td>" +
+                "<td>" + escapeHtml(String(row.source || "")) + "</td>" +
+                "<td><span class=\"patch-status-dot\"></span>" + escapeHtml(String(row.status || "")) + "</td>" +
                 "</tr>";
         }).join("");
+
+        patchPackagesTableBody.querySelectorAll(".patch-row-checkbox").forEach((input) => {
+            input.addEventListener("change", () => {
+                const installId = String(input.getAttribute("data-install-id") || "").trim();
+                if (!installId) {
+                    return;
+                }
+
+                if (input.checked) {
+                    selectedAvailablePackageIds.add(installId);
+                } else {
+                    selectedAvailablePackageIds.delete(installId);
+                }
+
+                updatePatchSelectionUi(agent, rows);
+            });
+        });
+
+        updatePatchSelectionUi(agent, rows);
+    }
+
+    function toggleSelectVisibleAvailablePatches(checked) {
+        if (!selectedAgentId || activePatchTab !== "available") {
+            return;
+        }
+
+        const agent = findAgent(selectedAgentId);
+        if (!agent) {
+            return;
+        }
+
+        const rows = getFilteredPatchRows(agent).filter((row) => row.selectable && row.install_id !== "");
+        rows.forEach((row) => {
+            if (checked) {
+                selectedAvailablePackageIds.add(row.install_id);
+            } else {
+                selectedAvailablePackageIds.delete(row.install_id);
+            }
+        });
+
+        renderPatchTableForSelectedAgent();
+    }
+
+    function switchPatchTab(tabName) {
+        if (tabName !== "available" && tabName !== "installed") {
+            return;
+        }
+
+        activePatchTab = tabName;
+        selectAllVisiblePatches.checked = false;
+        renderPatchTableForSelectedAgent();
     }
 
     async function queuePackageInstallJob(agent, installAll, packageIds) {
@@ -1591,35 +1913,6 @@
         });
 
         return { response: response, type: "windows_powershell_script" };
-    }
-
-    function parsePackageIds(rawValue, normalizeKbStyle) {
-        const seen = new Set();
-        const result = [];
-
-        String(rawValue || "")
-            .split(/[\n,]+/)
-            .map((value) => value.trim())
-            .filter((value) => value !== "")
-            .forEach((value) => {
-                let normalized = value;
-
-                if (normalizeKbStyle) {
-                    if (/^\d+$/.test(normalized)) {
-                        normalized = "KB" + normalized;
-                    } else if (/^kb\d+$/i.test(normalized)) {
-                        normalized = normalized.toUpperCase();
-                    }
-                }
-
-                const key = normalized.toLowerCase();
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    result.push(normalized);
-                }
-            });
-
-        return result;
     }
 
     function buildGcpwInstallTemplate() {
