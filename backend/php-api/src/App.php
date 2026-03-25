@@ -1003,7 +1003,7 @@ final class App
             return;
         }
 
-        $this->servePublicHtmlFile($filename, $missingMessage);
+        $this->servePublicHtmlFile($filename, $missingMessage, true);
     }
 
     private function handleAdminLoginView(): void
@@ -1018,7 +1018,7 @@ final class App
             return;
         }
 
-        $this->servePublicHtmlFile('admin-login.html', 'Admin login page is missing.');
+        $this->servePublicHtmlFile('admin-login.html', 'Admin login page is missing.', true);
     }
 
     private function handleAdminAuthStatus(): void
@@ -1868,7 +1868,7 @@ final class App
         return is_string($decoded) ? $decoded : null;
     }
 
-    private function servePublicHtmlFile(string $filename, string $missingMessage): void
+    private function servePublicHtmlFile(string $filename, string $missingMessage, bool $injectScriptNonce = false): void
     {
         $path = dirname(__DIR__) . '/public/' . $filename;
         if (!is_file($path)) {
@@ -1878,9 +1878,53 @@ final class App
             return;
         }
 
+        if (!$injectScriptNonce) {
+            http_response_code(200);
+            header('Content-Type: text/html; charset=utf-8');
+            readfile($path);
+            return;
+        }
+
+        $html = file_get_contents($path);
+        if (!is_string($html)) {
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo $missingMessage;
+            return;
+        }
+
+        $nonce = $this->generateCspNonce();
+        $html = $this->injectScriptNonceIntoHtml($html, $nonce);
+
         http_response_code(200);
         header('Content-Type: text/html; charset=utf-8');
-        readfile($path);
+        header('X-CSP-Nonce: ' . $nonce);
+        echo $html;
+    }
+
+    private function generateCspNonce(): string
+    {
+        try {
+            $bytes = random_bytes(18);
+        } catch (Throwable) {
+            $bytes = hash('sha256', uniqid('patchagent_nonce_', true), true);
+        }
+
+        return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
+    }
+
+    private function injectScriptNonceIntoHtml(string $html, string $nonce): string
+    {
+        $result = preg_replace_callback('/<script\b([^>]*)>/i', static function (array $matches) use ($nonce): string {
+            $attributes = $matches[1] ?? '';
+            if (preg_match('/\bnonce\s*=/i', $attributes) === 1) {
+                return $matches[0];
+            }
+
+            return '<script' . $attributes . ' nonce="' . htmlspecialchars($nonce, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '">';
+        }, $html);
+
+        return is_string($result) ? $result : $html;
     }
 
     private function handleLinuxInstallScript(Request $request): void

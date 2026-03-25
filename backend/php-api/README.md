@@ -129,6 +129,15 @@ server {
 }
 ```
 
+If you use a strict Content-Security-Policy, admin pages now emit a per-request nonce in the
+`X-CSP-Nonce` response header. In nginx, prefer a CSP like:
+
+```nginx
+add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'nonce-$upstream_http_x_csp_nonce'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'" always;
+```
+
+This allows inline admin scripts only when they carry the server-generated nonce.
+
 Suggested next steps:
 - Replace file storage with MySQL or PostgreSQL
 - Add agent key rotation and signed enrollment flow
