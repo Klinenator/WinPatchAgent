@@ -12,6 +12,12 @@ public sealed class JobCompletionReport
 
     public string PostRebootValidation { get; set; } = "not_run";
 
+    public string? Summary { get; set; }
+
+    public string? Output { get; set; }
+
+    public string? ErrorOutput { get; set; }
+
     public string? ErrorCode { get; set; }
 
     public string? ErrorMessage { get; set; }

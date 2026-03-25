@@ -362,6 +362,12 @@ public sealed class JobCompletionResult
     public bool RebootPerformed { get; set; }
 
     public string PostRebootValidation { get; set; } = "not_run";
+
+    public string? Summary { get; set; }
+
+    public string? Output { get; set; }
+
+    public string? ErrorOutput { get; set; }
 }
 
 public sealed class JobCompletionError

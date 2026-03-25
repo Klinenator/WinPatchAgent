@@ -812,6 +812,71 @@
             margin-top: 12px;
         }
 
+        .job-log-view {
+            margin-top: 10px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #fff;
+            padding: 10px;
+        }
+
+        .job-log-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .job-log-head h3 {
+            margin: 0;
+            font-size: 15px;
+            color: #22384e;
+            letter-spacing: 0.01em;
+        }
+
+        .job-log-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .job-log-block {
+            border: 1px solid #d9e7f0;
+            border-radius: 10px;
+            background: #f7fbfe;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        .job-log-block.full {
+            grid-column: 1 / -1;
+        }
+
+        .job-log-label {
+            margin: 0;
+            padding: 6px 8px;
+            border-bottom: 1px solid #d9e7f0;
+            background: #edf5fb;
+            color: #33506d;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .job-log-text {
+            margin: 0;
+            padding: 8px;
+            max-height: 240px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: #1f2f41;
+        }
+
         .fade-up {
             animation: rise 0.66s ease;
         }
@@ -893,6 +958,10 @@
             .patch-actions-right .btn {
                 min-width: 0;
                 width: 100%;
+            }
+
+            .job-log-grid {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -1146,12 +1215,37 @@
                         <th>Target Device</th>
                         <th>Target Agent</th>
                         <th>Created</th>
+                        <th>Actions</th>
                     </tr>
                     </thead>
                     <tbody id="jobsTableBody">
-                    <tr><td colspan="6" class="hint">No jobs loaded.</td></tr>
+                    <tr><td colspan="7" class="hint">No jobs loaded.</td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div class="job-log-view">
+                <div class="job-log-head">
+                    <h3 id="jobLogTitle">Job Logs</h3>
+                    <p id="jobLogMeta" class="hint">Select a job to inspect completion output.</p>
+                </div>
+                <div class="job-log-grid">
+                    <div class="job-log-block">
+                        <p class="job-log-label">Summary</p>
+                        <pre id="jobLogSummary" class="job-log-text">No job selected.</pre>
+                    </div>
+                    <div class="job-log-block">
+                        <p class="job-log-label">Error Output (stderr)</p>
+                        <pre id="jobLogStderr" class="job-log-text">No job selected.</pre>
+                    </div>
+                    <div class="job-log-block full">
+                        <p class="job-log-label">Standard Output (stdout)</p>
+                        <pre id="jobLogStdout" class="job-log-text">No job selected.</pre>
+                    </div>
+                    <div class="job-log-block full">
+                        <p class="job-log-label">Raw Completion Payload</p>
+                        <pre id="jobLogCompletionJson" class="job-log-text">No job selected.</pre>
+                    </div>
+                </div>
             </div>
         </section>
     </main>
@@ -1163,6 +1257,12 @@
     const tokenStatus = document.getElementById("tokenStatus");
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
+    const jobLogTitle = document.getElementById("jobLogTitle");
+    const jobLogMeta = document.getElementById("jobLogMeta");
+    const jobLogSummary = document.getElementById("jobLogSummary");
+    const jobLogStdout = document.getElementById("jobLogStdout");
+    const jobLogStderr = document.getElementById("jobLogStderr");
+    const jobLogCompletionJson = document.getElementById("jobLogCompletionJson");
     const patchPackagesTableBody = document.getElementById("patchPackagesTableBody");
     const patchInventoryMeta = document.getElementById("patchInventoryMeta");
     const patchLastUpdatedCopy = document.getElementById("patchLastUpdatedCopy");
@@ -1213,6 +1313,7 @@
     let latestAgents = [];
     let latestJobs = [];
     let selectedAgentId = "";
+    let selectedJobId = "";
     let selectedAvailablePackageIds = new Set();
     let activePatchTab = "available";
     let installActionInFlight = false;
@@ -1574,6 +1675,7 @@
             renderAgents(latestAgents);
             renderJobs(latestJobs);
             syncSelectedAgent();
+            syncSelectedJobLog();
             setStatus(tokenStatus, "Loaded " + latestAgents.length + " agent(s) and " + latestJobs.length + " job(s).", "success");
         } catch (error) {
             latestJobs = [];
@@ -1582,6 +1684,7 @@
             renderAgents([]);
             renderJobs([]);
             syncSelectedAgent();
+            renderJobLog(null);
             setStatus(tokenStatus, String(error.message || error), "error");
         }
     }
@@ -1687,23 +1790,33 @@
 
     function renderJobs(jobs) {
         if (!jobs.length) {
-            jobsTableBody.innerHTML = '<tr><td colspan="6" class="hint">No jobs found.</td></tr>';
+            jobsTableBody.innerHTML = '<tr><td colspan="7" class="hint">No jobs found.</td></tr>';
             return;
         }
 
         jobsTableBody.innerHTML = jobs.map((job) => {
             const status = String(job.status || "");
             const statusClass = statusToClass(status);
+            const jobId = String(job.job_id || "");
 
             return "<tr>" +
-                "<td><code class=\"mono\">" + escapeHtml(String(job.job_id || "")) + "</code></td>" +
+                "<td><code class=\"mono\">" + escapeHtml(jobId) + "</code></td>" +
                 "<td><span class=\"pill " + escapeHtml(statusClass) + "\">" + escapeHtml(status || "unknown") + "</span></td>" +
                 "<td>" + escapeHtml(String(job.type || "")) + "</td>" +
                 "<td>" + escapeHtml(String(job.target_device_id || "")) + "</td>" +
                 "<td><code class=\"mono\">" + escapeHtml(String(job.target_agent_id || "")) + "</code></td>" +
                 "<td>" + escapeHtml(String(job.created_at || "")) + "</td>" +
+                "<td><button type=\"button\" class=\"btn tiny view-job-log-btn\" data-job-id=\"" + escapeHtml(jobId) + "\">View Logs</button></td>" +
                 "</tr>";
         }).join("");
+
+        jobsTableBody.querySelectorAll(".view-job-log-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+                const jobId = button.getAttribute("data-job-id") || "";
+                const job = findJob(jobId);
+                renderJobLog(job);
+            });
+        });
     }
 
     function selectAgent(agentId) {
@@ -1756,6 +1869,92 @@
 
     function findAgent(agentId) {
         return latestAgents.find((agent) => String(agent.agent_record_id || "") === String(agentId)) || null;
+    }
+
+    function findJob(jobId) {
+        return latestJobs.find((job) => String(job.job_id || "") === String(jobId)) || null;
+    }
+
+    function syncSelectedJobLog() {
+        if (!selectedJobId) {
+            return;
+        }
+
+        const job = findJob(selectedJobId);
+        if (!job) {
+            renderJobLog(null);
+            return;
+        }
+
+        renderJobLog(job);
+    }
+
+    function renderJobLog(job) {
+        if (!job) {
+            selectedJobId = "";
+            jobLogTitle.textContent = "Job Logs";
+            jobLogMeta.textContent = "Select a job to inspect completion output.";
+            jobLogSummary.textContent = "No job selected.";
+            jobLogStdout.textContent = "No job selected.";
+            jobLogStderr.textContent = "No job selected.";
+            jobLogCompletionJson.textContent = "No job selected.";
+            return;
+        }
+
+        selectedJobId = String(job.job_id || "");
+
+        const completion = (typeof job.completion === "object" && job.completion !== null)
+            ? job.completion
+            : {};
+        const result = (typeof completion.result === "object" && completion.result !== null)
+            ? completion.result
+            : {};
+        const error = (typeof completion.error === "object" && completion.error !== null)
+            ? completion.error
+            : {};
+
+        const summaryParts = [];
+        const finalState = String(completion.final_state || job.status || "unknown");
+        const installResult = String(result.install_result || "").trim();
+        const summary = String(result.summary || "").trim();
+        const errorMessage = String(error.message || "").trim();
+        const errorCode = String(error.code || "").trim();
+
+        summaryParts.push("Final state: " + finalState);
+        if (installResult) {
+            summaryParts.push("Install result: " + installResult);
+        }
+        if (summary) {
+            summaryParts.push("Summary: " + summary);
+        }
+        if (errorCode || errorMessage) {
+            summaryParts.push("Error: " + (errorCode ? errorCode + " " : "") + errorMessage);
+        }
+
+        const stdout = String(
+            result.output
+            || result.stdout
+            || result.standard_output
+            || ""
+        );
+        const stderr = String(
+            result.error_output
+            || result.stderr
+            || result.standard_error
+            || ""
+        );
+
+        jobLogTitle.textContent = "Job Logs - " + selectedJobId;
+        jobLogMeta.textContent = "Type: "
+            + String(job.type || "unknown")
+            + " | Target: "
+            + String(job.target_agent_id || job.target_device_id || "unknown")
+            + " | Created: "
+            + String(job.created_at || "n/a");
+        jobLogSummary.textContent = summaryParts.join("\n") || "No summary was reported for this job.";
+        jobLogStdout.textContent = stdout.trim() || "No stdout captured.";
+        jobLogStderr.textContent = stderr.trim() || (errorMessage || "No stderr captured.");
+        jobLogCompletionJson.textContent = JSON.stringify(completion, null, 2) || "{}";
     }
 
     function getWindowsUpdateSection(agent) {

@@ -318,7 +318,10 @@ public sealed class HttpPolicyClient : IPolicyClient
                 InstallResult = report.InstallResult,
                 RebootRequired = report.RebootRequired,
                 RebootPerformed = report.RebootPerformed,
-                PostRebootValidation = report.PostRebootValidation
+                PostRebootValidation = report.PostRebootValidation,
+                Summary = report.Summary,
+                Output = report.Output,
+                ErrorOutput = report.ErrorOutput
             },
             Error = report.ErrorCode is null && report.ErrorMessage is null && report.Retryable is null
                 ? null

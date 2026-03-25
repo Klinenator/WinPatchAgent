@@ -11,6 +11,8 @@ namespace PatchAgent.Service.Services;
 
 public sealed class WindowsPowerShellScriptJobExecutor : IJobExecutor
 {
+    private const int MaxReportedOutputChars = 24000;
+
     private readonly ILogger<WindowsPowerShellScriptJobExecutor> _logger;
     private readonly AgentOptions _options;
     private readonly IPolicyClient _policyClient;
@@ -116,11 +118,13 @@ public sealed class WindowsPowerShellScriptJobExecutor : IJobExecutor
             cancellationToken);
 
         var completionReport = executionResult.Success
-            ? BuildCompletionReport(job)
+            ? BuildCompletionReport(job, executionResult)
             : BuildFailureReport(
                 executionResult.ErrorCode ?? "WINDOWS_SCRIPT_FAILED",
                 executionResult.ErrorMessage ?? "PowerShell script execution failed.",
-                executionResult.RebootRequired);
+                executionResult.RebootRequired,
+                executionResult.StandardOutput,
+                executionResult.StandardError);
 
         return await ReportAndClearAsync(state, job, completionReport, cancellationToken);
     }
@@ -187,17 +191,24 @@ public sealed class WindowsPowerShellScriptJobExecutor : IJobExecutor
         {
             return WindowsScriptExecutionResult.Fail(
                 "WINDOWS_SCRIPT_TIMEOUT",
-                "PowerShell script timed out.");
+                "PowerShell script timed out.",
+                standardOutput: result.StandardOutput,
+                standardError: result.StandardError);
         }
 
         if (result.ExitCode != 0)
         {
             return WindowsScriptExecutionResult.Fail(
                 "WINDOWS_SCRIPT_COMMAND_FAILED",
-                BuildErrorSummary(result.StandardError, result.StandardOutput));
+                BuildErrorSummary(result.StandardError, result.StandardOutput),
+                standardOutput: result.StandardOutput,
+                standardError: result.StandardError);
         }
 
-        return WindowsScriptExecutionResult.Ok(IsWindowsRebootPending());
+        return WindowsScriptExecutionResult.Ok(
+            IsWindowsRebootPending(),
+            result.StandardOutput,
+            result.StandardError);
     }
 
     private static string BuildScriptContent(JobExecutionState job)
@@ -300,20 +311,37 @@ public sealed class WindowsPowerShellScriptJobExecutor : IJobExecutor
 
     private static JobCompletionReport BuildCompletionReport(JobExecutionState job)
     {
+        return BuildCompletionReport(
+            job,
+            WindowsScriptExecutionResult.Ok(
+                rebootRequired: job.SimulatedRebootRequired,
+                standardOutput: null,
+                standardError: null));
+    }
+
+    private static JobCompletionReport BuildCompletionReport(
+        JobExecutionState job,
+        WindowsScriptExecutionResult executionResult)
+    {
         return new JobCompletionReport
         {
             FinalState = "Succeeded",
             InstallResult = "success",
             RebootRequired = job.SimulatedRebootRequired,
             RebootPerformed = false,
-            PostRebootValidation = "not_run"
+            PostRebootValidation = "not_run",
+            Summary = "PowerShell script completed successfully.",
+            Output = TruncateForReport(executionResult.StandardOutput),
+            ErrorOutput = TruncateForReport(executionResult.StandardError)
         };
     }
 
     private static JobCompletionReport BuildFailureReport(
         string code,
         string message,
-        bool rebootRequired = false)
+        bool rebootRequired = false,
+        string? standardOutput = null,
+        string? standardError = null)
     {
         return new JobCompletionReport
         {
@@ -322,10 +350,30 @@ public sealed class WindowsPowerShellScriptJobExecutor : IJobExecutor
             RebootRequired = rebootRequired,
             RebootPerformed = false,
             PostRebootValidation = "not_run",
+            Summary = message,
+            Output = TruncateForReport(standardOutput),
+            ErrorOutput = TruncateForReport(standardError),
             ErrorCode = code,
             ErrorMessage = message,
             Retryable = true
         };
+    }
+
+    private static string? TruncateForReport(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        if (normalized.Length <= MaxReportedOutputChars)
+        {
+            return normalized;
+        }
+
+        var remaining = normalized.Length - MaxReportedOutputChars;
+        return normalized[..MaxReportedOutputChars] + $"\n... [truncated {remaining} chars]";
     }
 
     private static async Task<ProcessResult> RunProcessAsync(
@@ -413,19 +461,26 @@ public sealed class WindowsPowerShellScriptJobExecutor : IJobExecutor
         bool Success,
         bool RebootRequired,
         string? ErrorCode,
-        string? ErrorMessage)
+        string? ErrorMessage,
+        string? StandardOutput,
+        string? StandardError)
     {
-        public static WindowsScriptExecutionResult Ok(bool rebootRequired)
+        public static WindowsScriptExecutionResult Ok(
+            bool rebootRequired,
+            string? standardOutput = null,
+            string? standardError = null)
         {
-            return new WindowsScriptExecutionResult(true, rebootRequired, null, null);
+            return new WindowsScriptExecutionResult(true, rebootRequired, null, null, standardOutput, standardError);
         }
 
         public static WindowsScriptExecutionResult Fail(
             string code,
             string message,
-            bool rebootRequired = false)
+            bool rebootRequired = false,
+            string? standardOutput = null,
+            string? standardError = null)
         {
-            return new WindowsScriptExecutionResult(false, rebootRequired, code, message);
+            return new WindowsScriptExecutionResult(false, rebootRequired, code, message, standardOutput, standardError);
         }
     }
 }
