@@ -50,7 +50,7 @@ public sealed class HttpPolicyClient : IPolicyClient
             },
             Os = new RegisterOs
             {
-                Family = OperatingSystem.IsWindows() ? "windows" : Environment.OSVersion.Platform.ToString().ToLowerInvariant(),
+                Family = DetectOsFamily(),
                 Description = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
                 Architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString()
             },
@@ -396,6 +396,26 @@ public sealed class HttpPolicyClient : IPolicyClient
         state.ServerHeartbeatIntervalSeconds = poll.HeartbeatSeconds;
         state.ServerJobPollIntervalSeconds = poll.JobsSeconds;
         state.ServerInventoryIntervalSeconds = poll.InventorySeconds;
+    }
+
+    private static string DetectOsFamily()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return "windows";
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return "linux";
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return "mac";
+        }
+
+        return Environment.OSVersion.Platform.ToString().ToLowerInvariant();
     }
 
     private static string ReadSimulatedOutcome(JsonElement? payload)

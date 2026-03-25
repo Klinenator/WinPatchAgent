@@ -173,19 +173,6 @@
             flex-wrap: wrap;
         }
 
-        .token-wrap {
-            min-width: 240px;
-        }
-
-        .label-mini {
-            display: block;
-            margin-bottom: 3px;
-            font-size: 11px;
-            letter-spacing: 0.05em;
-            color: var(--muted);
-            text-transform: uppercase;
-        }
-
         input, textarea, select, button {
             font: inherit;
         }
@@ -431,11 +418,6 @@
                 justify-content: flex-start;
                 width: 100%;
             }
-
-            .token-wrap {
-                min-width: 0;
-                width: 100%;
-            }
         }
 
         @media (max-width: 760px) {
@@ -456,6 +438,7 @@
             <a href="/admin" class="side-link">Main</a>
             <a href="/admin/seed-jobs" class="side-link active">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
+            <a href="/admin/settings" class="side-link">Admin</a>
         </nav>
         <div class="side-foot">
             <p class="side-foot-label">Signed In User</p>
@@ -471,13 +454,8 @@
                 <p>Create targeted jobs quickly and verify they landed in the queue.</p>
             </div>
             <div class="command-actions">
-                <div class="token-wrap">
-                    <label class="label-mini" for="adminToken">Admin Bearer Token (Optional)</label>
-                    <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
-                </div>
-                <button id="saveTokenBtn" type="button" class="btn subtle">Save Token</button>
-                <button id="clearTokenBtn" type="button" class="btn danger">Clear Token</button>
                 <button id="refreshJobsBtn" type="button" class="btn primary">Refresh Jobs</button>
+                <a href="/admin/settings" class="btn subtle">Admin Settings</a>
             </div>
         </section>
         <div id="tokenStatus" class="status-line"></div>
@@ -557,15 +535,12 @@
 <script>
 (() => {
     const authUser = document.getElementById("authUser");
-    const tokenInput = document.getElementById("adminToken");
     const tokenStatus = document.getElementById("tokenStatus");
     const createStatus = document.getElementById("createStatus");
     const jobsTableBody = document.getElementById("jobsTableBody");
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshJobsBtn = document.getElementById("refreshJobsBtn");
-    const saveTokenBtn = document.getElementById("saveTokenBtn");
-    const clearTokenBtn = document.getElementById("clearTokenBtn");
     const createJobBtn = document.getElementById("createJobBtn");
 
     const targetDeviceIdInput = document.getElementById("targetDeviceId");
@@ -576,23 +551,6 @@
     const jobPolicyInput = document.getElementById("jobPolicy");
 
     const STORAGE_KEY = "patchagent_admin_token";
-    const savedToken = localStorage.getItem(STORAGE_KEY);
-    if (savedToken) {
-        tokenInput.value = savedToken;
-        setStatus(tokenStatus, "Token loaded from browser storage.", "success");
-    }
-
-    saveTokenBtn.addEventListener("click", () => {
-        localStorage.setItem(STORAGE_KEY, tokenInput.value.trim());
-        setStatus(tokenStatus, "Token saved in browser storage.", "success");
-    });
-
-    clearTokenBtn.addEventListener("click", () => {
-        localStorage.removeItem(STORAGE_KEY);
-        tokenInput.value = "";
-        setStatus(tokenStatus, "Saved token cleared.", "");
-    });
-
     logoutBtn.addEventListener("click", async () => {
         try {
             await apiFetch("/v1/admin/auth/logout", { method: "POST" });
@@ -674,7 +632,7 @@
 
             if (data.oauth_enabled === true) {
                 authUser.textContent = "Not signed in";
-                setStatus(tokenStatus, "Use Google login or set a bearer token.", "");
+                setStatus(tokenStatus, "Use Google login, or manage bearer token in the Admin tab.", "");
                 return;
             }
 
@@ -721,7 +679,7 @@
         const headers = new Headers(options?.headers || {});
         headers.set("Accept", "application/json");
 
-        const token = tokenInput.value.trim();
+        const token = getStoredToken();
         if (token) {
             headers.set("Authorization", "Bearer " + token);
         }
@@ -796,6 +754,10 @@
     function setStatus(element, message, kind) {
         element.textContent = message;
         element.className = "status-line" + (kind ? " " + kind : "");
+    }
+
+    function getStoredToken() {
+        return String(localStorage.getItem(STORAGE_KEY) || "").trim();
     }
 
     function escapeHtml(value) {

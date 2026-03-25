@@ -177,19 +177,6 @@
             flex-wrap: wrap;
         }
 
-        .token-wrap {
-            min-width: 240px;
-        }
-
-        .label-mini {
-            display: block;
-            margin-bottom: 3px;
-            font-size: 11px;
-            letter-spacing: 0.05em;
-            color: var(--muted);
-            text-transform: uppercase;
-        }
-
         input, textarea, select, button {
             font: inherit;
         }
@@ -521,6 +508,24 @@
             border-color: #cfd9e3;
         }
 
+        .pill.windows {
+            color: #165ea0;
+            background: #e2f0ff;
+            border-color: #bfdcfb;
+        }
+
+        .pill.linux {
+            color: #2f5e1b;
+            background: #e8f9dd;
+            border-color: #c9e7b0;
+        }
+
+        .pill.mac {
+            color: #6a3f8a;
+            background: #f3e9ff;
+            border-color: #dcc6fb;
+        }
+
         .jobs-panel {
             margin-top: 12px;
         }
@@ -577,11 +582,6 @@
                 width: 100%;
             }
 
-            .token-wrap {
-                min-width: 0;
-                width: 100%;
-            }
-
             .toolbar-row {
                 grid-template-columns: 1fr;
             }
@@ -609,6 +609,7 @@
             <a href="/admin" class="side-link active">Main</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
+            <a href="/admin/settings" class="side-link">Admin</a>
         </nav>
         <div class="side-foot">
             <p class="side-foot-label">Signed In User</p>
@@ -624,14 +625,9 @@
                 <p>Monitor agents, queue package jobs, and track rollout status in one console.</p>
             </div>
             <div class="command-actions">
-                <div class="token-wrap">
-                    <label class="label-mini" for="adminToken">Admin Bearer Token (Optional)</label>
-                    <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
-                </div>
-                <button id="saveTokenBtn" type="button" class="btn subtle">Save Token</button>
-                <button id="clearTokenBtn" type="button" class="btn danger">Clear Token</button>
                 <button id="refreshBtn" type="button" class="btn primary">Refresh</button>
                 <a href="/admin/install-agent" class="btn light-link">Install Agent</a>
+                <a href="/admin/settings" class="btn subtle">Admin Settings</a>
             </div>
         </section>
         <div id="tokenStatus" class="status-line"></div>
@@ -681,6 +677,7 @@
                         <thead>
                         <tr>
                             <th>Device</th>
+                            <th>Device Type</th>
                             <th>Agent ID</th>
                             <th>Last Seen</th>
                             <th>Availability</th>
@@ -691,7 +688,7 @@
                         </tr>
                         </thead>
                         <tbody id="agentsTableBody">
-                        <tr><td colspan="8" class="hint">No agents loaded.</td></tr>
+                        <tr><td colspan="9" class="hint">No agents loaded.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -779,7 +776,6 @@
 <script>
 (() => {
     const authUser = document.getElementById("authUser");
-    const tokenInput = document.getElementById("adminToken");
     const tokenStatus = document.getElementById("tokenStatus");
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
@@ -797,8 +793,6 @@
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshBtn = document.getElementById("refreshBtn");
-    const saveTokenBtn = document.getElementById("saveTokenBtn");
-    const clearTokenBtn = document.getElementById("clearTokenBtn");
     const renameAgentBtn = document.getElementById("renameAgentBtn");
     const installListedUpdatesBtn = document.getElementById("installListedUpdatesBtn");
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
@@ -814,23 +808,6 @@
     let latestAgents = [];
     let latestJobs = [];
     let selectedAgentId = "";
-
-    const savedToken = localStorage.getItem(STORAGE_KEY);
-    if (savedToken) {
-        tokenInput.value = savedToken;
-        setStatus(tokenStatus, "Token loaded from browser storage.", "success");
-    }
-
-    saveTokenBtn.addEventListener("click", () => {
-        localStorage.setItem(STORAGE_KEY, tokenInput.value.trim());
-        setStatus(tokenStatus, "Token saved in browser storage.", "success");
-    });
-
-    clearTokenBtn.addEventListener("click", () => {
-        localStorage.removeItem(STORAGE_KEY);
-        tokenInput.value = "";
-        setStatus(tokenStatus, "Saved token cleared.", "");
-    });
 
     logoutBtn.addEventListener("click", async () => {
         try {
@@ -934,7 +911,7 @@
 
             if (data.oauth_enabled === true) {
                 authUser.textContent = "Not signed in";
-                setStatus(tokenStatus, "Use Google login or set a bearer token.", "");
+                setStatus(tokenStatus, "Use Google login, or manage bearer token in the Admin tab.", "");
                 return;
             }
 
@@ -1001,7 +978,8 @@
             const agentId = String(agent.agent_record_id || "");
             const hostname = String(agent.hostname || "");
             const deviceId = String(agent.device_id || "");
-            const haystack = (displayName + " " + agentId + " " + hostname + " " + deviceId).toLowerCase();
+            const deviceType = getDeviceType(agent);
+            const haystack = (displayName + " " + agentId + " " + hostname + " " + deviceId + " " + deviceType.label).toLowerCase();
             const availability = availabilityState(agent).value;
 
             const queryMatch = query === "" || haystack.includes(query);
@@ -1012,7 +990,7 @@
         agentsSummary.textContent = "Showing " + filtered.length + " of " + agents.length + " agents";
 
         if (!filtered.length) {
-            agentsTableBody.innerHTML = '<tr><td colspan="8" class="hint">No agents match your filters.</td></tr>';
+            agentsTableBody.innerHTML = '<tr><td colspan="9" class="hint">No agents match your filters.</td></tr>';
             return;
         }
 
@@ -1033,12 +1011,14 @@
             const selectedClass = selectedAgentId && selectedAgentId === agentId ? " selected" : "";
             const status = availabilityState(agent);
             const serviceState = String(heartbeat.service_state || "unknown");
+            const deviceType = getDeviceType(agent);
 
             return "<tr class=\"" + selectedClass.trim() + "\">" +
                 "<td>" +
                 "<div class=\"cell-main\">" + escapeHtml(displayName) + "</div>" +
                 "<div class=\"cell-sub\">" + escapeHtml(String(agent.hostname || "")) + "</div>" +
                 "</td>" +
+                "<td><span class=\"pill " + escapeHtml(deviceType.value) + "\">" + escapeHtml(deviceType.label) + "</span></td>" +
                 "<td><code class=\"mono\">" + escapeHtml(agentId) + "</code></td>" +
                 "<td>" + escapeHtml(describeLastSeen(String(agent.last_seen_at || ""))) + "</td>" +
                 "<td><span class=\"pill " + escapeHtml(status.value) + "\">" + escapeHtml(status.label) + "</span></td>" +
@@ -1154,6 +1134,31 @@
         return getInstalledUpdates(agent).length;
     }
 
+    function getDeviceType(agent) {
+        const osInfo = (typeof agent.os === "object" && agent.os !== null) ? agent.os : {};
+        const familyRaw = String(osInfo.family || "").trim().toLowerCase();
+        const descriptionRaw = String(osInfo.description || "").trim().toLowerCase();
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        const inventoryOs = (typeof inventory.os === "object" && inventory.os !== null) ? inventory.os : {};
+        const inventoryDescription = String(inventoryOs.description || "").trim().toLowerCase();
+
+        const combined = (familyRaw + " " + descriptionRaw + " " + inventoryDescription).trim();
+
+        if (familyRaw === "windows" || combined.includes("windows")) {
+            return { value: "windows", label: "Windows" };
+        }
+
+        if (familyRaw === "linux" || combined.includes("linux") || combined.includes("ubuntu") || combined.includes("debian")) {
+            return { value: "linux", label: "Linux" };
+        }
+
+        if (familyRaw === "mac" || familyRaw === "darwin" || familyRaw === "osx" || combined.includes("mac") || combined.includes("darwin")) {
+            return { value: "mac", label: "Mac" };
+        }
+
+        return { value: "unknown", label: "Unknown" };
+    }
+
     function renderInstalledUpdates(updates) {
         if (!updates.length) {
             installedUpdatesTableBody.innerHTML = '<tr><td colspan="3" class="hint">No installed package data in latest inventory.</td></tr>';
@@ -1256,7 +1261,7 @@
         const headers = new Headers(options?.headers || {});
         headers.set("Accept", "application/json");
 
-        const token = tokenInput.value.trim();
+        const token = getStoredToken();
         if (token) {
             headers.set("Authorization", "Bearer " + token);
         }
@@ -1298,6 +1303,10 @@
     function setStatus(element, message, kind) {
         element.textContent = message;
         element.className = "status-line" + (kind ? " " + kind : "");
+    }
+
+    function getStoredToken() {
+        return String(localStorage.getItem(STORAGE_KEY) || "").trim();
     }
 
     function escapeHtml(value) {

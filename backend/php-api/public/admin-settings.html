@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PatchAgent Admin - Install Agent</title>
+    <title>PatchAgent Admin - Settings</title>
     <style>
         @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
 
@@ -167,10 +167,8 @@
 
         .command-actions {
             display: flex;
-            align-items: flex-end;
-            justify-content: flex-end;
-            gap: 8px;
             flex-wrap: wrap;
+            gap: 8px;
         }
 
         input, textarea, select, button {
@@ -190,11 +188,6 @@
             outline: none;
             border-color: #74b8f3;
             box-shadow: 0 0 0 3px rgba(46, 130, 218, 0.15);
-        }
-
-        textarea {
-            min-height: 96px;
-            resize: vertical;
         }
 
         .btn {
@@ -244,21 +237,6 @@
             border-color: rgba(255, 255, 255, 0.22);
         }
 
-        .status-line {
-            margin: 9px 2px 2px;
-            min-height: 20px;
-            font-size: 13px;
-            color: var(--muted);
-        }
-
-        .status-line.success {
-            color: var(--green);
-        }
-
-        .status-line.error {
-            color: var(--red);
-        }
-
         .panel-wrap {
             margin-top: 12px;
         }
@@ -284,13 +262,6 @@
             color: var(--muted);
         }
 
-        .row {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-
         .field-block label {
             display: block;
             margin-bottom: 4px;
@@ -308,16 +279,19 @@
             margin-top: 8px;
         }
 
-        .mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
+        .status-line {
+            margin: 9px 2px 2px;
+            min-height: 20px;
+            font-size: 13px;
+            color: var(--muted);
         }
 
-        .output-grid {
-            margin-top: 10px;
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
+        .status-line.success {
+            color: var(--green);
+        }
+
+        .status-line.error {
+            color: var(--red);
         }
 
         @keyframes rise {
@@ -350,13 +324,6 @@
                 width: 100%;
             }
         }
-
-        @media (max-width: 760px) {
-            .row,
-            .output-grid {
-                grid-template-columns: 1fr;
-            }
-        }
     </style>
 </head>
 <body>
@@ -369,8 +336,8 @@
         <nav class="side-nav">
             <a href="/admin" class="side-link">Main</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
-            <a href="/admin/install-agent" class="side-link active">Install Agent</a>
-            <a href="/admin/settings" class="side-link">Admin</a>
+            <a href="/admin/install-agent" class="side-link">Install Agent</a>
+            <a href="/admin/settings" class="side-link active">Admin</a>
         </nav>
         <div class="side-foot">
             <p class="side-foot-label">Signed In User</p>
@@ -382,52 +349,33 @@
     <main class="workspace">
         <section class="top-command">
             <div class="top-copy">
-                <h1>Install Agent</h1>
-                <p>Generate one-time enrollment keys and copy platform-specific installer commands.</p>
+                <h1>Admin Settings</h1>
+                <p>Manage optional bearer token storage and authentication diagnostics.</p>
             </div>
             <div class="command-actions">
-                <a href="/admin/settings" class="btn subtle">Admin Settings</a>
+                <button id="refreshStatusBtn" type="button" class="btn subtle">Refresh Status</button>
             </div>
         </section>
-        <div id="tokenStatus" class="status-line"></div>
+        <div id="pageStatus" class="status-line"></div>
 
         <section class="panel-wrap">
             <section class="panel">
-                <h2>Generate Installer</h2>
-                <p class="hint">Each generated enrollment key is one-time use and expires automatically.</p>
-                <div class="row">
-                    <div class="field-block">
-                        <label for="newAgentPlatform">Platform</label>
-                        <select id="newAgentPlatform">
-                            <option value="linux">Linux (Ubuntu)</option>
-                            <option value="windows">Windows (PowerShell)</option>
-                        </select>
-                    </div>
-                    <div class="field-block">
-                        <label for="newAgentTtlSeconds">Key TTL Seconds</label>
-                        <input id="newAgentTtlSeconds" type="number" min="300" max="2592000" value="604800">
-                    </div>
-                </div>
-
-                <div class="actions">
-                    <button id="generateAgentBtn" type="button" class="btn primary">Generate Installer</button>
-                </div>
-                <div id="installStatus" class="status-line"></div>
-
-                <div class="output-grid">
-                    <div class="field-block">
-                        <label for="newAgentEnrollmentKey">Enrollment Key</label>
-                        <input id="newAgentEnrollmentKey" class="mono" type="text" readonly>
-                    </div>
-                    <div class="field-block">
-                        <label for="newAgentScriptUrl">Install Script URL</label>
-                        <input id="newAgentScriptUrl" class="mono" type="text" readonly>
-                    </div>
-                </div>
+                <h2>Bearer Token</h2>
+                <p class="hint">Only needed if you prefer API bearer auth instead of Google OAuth session.</p>
                 <div class="field-block">
-                    <label for="newAgentInstallCommand">Install Command</label>
-                    <textarea id="newAgentInstallCommand" class="mono" readonly></textarea>
+                    <label for="adminToken">Admin Bearer Token</label>
+                    <input id="adminToken" type="password" placeholder="change-me-admin-key" autocomplete="off">
                 </div>
+                <div class="actions">
+                    <button id="saveTokenBtn" type="button" class="btn primary">Save Token</button>
+                    <button id="clearTokenBtn" type="button" class="btn danger">Clear Token</button>
+                </div>
+                <div id="tokenStatus" class="status-line"></div>
+            </section>
+
+            <section class="panel" style="margin-top: 12px;">
+                <h2>Auth Status</h2>
+                <p id="authSummary" class="hint">Checking authentication mode...</p>
             </section>
         </section>
     </main>
@@ -436,60 +384,57 @@
 <script>
 (() => {
     const authUser = document.getElementById("authUser");
+    const authSummary = document.getElementById("authSummary");
+    const pageStatus = document.getElementById("pageStatus");
     const tokenStatus = document.getElementById("tokenStatus");
-    const installStatus = document.getElementById("installStatus");
+    const tokenInput = document.getElementById("adminToken");
 
     const logoutBtn = document.getElementById("logoutBtn");
-    const generateAgentBtn = document.getElementById("generateAgentBtn");
-
-    const newAgentPlatformInput = document.getElementById("newAgentPlatform");
-    const newAgentTtlSecondsInput = document.getElementById("newAgentTtlSeconds");
-    const newAgentEnrollmentKeyInput = document.getElementById("newAgentEnrollmentKey");
-    const newAgentScriptUrlInput = document.getElementById("newAgentScriptUrl");
-    const newAgentInstallCommandInput = document.getElementById("newAgentInstallCommand");
+    const refreshStatusBtn = document.getElementById("refreshStatusBtn");
+    const saveTokenBtn = document.getElementById("saveTokenBtn");
+    const clearTokenBtn = document.getElementById("clearTokenBtn");
 
     const STORAGE_KEY = "patchagent_admin_token";
+
+    const savedToken = localStorage.getItem(STORAGE_KEY);
+    if (savedToken) {
+        tokenInput.value = savedToken;
+        setStatus(tokenStatus, "Token loaded from browser storage.", "success");
+    } else {
+        setStatus(tokenStatus, "No token currently stored in this browser.", "");
+    }
+
+    saveTokenBtn.addEventListener("click", () => {
+        const token = tokenInput.value.trim();
+        if (!token) {
+            setStatus(tokenStatus, "Enter a token before saving.", "error");
+            return;
+        }
+
+        localStorage.setItem(STORAGE_KEY, token);
+        setStatus(tokenStatus, "Token saved in browser storage.", "success");
+    });
+
+    clearTokenBtn.addEventListener("click", () => {
+        localStorage.removeItem(STORAGE_KEY);
+        tokenInput.value = "";
+        setStatus(tokenStatus, "Saved token cleared.", "");
+    });
+
+    refreshStatusBtn.addEventListener("click", async () => {
+        await loadAuthStatus();
+    });
+
     logoutBtn.addEventListener("click", async () => {
         try {
-            await apiFetch("/v1/admin/auth/logout", { method: "POST" });
+            await fetch("/v1/admin/auth/logout", {
+                method: "POST",
+                headers: { "Accept": "application/json" }
+            });
         } catch {
         }
 
         window.location.href = "/admin/login";
-    });
-
-    generateAgentBtn.addEventListener("click", async () => {
-        const platform = newAgentPlatformInput.value;
-        const ttlRaw = newAgentTtlSecondsInput.value.trim();
-        const ttlSeconds = Number.parseInt(ttlRaw, 10);
-
-        if (!Number.isFinite(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 2592000) {
-            setStatus(installStatus, "TTL must be between 300 and 2592000 seconds.", "error");
-            return;
-        }
-
-        try {
-            const response = await apiFetch("/v1/admin/enrollments", {
-                method: "POST",
-                body: JSON.stringify({
-                    platform: platform,
-                    ttl_seconds: ttlSeconds
-                })
-            });
-
-            const enrollment = response.enrollment || {};
-            const install = response.install || {};
-
-            newAgentEnrollmentKeyInput.value = String(enrollment.enrollment_key || "");
-            newAgentScriptUrlInput.value = String(install.script_url || "");
-            newAgentInstallCommandInput.value = String(install.command || "");
-
-            const expiresAt = String(enrollment.expires_at || "");
-            const expiryText = expiresAt ? (" Expires: " + expiresAt) : "";
-            setStatus(installStatus, "Enrollment key generated." + expiryText, "success");
-        } catch (error) {
-            setStatus(installStatus, String(error.message || error), "error");
-        }
     });
 
     async function loadAuthStatus() {
@@ -505,74 +450,31 @@
                 const email = String(user.email || "").trim();
                 const name = String(user.name || "").trim();
                 authUser.textContent = name ? (name + " <" + email + ">") : email;
-                setStatus(tokenStatus, "Authenticated session is active.", "success");
+                authSummary.textContent = "OAuth session is active.";
+                setStatus(pageStatus, "Authenticated session is active.", "success");
                 return;
             }
 
             if (data.oauth_enabled === true) {
                 authUser.textContent = "Not signed in";
-                setStatus(tokenStatus, "Use Google login, or manage bearer token in the Admin tab.", "");
+                authSummary.textContent = "OAuth is enabled, but there is no active admin session.";
+                setStatus(pageStatus, "Sign in via Google OAuth or rely on bearer token.", "");
                 return;
             }
 
             authUser.textContent = "OAuth not configured";
-            setStatus(tokenStatus, "Google OAuth is not configured on this server.", "");
+            authSummary.textContent = "Google OAuth is disabled on this server.";
+            setStatus(pageStatus, "Bearer token auth can still be used for API requests.", "");
         } catch {
             authUser.textContent = "Unknown";
-            setStatus(tokenStatus, "Could not load auth status.", "error");
+            authSummary.textContent = "Could not determine auth state.";
+            setStatus(pageStatus, "Could not load auth status.", "error");
         }
-    }
-
-    async function apiFetch(path, options) {
-        const headers = new Headers(options?.headers || {});
-        headers.set("Accept", "application/json");
-
-        const token = getStoredToken();
-        if (token) {
-            headers.set("Authorization", "Bearer " + token);
-        }
-
-        if (options?.body) {
-            headers.set("Content-Type", "application/json");
-        }
-
-        const response = await fetch(path, {
-            method: options?.method || "GET",
-            headers: headers,
-            body: options?.body
-        });
-
-        const raw = await response.text();
-        let data = {};
-
-        if (raw.trim() !== "") {
-            try {
-                data = JSON.parse(raw);
-            } catch {
-                throw new Error("Server returned non-JSON response.");
-            }
-        }
-
-        if (!response.ok) {
-            if (response.status === 401 && data?.error?.code === "admin_auth_required") {
-                window.location.href = "/admin/login";
-                throw new Error("Redirecting to login.");
-            }
-
-            const message = data?.error?.message || ("Request failed with status " + response.status);
-            throw new Error(message);
-        }
-
-        return data;
     }
 
     function setStatus(element, message, kind) {
         element.textContent = message;
         element.className = "status-line" + (kind ? " " + kind : "");
-    }
-
-    function getStoredToken() {
-        return String(localStorage.getItem(STORAGE_KEY) || "").trim();
     }
 
     async function initialize() {

@@ -82,6 +82,11 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && ($path === '/admin/settings' || $path === '/admin/settings/')) {
+                $this->handleAdminSettingsView();
+                return;
+            }
+
             if ($method === 'GET' && ($path === '/admin/login' || $path === '/admin/login/')) {
                 $this->handleAdminLoginView();
                 return;
@@ -500,6 +505,11 @@ final class App
     private function handleAdminInstallAgentView(): void
     {
         $this->handleAdminProtectedView('admin-install-agent.html', 'Admin install agent page is missing.');
+    }
+
+    private function handleAdminSettingsView(): void
+    {
+        $this->handleAdminProtectedView('admin-settings.html', 'Admin settings page is missing.');
     }
 
     private function handleAdminProtectedView(string $filename, string $missingMessage): void
