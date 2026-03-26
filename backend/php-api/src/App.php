@@ -3265,6 +3265,39 @@ function Ensure-DotnetSdk8 {
     return \$dotnetExe
 }
 
+function Ensure-NuGetSourceHealth {
+    param([string]\$DotnetExe)
+
+    if ([string]::IsNullOrWhiteSpace(\$DotnetExe)) {
+        return \$false
+    }
+
+    \$listBefore = (& \$DotnetExe nuget list source 2>&1 | Out-String)
+    \$hasNugetOrg = \$listBefore -match "https://api\\.nuget\\.org/v3/index\\.json"
+    \$noSources = \$listBefore -match "No sources found"
+    \$nugetOrgDisabled = \$listBefore -match "nuget\\.org\\s+\\[Disabled\\]"
+
+    if (-not \$hasNugetOrg -or \$noSources -or \$nugetOrgDisabled) {
+        Write-Warning "NuGet sources appear incomplete or disabled. Attempting to configure nuget.org for restore."
+
+        # Safe to run repeatedly: add may fail if source already exists; enable is idempotent.
+        & \$DotnetExe nuget add source "https://api.nuget.org/v3/index.json" -n nuget.org 2>\$null | Out-Null
+        & \$DotnetExe nuget enable source nuget.org 2>\$null | Out-Null
+        & \$DotnetExe nuget locals all --clear 2>\$null | Out-Null
+
+        \$listAfter = (& \$DotnetExe nuget list source 2>&1 | Out-String)
+        if (\$listAfter -notmatch "https://api\\.nuget\\.org/v3/index\\.json") {
+            Write-Warning "Could not verify nuget.org as an available NuGet source after auto-repair."
+            return \$false
+        }
+
+        Write-Host "NuGet source repair complete (nuget.org available)."
+        return \$true
+    }
+
+    return \$false
+}
+
 function Normalize-RepoHttpUrl {
     param([string]\$RawUrl)
 
@@ -3370,12 +3403,28 @@ function Install-FromSource {
 
     Clear-InstallDir
     \$dotnetExe = Ensure-DotnetSdk8
-    & \$dotnetExe publish \$projectPath -c Release -r win-x64 --self-contained true -o \$InstallDir
-    if (\$LASTEXITCODE -eq 0) {
+    \$publishOutput = (& \$dotnetExe publish \$projectPath -c Release -r win-x64 --self-contained true -o \$InstallDir 2>&1)
+    \$publishOutput | ForEach-Object { Write-Host \$_ }
+    \$publishExitCode = \$LASTEXITCODE
+    if (\$publishExitCode -eq 0) {
         return
     }
 
-    \$publishExitCode = \$LASTEXITCODE
+    \$publishOutputText = (\$publishOutput | Out-String)
+    \$shouldRetryForNuget = \$publishOutputText -match "NU1100" -or \$publishOutputText -match "No sources found"
+    if (\$shouldRetryForNuget) {
+        \$didRepair = Ensure-NuGetSourceHealth -DotnetExe \$dotnetExe
+        if (\$didRepair) {
+            Write-Host "Retrying source build after NuGet source repair..."
+            \$publishOutput = (& \$dotnetExe publish \$projectPath -c Release -r win-x64 --self-contained true -o \$InstallDir 2>&1)
+            \$publishOutput | ForEach-Object { Write-Host \$_ }
+            \$publishExitCode = \$LASTEXITCODE
+            if (\$publishExitCode -eq 0) {
+                return
+            }
+        }
+    }
+
     if (-not [string]::IsNullOrWhiteSpace(\$WindowsAgentPackageUrl)) {
         Write-Warning ("Source build failed with exit code {0}. Falling back to prebuilt package URL." -f \$publishExitCode)
         Install-FromPrebuilt

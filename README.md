@@ -134,6 +134,7 @@ Windows installs can enforce SOC2 baseline controls by default (`PATCH_API_WINDO
 The admin main page now surfaces a Windows SOC2 baseline status card (Defender service/realtime, firewall profiles, removable storage policy, and BitLocker state). BitLocker is marked not-supported on editions where it is unavailable.
 The admin main page also provides one-click SOC2 evidence exports (JSON/CSV) suitable for audit packages.
 Windows install links from `/install/windows.ps1` support `mode=prebuilt` (default, no endpoint compile) or `mode=source` (compile on endpoint after downloading source).
+In `mode=source`, the installer now detects common NuGet source issues (`NU1100` / "No sources found"), auto-configures `nuget.org`, and retries `dotnet publish` once before falling back to prebuilt mode.
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 Backend storage now supports either file mode (`storage/runtime`) or MySQL relational mode (`PATCH_API_DB_DRIVER=mysql`) for more durable production persistence and easier SQL debugging.
 

@@ -45,6 +45,7 @@ Current endpoints:
 - `GET /install/linux.sh?enrollment_key=...`
 - `GET /install/macos.sh?enrollment_key=...`
 - `GET /install/windows.ps1?enrollment_key=...&mode=prebuilt|source` (`mode` optional, default `prebuilt`)
+  - In `mode=source`, installer logic auto-repairs missing/disabled NuGet sources (`nuget.org`) when publish fails with common restore errors (for example `NU1100`), then retries once before prebuilt fallback.
 - `GET /healthz`
 
 Storage model:
