@@ -1117,8 +1117,15 @@ final class App
 
     private function searchWingetCatalogViaWingetRun(string $query, int $limit): array
     {
+        $take = min(24, max(1, $limit));
         $url = self::WINGET_RUN_SEARCH_URL . '?' . http_build_query([
-            'search' => trim($query),
+            'query' => trim($query),
+            'ensureContains' => 'true',
+            'preferContains' => 'true',
+            'partialMatch' => 'true',
+            'splitQuery' => 'true',
+            'take' => $take,
+            'page' => 0,
         ], '', '&', PHP_QUERY_RFC3986);
 
         $headers = [
@@ -1157,7 +1164,7 @@ final class App
         return [
             'manager' => 'winget',
             'query' => $query,
-            'source' => 'winget.run',
+            'source' => 'winget.run/packages?query',
             'fetched_at' => gmdate(DATE_ATOM),
             'total_count' => max(0, $totalCount),
             'returned_count' => count($resultsById),
