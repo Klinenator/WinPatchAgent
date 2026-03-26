@@ -27,6 +27,7 @@ final class App
     private const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
     private const GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo';
     private const GITHUB_CODE_SEARCH_URL = 'https://api.github.com/search/code';
+    private const WINGET_RUN_SEARCH_URL = 'https://api.winget.run/v2/packages';
     private const OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
     private const OAUTH_SESSION_STATE_KEY = 'google_oauth_state';
     private const OAUTH_SESSION_NONCE_KEY = 'google_oauth_nonce';
@@ -1035,6 +1036,32 @@ final class App
 
     private function searchWingetCatalog(string $query, int $limit): array
     {
+        $githubFailureMessage = '';
+        $githubToken = trim((string) getenv('PATCH_API_GITHUB_TOKEN'));
+        if ($githubToken !== '') {
+            try {
+                return $this->searchWingetCatalogViaGitHubCodeSearch($query, $limit, $githubToken);
+            } catch (\Throwable $exception) {
+                $githubFailureMessage = trim($exception->getMessage());
+            }
+        }
+
+        try {
+            return $this->searchWingetCatalogViaWingetRun($query, $limit);
+        } catch (\Throwable $exception) {
+            if ($githubFailureMessage !== '') {
+                throw new RuntimeException(
+                    'GitHub search failed (' . $githubFailureMessage . ') and winget.run fallback failed ('
+                    . trim($exception->getMessage())
+                    . ').'
+                );
+            }
+            throw $exception;
+        }
+    }
+
+    private function searchWingetCatalogViaGitHubCodeSearch(string $query, int $limit, string $githubToken): array
+    {
         $perPage = min(100, max(20, $limit * 3));
         $searchQuery = trim($query) . ' repo:microsoft/winget-pkgs path:manifests filename:installer.yaml';
 
@@ -1048,11 +1075,8 @@ final class App
             'Accept: application/vnd.github+json',
             'X-GitHub-Api-Version: 2022-11-28',
             'User-Agent: WinPatchAgent/1.0',
+            'Authorization: Bearer ' . $githubToken,
         ];
-        $githubToken = trim((string) getenv('PATCH_API_GITHUB_TOKEN'));
-        if ($githubToken !== '') {
-            $headers[] = 'Authorization: Bearer ' . $githubToken;
-        }
 
         $decoded = $this->requestJsonFromUrl('GET', $url, null, $headers);
         $items = is_array($decoded['items'] ?? null) ? $decoded['items'] : [];
@@ -1083,11 +1107,92 @@ final class App
         return [
             'manager' => 'winget',
             'query' => $query,
-            'source' => 'github:microsoft/winget-pkgs',
+            'source' => 'github:microsoft/winget-pkgs/code-search',
             'fetched_at' => gmdate(DATE_ATOM),
             'total_count' => max(0, $totalCount),
             'returned_count' => count($resultsById),
             'results' => array_values($resultsById),
+        ];
+    }
+
+    private function searchWingetCatalogViaWingetRun(string $query, int $limit): array
+    {
+        $url = self::WINGET_RUN_SEARCH_URL . '?' . http_build_query([
+            'search' => trim($query),
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        $headers = [
+            'Accept: application/json',
+            'User-Agent: WinPatchAgent/1.0',
+        ];
+
+        $decoded = $this->requestJsonFromUrl('GET', $url, null, $headers);
+        $packages = is_array($decoded['Packages'] ?? null)
+            ? $decoded['Packages']
+            : (is_array($decoded['packages'] ?? null) ? $decoded['packages'] : []);
+        $totalCount = (int) ($decoded['Total'] ?? $decoded['total'] ?? count($packages));
+
+        $resultsById = [];
+        foreach ($packages as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $parsed = $this->parseWingetRunSearchItem($item);
+            if ($parsed === null) {
+                continue;
+            }
+
+            $key = strtolower((string) $parsed['id']);
+            if (isset($resultsById[$key])) {
+                continue;
+            }
+
+            $resultsById[$key] = $parsed;
+            if (count($resultsById) >= $limit) {
+                break;
+            }
+        }
+
+        return [
+            'manager' => 'winget',
+            'query' => $query,
+            'source' => 'winget.run',
+            'fetched_at' => gmdate(DATE_ATOM),
+            'total_count' => max(0, $totalCount),
+            'returned_count' => count($resultsById),
+            'results' => array_values($resultsById),
+        ];
+    }
+
+    private function parseWingetRunSearchItem(array $item): ?array
+    {
+        $id = trim((string) ($item['Id'] ?? $item['id'] ?? ''));
+        if ($id === '') {
+            return null;
+        }
+
+        $versions = is_array($item['Versions'] ?? null)
+            ? $item['Versions']
+            : (is_array($item['versions'] ?? null) ? $item['versions'] : []);
+        $version = isset($versions[0]) ? trim((string) $versions[0]) : '';
+        if ($version === '') {
+            $version = trim((string) ($item['Version'] ?? $item['version'] ?? ''));
+        }
+
+        $latest = is_array($item['Latest'] ?? null)
+            ? $item['Latest']
+            : (is_array($item['latest'] ?? null) ? $item['latest'] : []);
+        $name = trim((string) ($latest['Name'] ?? $latest['name'] ?? ''));
+        $publisher = trim((string) ($latest['Publisher'] ?? $latest['publisher'] ?? ''));
+
+        return [
+            'id' => $id,
+            'version' => $version,
+            'name' => $name,
+            'publisher' => $publisher,
+            'manifest_path' => '',
+            'manifest_url' => '',
         ];
     }
 
