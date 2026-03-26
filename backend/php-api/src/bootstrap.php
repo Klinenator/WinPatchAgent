@@ -6,6 +6,7 @@ require_once __DIR__ . '/App.php';
 require_once __DIR__ . '/Config.php';
 require_once __DIR__ . '/Http/JsonResponse.php';
 require_once __DIR__ . '/Http/Request.php';
+require_once __DIR__ . '/Storage/MySqlDocumentStore.php';
 require_once __DIR__ . '/Storage/FileStore.php';
 require_once __DIR__ . '/Storage/AgentRepository.php';
 require_once __DIR__ . '/Storage/EnrollmentRepository.php';

@@ -52,7 +52,7 @@ final class App
     public function __construct()
     {
         $this->config = Config::fromEnvironment();
-        $store = new FileStore($this->config->storageRoot);
+        $store = FileStore::fromConfig($this->config);
         $this->store = $store;
 
         $this->agents = new AgentRepository($store);

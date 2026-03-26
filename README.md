@@ -135,6 +135,18 @@ The admin main page now surfaces a Windows SOC2 baseline status card (Defender s
 The admin main page also provides one-click SOC2 evidence exports (JSON/CSV) suitable for audit packages.
 Windows install links from `/install/windows.ps1` support `mode=prebuilt` (default, no endpoint compile) or `mode=source` (compile on endpoint after downloading source).
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
+Backend storage now supports either file mode (`storage/runtime`) or MySQL document mode (`PATCH_API_DB_DRIVER=mysql`) for more durable production persistence.
+
+To migrate current runtime files into MySQL:
+
+```bash
+php backend/php-api/scripts/migrate_runtime_to_mysql.php \
+  --storage-root /var/www/WinPatchAgent/backend/php-api/storage/runtime \
+  --db-host 127.0.0.1 \
+  --db-port 3306 \
+  --db-name winpatchagent \
+  --db-user winpatch_app
+```
 
 Local dev run:
 

@@ -48,9 +48,9 @@ Current endpoints:
 - `GET /healthz`
 
 Storage model:
-- File-backed JSON and NDJSON under `storage/runtime/`
-- Good enough for early prototyping
-- Not intended for production scale
+- File-backed JSON and NDJSON under `storage/runtime/` by default
+- Optional MySQL document store mode when `PATCH_API_DB_DRIVER=mysql`
+- Production deployments should use MySQL mode with backups
 
 Files:
 - `public/index.php`: front controller for nginx or the PHP built-in server
@@ -81,9 +81,29 @@ Environment variables:
 - `PATCH_API_LINUX_CVE_MAX_PACKAGE_LOOKUPS`: max Linux packages queried on a single cache-miss refresh (default `25`)
 - `PATCH_API_LINUX_CVE_MAX_VULNS_PER_PACKAGE`: max CVE records stored per package (default `25`)
 - `PATCH_API_STORAGE_ROOT`: optional override for the runtime storage path
+- `PATCH_API_DB_DRIVER`: set to `mysql` to enable MySQL-backed storage (`''` or unset keeps file mode)
+- `PATCH_API_DB_HOST`: MySQL host (default `127.0.0.1`)
+- `PATCH_API_DB_PORT`: MySQL port (default `3306`)
+- `PATCH_API_DB_NAME`: MySQL database name (required when driver is `mysql`)
+- `PATCH_API_DB_USER`: MySQL username (required when driver is `mysql`)
+- `PATCH_API_DB_PASSWORD`: MySQL password (required when driver is `mysql`)
+- `PATCH_API_DB_TABLE`: MySQL table for key-document storage (default `patchapi_documents`)
 - `PATCH_API_HEARTBEAT_SECONDS`: default `300`
 - `PATCH_API_JOBS_SECONDS`: default `120`
 - `PATCH_API_INVENTORY_SECONDS`: default `21600`
+
+MySQL migration helper:
+
+```bash
+php backend/php-api/scripts/migrate_runtime_to_mysql.php \
+  --storage-root /var/www/WinPatchAgent/backend/php-api/storage/runtime \
+  --db-host 127.0.0.1 \
+  --db-port 3306 \
+  --db-name winpatchagent \
+  --db-user winpatch_app
+```
+
+The script prompts for the DB password via env/arg if omitted from config and imports current runtime files into the MySQL document table.
 
 Local run example once PHP is installed:
 

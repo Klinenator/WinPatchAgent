@@ -10,6 +10,13 @@ final class Config
 {
     public function __construct(
         public readonly string $storageRoot,
+        public readonly string $dbDriver,
+        public readonly string $dbHost,
+        public readonly int $dbPort,
+        public readonly string $dbName,
+        public readonly string $dbUser,
+        public readonly string $dbPassword,
+        public readonly string $dbTable,
         public readonly string $enrollmentKey,
         public readonly string $adminKey,
         public readonly string $googleClientId,
@@ -46,6 +53,13 @@ final class Config
 
         return new self(
             storageRoot: Path::normalize(self::env('PATCH_API_STORAGE_ROOT', $defaultRoot)),
+            dbDriver: strtolower(self::env('PATCH_API_DB_DRIVER', '')),
+            dbHost: self::env('PATCH_API_DB_HOST', '127.0.0.1'),
+            dbPort: max(1, self::envInt('PATCH_API_DB_PORT', 3306)),
+            dbName: self::env('PATCH_API_DB_NAME', ''),
+            dbUser: self::env('PATCH_API_DB_USER', ''),
+            dbPassword: self::env('PATCH_API_DB_PASSWORD', ''),
+            dbTable: self::env('PATCH_API_DB_TABLE', 'patchapi_documents'),
             enrollmentKey: self::env('PATCH_API_ENROLLMENT_KEY', ''),
             adminKey: self::env('PATCH_API_ADMIN_KEY', ''),
             googleClientId: self::env('PATCH_API_GOOGLE_CLIENT_ID', $legacyConfig['google_client_id'] ?? ''),
