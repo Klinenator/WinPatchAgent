@@ -728,7 +728,7 @@
             border-bottom: 1px solid #d9e7f0;
             background: #fff;
             display: grid;
-            grid-template-columns: minmax(0, 2fr) 160px auto auto auto;
+            grid-template-columns: minmax(0, 1fr);
             gap: 8px;
             align-items: center;
         }
@@ -737,11 +737,96 @@
             margin-left: 2px;
         }
 
+        .software-install-controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-width: 0;
+            width: 100%;
+        }
+
+        .software-install-controls .btn {
+            white-space: nowrap;
+        }
+
+        .software-install-controls select {
+            max-width: 190px;
+        }
+
         .software-install-note {
             grid-column: 1 / -1;
             margin: 0;
             font-size: 12px;
             color: #5b6f85;
+        }
+
+        .software-search-results {
+            border-top: 1px solid #d9e7f0;
+            background: #f8fcff;
+            padding: 10px 12px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .software-search-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .software-search-title {
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            color: #27425b;
+        }
+
+        .software-search-match-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .software-search-match-item {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid #bcd1e4;
+            border-radius: 999px;
+            padding: 3px 8px;
+            background: #fff;
+            font-size: 12px;
+            color: #29455f;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .software-search-raw summary {
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            color: #3a566f;
+            user-select: none;
+        }
+
+        .software-search-raw pre {
+            margin: 6px 0 0;
+            max-height: 180px;
+            overflow: auto;
+            border: 1px solid #d9e7f0;
+            border-radius: 9px;
+            background: #fff;
+            padding: 8px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 12px;
+            line-height: 1.35;
+            color: #2d4258;
         }
 
         .software-install-toggle {
@@ -1267,19 +1352,33 @@
                     </div>
                     <div class="software-install-row">
                         <input id="softwarePackageInput" type="text" placeholder="Install package names or IDs (comma/space separated)">
-                        <select id="softwareManagerSelect">
-                            <option value="auto">auto</option>
-                            <option value="winget">winget (Windows)</option>
-                            <option value="apt">apt (Linux)</option>
-                            <option value="brew">brew (macOS)</option>
-                        </select>
-                        <label class="software-install-toggle">
-                            <input id="softwareAllowUpdateInput" type="checkbox">
-                            Allow update
-                        </label>
-                        <button id="searchSoftwareCatalogBtn" type="button" class="btn subtle">Search Catalog</button>
-                        <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
-                        <p id="softwareInstallHint" class="hint software-install-note">Tip: click Search Catalog first to find exact IDs, then run Install Software.</p>
+                        <div class="software-install-controls">
+                            <select id="softwareManagerSelect">
+                                <option value="auto">auto</option>
+                                <option value="winget">winget (Windows)</option>
+                                <option value="apt">apt (Linux)</option>
+                                <option value="brew">brew (macOS)</option>
+                            </select>
+                            <label class="software-install-toggle">
+                                <input id="softwareAllowUpdateInput" type="checkbox">
+                                Allow update
+                            </label>
+                            <button id="searchSoftwareCatalogBtn" type="button" class="btn subtle">Search Catalog</button>
+                            <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
+                        </div>
+                        <p id="softwareInstallHint" class="hint software-install-note">Tip: click Search Catalog first, then open Recent Jobs -> View Logs to see matching IDs.</p>
+                    </div>
+                    <div id="softwareSearchResultsPanel" class="software-search-results">
+                        <div class="software-search-head">
+                            <span class="software-search-title">Catalog Search Results</span>
+                            <span id="softwareSearchResultsMeta" class="hint">No catalog search has run yet for this agent.</span>
+                        </div>
+                        <p id="softwareSearchResultsSummary" class="hint">Run Search Catalog to list matching package IDs/names here.</p>
+                        <div id="softwareSearchMatchList" class="software-search-match-list"></div>
+                        <details class="software-search-raw">
+                            <summary>Raw Search Output</summary>
+                            <pre id="softwareSearchRawOutput">No output captured yet.</pre>
+                        </details>
                     </div>
                     <div class="table-wrap compact software-table-wrap">
                         <table>
@@ -1442,6 +1541,11 @@
     const softwareManagerSelect = document.getElementById("softwareManagerSelect");
     const softwareAllowUpdateInput = document.getElementById("softwareAllowUpdateInput");
     const softwareInstallHint = document.getElementById("softwareInstallHint");
+    const softwareSearchResultsPanel = document.getElementById("softwareSearchResultsPanel");
+    const softwareSearchResultsMeta = document.getElementById("softwareSearchResultsMeta");
+    const softwareSearchResultsSummary = document.getElementById("softwareSearchResultsSummary");
+    const softwareSearchMatchList = document.getElementById("softwareSearchMatchList");
+    const softwareSearchRawOutput = document.getElementById("softwareSearchRawOutput");
     const windowsScriptCorrelationIdInput = document.getElementById("windowsScriptCorrelationId");
     const windowsScriptUrlInput = document.getElementById("windowsScriptUrlInput");
     const windowsScriptInput = document.getElementById("windowsScriptInput");
@@ -3212,10 +3316,157 @@
         softwareInstallHint.textContent = "Tip: click Search Catalog first to find exact IDs, then run Install Software.";
     }
 
+    function isSoftwareSearchType(type) {
+        const normalized = String(type || "").trim().toLowerCase();
+        return normalized === "software_search"
+            || normalized === "application_search"
+            || normalized === "package_search";
+    }
+
+    function extractJobResultStrings(job) {
+        const completion = (typeof job?.completion === "object" && job.completion !== null) ? job.completion : {};
+        const result = (typeof completion.result === "object" && completion.result !== null) ? completion.result : {};
+        const error = (typeof completion.error === "object" && completion.error !== null) ? completion.error : {};
+
+        const summary = String(result.summary || "").trim();
+        const errorCode = String(error.code || "").trim();
+        const errorMessage = String(error.message || "").trim();
+        const output = String(result.output || result.stdout || result.standard_output || "").trim();
+        const errorOutput = String(result.error_output || result.stderr || result.standard_error || "").trim();
+
+        return {
+            summary: summary,
+            errorCode: errorCode,
+            errorMessage: errorMessage,
+            output: output,
+            errorOutput: errorOutput
+        };
+    }
+
+    function extractSoftwareSearchMatches(rawOutput) {
+        const lines = String(rawOutput || "")
+            .replaceAll("\r", "\n")
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line !== "");
+
+        const matches = [];
+        let inTopSection = false;
+
+        lines.forEach((line) => {
+            if (/^top package ids:/i.test(line) || /^top package names:/i.test(line) || /^top brew matches:/i.test(line)) {
+                inTopSection = true;
+                return;
+            }
+
+            if (inTopSection && line.startsWith("- ")) {
+                const value = line.slice(2).trim();
+                if (value !== "") {
+                    matches.push(value);
+                }
+                return;
+            }
+
+            if (inTopSection && !line.startsWith("- ") && !line.startsWith("... and")) {
+                inTopSection = false;
+            }
+        });
+
+        if (matches.length === 0) {
+            lines.forEach((line) => {
+                if (line.startsWith("- ")) {
+                    const value = line.slice(2).trim();
+                    if (value !== "") {
+                        matches.push(value);
+                    }
+                }
+            });
+        }
+
+        const unique = [];
+        const seen = new Set();
+        matches.forEach((value) => {
+            const key = value.toLowerCase();
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            unique.push(value);
+        });
+        return unique;
+    }
+
+    function findLatestSoftwareSearchJobForAgent(agentRecordId) {
+        const targetAgentId = String(agentRecordId || "");
+        if (targetAgentId === "") {
+            return null;
+        }
+
+        return latestJobs.find((job) => {
+            if (!isSoftwareSearchType(job?.type)) {
+                return false;
+            }
+            return String(job.target_agent_id || "") === targetAgentId;
+        }) || null;
+    }
+
+    function renderSoftwareSearchResultsForSelectedAgent(agent) {
+        if (!agent) {
+            softwareSearchResultsPanel.style.display = "grid";
+            softwareSearchResultsMeta.textContent = "Select an agent to view catalog search results.";
+            softwareSearchResultsSummary.textContent = "Run Search Catalog to list matching package IDs/names here.";
+            softwareSearchMatchList.innerHTML = "";
+            softwareSearchRawOutput.textContent = "No output captured yet.";
+            return;
+        }
+
+        const latestSearchJob = findLatestSoftwareSearchJobForAgent(agent.agent_record_id);
+        if (!latestSearchJob) {
+            softwareSearchResultsPanel.style.display = "grid";
+            softwareSearchResultsMeta.textContent = "No catalog search has run yet for this agent.";
+            softwareSearchResultsSummary.textContent = "Run Search Catalog and results will appear here.";
+            softwareSearchMatchList.innerHTML = "";
+            softwareSearchRawOutput.textContent = "No output captured yet.";
+            return;
+        }
+
+        const status = String(latestSearchJob.status || "unknown");
+        const jobId = String(latestSearchJob.job_id || "");
+        const createdAt = String(latestSearchJob.created_at || "");
+        softwareSearchResultsMeta.textContent = "Job "
+            + (jobId || "(unknown)")
+            + " • "
+            + status
+            + (createdAt ? (" • " + createdAt) : "");
+
+        const result = extractJobResultStrings(latestSearchJob);
+        const summary = result.summary
+            || (status.toLowerCase() === "assigned"
+                ? "Search is queued. Refresh shortly or check Recent Jobs."
+                : "Search completed. Review output below.");
+        softwareSearchResultsSummary.textContent = summary
+            + (result.errorMessage ? (" Error: " + (result.errorCode ? result.errorCode + " " : "") + result.errorMessage) : "");
+
+        const rawOutput = result.output || result.errorOutput || "No output captured yet.";
+        softwareSearchRawOutput.textContent = rawOutput;
+
+        const matches = extractSoftwareSearchMatches(result.output);
+        if (!matches.length) {
+            softwareSearchMatchList.innerHTML = '<span class="hint">No parsed package IDs/names yet. Use Raw Search Output or View Logs for full command output.</span>';
+            return;
+        }
+
+        softwareSearchMatchList.innerHTML = matches
+            .slice(0, 40)
+            .map((value) => "<span class=\"software-search-match-item\">" + escapeHtml(value) + "</span>")
+            .join("");
+    }
+
     function renderSoftwareInventoryForSelectedAgent() {
         const agent = selectedAgentId ? findAgent(selectedAgentId) : null;
         if (!agent) {
             refreshSoftwareInstallHints(null);
+            renderSoftwareSearchResultsForSelectedAgent(null);
             softwareInventoryMeta.textContent = "Select an agent to view installed software and queue installs.";
             softwareLastUpdatedCopy.textContent = "Inventory updated: n/a";
             softwareInventoryTableBody.innerHTML = '<tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>';
@@ -3230,6 +3481,7 @@
         const allRows = getApplicationsForAgent(agent);
         const rows = getFilteredApplicationsForAgent(agent);
         const snapshotTimestamp = getInventorySnapshotTimestamp(agent);
+        renderSoftwareSearchResultsForSelectedAgent(agent);
         const agentName = String(agent.display_name || agent.hostname || "selected agent");
         softwareInventoryMeta.textContent = "Showing "
             + String(rows.length)
