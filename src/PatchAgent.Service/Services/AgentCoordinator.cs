@@ -210,7 +210,10 @@ public sealed class AgentCoordinator
             AgentSelfUpdatePackageUrl = job.AgentSelfUpdatePackageUrl,
             SoftwareInstallManager = job.SoftwareInstallManager,
             SoftwareInstallAllowUpdate = job.SoftwareInstallAllowUpdate,
-            SoftwareInstallPackages = job.SoftwareInstallPackages.ToList()
+            SoftwareInstallPackages = job.SoftwareInstallPackages.ToList(),
+            SoftwareSearchManager = job.SoftwareSearchManager,
+            SoftwareSearchQuery = job.SoftwareSearchQuery,
+            SoftwareSearchLimit = job.SoftwareSearchLimit
         };
 
         await _policyClient.AcknowledgeJobAsync(

@@ -379,6 +379,41 @@ final class JobRepository
             ];
         }
 
+        if (
+            $typeNormalized === 'software_search'
+            || $typeNormalized === 'application_search'
+            || $typeNormalized === 'package_search'
+        ) {
+            $search = is_array($payload['software_search'] ?? null)
+                ? $payload['software_search']
+                : (
+                    is_array($payload['search'] ?? null)
+                        ? $payload['search']
+                        : (is_array($payload['software'] ?? null) ? $payload['software'] : [])
+                );
+
+            $query = trim((string) ($search['query'] ?? ($search['search'] ?? ($search['term'] ?? ''))));
+            $manager = strtolower(trim((string) ($search['manager'] ?? 'auto')));
+            if ($manager === '') {
+                $manager = 'auto';
+            }
+
+            $limit = (int) ($search['limit'] ?? ($search['max_results'] ?? 25));
+            if ($limit < 1) {
+                $limit = 1;
+            } elseif ($limit > 100) {
+                $limit = 100;
+            }
+
+            return [
+                'software_search' => [
+                    'manager' => $manager,
+                    'query' => $query,
+                    'limit' => $limit,
+                ],
+            ];
+        }
+
         if ($typeNormalized === 'windows_powershell_script') {
             $script = is_array($payload['windows_script'] ?? null) ? $payload['windows_script'] : [];
             return [

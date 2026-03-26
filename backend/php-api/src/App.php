@@ -468,8 +468,17 @@ final class App
             $typeNormalized = 'software_install';
         }
 
+        if (in_array($typeNormalized, ['application_search', 'package_search'], true)) {
+            $type = 'software_search';
+            $typeNormalized = 'software_search';
+        }
+
         if ($typeNormalized === 'software_install') {
             $payload = $this->normalizeSoftwareInstallPayload($payload);
+        }
+
+        if ($typeNormalized === 'software_search') {
+            $payload = $this->normalizeSoftwareSearchPayload($payload);
         }
 
         if ($targetAgentId === null && $targetDeviceId === null) {
@@ -4215,6 +4224,54 @@ BASH;
                     $software['allow_update'] ?? ($software['allow_upgrade'] ?? false)
                 ),
                 'packages' => array_values($normalizedPackages),
+            ],
+        ];
+    }
+
+    private function normalizeSoftwareSearchPayload(array $payload): array
+    {
+        $search = is_array($payload['software_search'] ?? null)
+            ? $payload['software_search']
+            : (
+                is_array($payload['search'] ?? null)
+                    ? $payload['search']
+                    : (is_array($payload['software'] ?? null) ? $payload['software'] : [])
+            );
+
+        $query = trim((string) ($search['query'] ?? ($search['search'] ?? ($search['term'] ?? ''))));
+        if ($query === '' || preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+@\/ -]{0,127}$/', $query) !== 1) {
+            throw new ApiException(
+                422,
+                'invalid_request',
+                'software_search requires a valid query in software_search.query.'
+            );
+        }
+
+        $manager = strtolower(trim((string) ($search['manager'] ?? 'auto')));
+        if ($manager === '') {
+            $manager = 'auto';
+        }
+
+        if (!in_array($manager, ['auto', 'winget', 'apt', 'brew'], true)) {
+            throw new ApiException(
+                422,
+                'invalid_request',
+                'software_search.manager must be one of: auto, winget, apt, brew.'
+            );
+        }
+
+        $limit = (int) ($search['limit'] ?? ($search['max_results'] ?? 25));
+        if ($limit < 1) {
+            $limit = 1;
+        } elseif ($limit > 100) {
+            $limit = 100;
+        }
+
+        return [
+            'software_search' => [
+                'manager' => $manager,
+                'query' => $query,
+                'limit' => $limit,
             ],
         ];
     }

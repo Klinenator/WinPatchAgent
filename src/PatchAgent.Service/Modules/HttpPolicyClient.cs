@@ -287,7 +287,10 @@ public sealed class HttpPolicyClient : IPolicyClient
             AgentSelfUpdatePackageUrl = ReadAgentSelfUpdatePackageUrl(response.Job.Payload),
             SoftwareInstallManager = ReadSoftwareInstallManager(response.Job.Payload),
             SoftwareInstallAllowUpdate = ReadSoftwareInstallAllowUpdate(response.Job.Payload),
-            SoftwareInstallPackages = ReadSoftwareInstallPackages(response.Job.Payload)
+            SoftwareInstallPackages = ReadSoftwareInstallPackages(response.Job.Payload),
+            SoftwareSearchManager = ReadSoftwareSearchManager(response.Job.Payload),
+            SoftwareSearchQuery = ReadSoftwareSearchQuery(response.Job.Payload),
+            SoftwareSearchLimit = ReadSoftwareSearchLimit(response.Job.Payload)
         };
     }
 
@@ -831,6 +834,75 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
     }
 
+    private static string ReadSoftwareSearchManager(JsonElement? payload)
+    {
+        if (TryGetSoftwareSearchValue(payload, "manager", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var manager = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(manager))
+            {
+                return manager.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ReadSoftwareSearchQuery(JsonElement? payload)
+    {
+        if (TryGetSoftwareSearchValue(payload, "query", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var query = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                return query.Trim();
+            }
+        }
+
+        if (TryGetSoftwareSearchValue(payload, "search", out value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var query = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                return query.Trim();
+            }
+        }
+
+        if (TryGetSoftwareSearchValue(payload, "term", out value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var query = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                return query.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static int ReadSoftwareSearchLimit(JsonElement? payload)
+    {
+        if (TryGetSoftwareSearchValue(payload, "limit", out var value)
+            && value is { ValueKind: JsonValueKind.Number }
+            && value.Value.TryGetInt32(out var limitFromLimit))
+        {
+            return limitFromLimit;
+        }
+
+        if (TryGetSoftwareSearchValue(payload, "max_results", out value)
+            && value is { ValueKind: JsonValueKind.Number }
+            && value.Value.TryGetInt32(out var limitFromMaxResults))
+        {
+            return limitFromMaxResults;
+        }
+
+        return 25;
+    }
+
     private static List<string> ReadWindowsKbIds(JsonElement? payload)
     {
         var kbSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1218,6 +1290,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!softwareSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetSoftwareSearchValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement searchSection;
+        if (payloadObject.TryGetProperty("software_search", out var softwareSearchSection)
+            && softwareSearchSection.ValueKind == JsonValueKind.Object)
+        {
+            searchSection = softwareSearchSection;
+        }
+        else if (payloadObject.TryGetProperty("search", out var searchSectionAlias)
+                 && searchSectionAlias.ValueKind == JsonValueKind.Object)
+        {
+            searchSection = searchSectionAlias;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!searchSection.TryGetProperty(key, out var child))
         {
             return false;
         }

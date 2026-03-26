@@ -49,4 +49,10 @@ public sealed class JobAssignment
     public bool SoftwareInstallAllowUpdate { get; set; }
 
     public List<string> SoftwareInstallPackages { get; set; } = [];
+
+    public string SoftwareSearchManager { get; set; } = string.Empty;
+
+    public string SoftwareSearchQuery { get; set; } = string.Empty;
+
+    public int SoftwareSearchLimit { get; set; } = 25;
 }

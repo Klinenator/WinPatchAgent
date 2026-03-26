@@ -728,7 +728,7 @@
             border-bottom: 1px solid #d9e7f0;
             background: #fff;
             display: grid;
-            grid-template-columns: minmax(0, 2fr) 160px auto auto;
+            grid-template-columns: minmax(0, 2fr) 160px auto auto auto;
             gap: 8px;
             align-items: center;
         }
@@ -1277,8 +1277,9 @@
                             <input id="softwareAllowUpdateInput" type="checkbox">
                             Allow update
                         </label>
+                        <button id="searchSoftwareCatalogBtn" type="button" class="btn subtle">Search Catalog</button>
                         <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
-                        <p id="softwareInstallHint" class="hint software-install-note">Tip: enter exact IDs or short search terms. For Windows, the agent can auto-resolve terms like `chrome` and returns suggestions when multiple matches exist.</p>
+                        <p id="softwareInstallHint" class="hint software-install-note">Tip: click Search Catalog first to find exact IDs, then run Install Software.</p>
                     </div>
                     <div class="table-wrap compact software-table-wrap">
                         <table>
@@ -1427,6 +1428,7 @@
     const queueSelfUpdateBtn = document.getElementById("queueSelfUpdateBtn");
     const installListedUpdatesBtn = document.getElementById("installListedUpdatesBtn");
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
+    const searchSoftwareCatalogBtn = document.getElementById("searchSoftwareCatalogBtn");
     const queueSoftwareInstallBtn = document.getElementById("queueSoftwareInstallBtn");
     const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
     const loadGcpwTemplateBtn = document.getElementById("loadGcpwTemplateBtn");
@@ -1640,6 +1642,51 @@
         } finally {
             installActionInFlight = false;
             renderPatchTableForSelectedAgent();
+        }
+    });
+
+    searchSoftwareCatalogBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        const selectedAgent = findAgent(selectedAgentId);
+        if (!selectedAgent) {
+            setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+            return;
+        }
+
+        const deviceType = getDeviceType(selectedAgent).value;
+        if (deviceType !== "windows" && deviceType !== "linux" && deviceType !== "mac") {
+            setStatus(agentActionStatus, "Catalog search is supported only for Windows, Linux, or macOS agents.", "error");
+            return;
+        }
+
+        const query = String(softwarePackageInput.value || "").trim();
+        if (query === "") {
+            setStatus(agentActionStatus, "Enter a software search term first (for example: omnissa or horizon).", "error");
+            return;
+        }
+
+        const manager = String(softwareManagerSelect.value || "auto").trim().toLowerCase();
+
+        try {
+            const queued = await queueSoftwareSearchJob(selectedAgent, query, manager);
+            const response = queued.response;
+            const jobId = response?.job?.job_id || "";
+            if (response?.duplicate === true) {
+                setStatus(agentActionStatus, "Matching catalog search already active: " + (jobId || "(unknown)"), "success");
+            } else {
+                setStatus(agentActionStatus, "Catalog search queued: " + (jobId || "(unknown)") + ". Open View Logs when it completes.", "success");
+            }
+
+            if (jobId) {
+                selectedJobId = String(jobId);
+            }
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
         }
     });
 
@@ -3145,24 +3192,24 @@
         const deviceType = agent ? getDeviceType(agent).value : "unknown";
         if (deviceType === "windows") {
             softwarePackageInput.placeholder = "Install package names or IDs (e.g. chrome vscode \"Google Chrome\")";
-            softwareInstallHint.textContent = "Tip: enter exact IDs or short search terms. Windows installs auto-resolve terms and return suggestions when multiple matches exist.";
+            softwareInstallHint.textContent = "Tip: use Search Catalog to find winget IDs, then install. Installs can auto-resolve short terms and return suggestions when ambiguous.";
             return;
         }
 
         if (deviceType === "linux") {
-            softwarePackageInput.placeholder = "Install apt package names (e.g. curl coreutils docker.io)";
-            softwareInstallHint.textContent = "Tip: use apt package names. If you need spaces, wrap the package token in quotes.";
+            softwarePackageInput.placeholder = "Search or install apt package names (e.g. curl coreutils docker.io)";
+            softwareInstallHint.textContent = "Tip: use Search Catalog to confirm apt package names before install.";
             return;
         }
 
         if (deviceType === "mac") {
-            softwarePackageInput.placeholder = "Install brew formula/cask (e.g. wget cask:google-chrome)";
-            softwareInstallHint.textContent = "Tip: use brew names and prefix GUI apps with cask:.";
+            softwarePackageInput.placeholder = "Search or install brew formula/cask (e.g. wget cask:google-chrome)";
+            softwareInstallHint.textContent = "Tip: use Search Catalog to find brew names. Prefix GUI apps with cask: when installing.";
             return;
         }
 
         softwarePackageInput.placeholder = "Install package names or IDs (comma/space separated)";
-        softwareInstallHint.textContent = "Tip: enter exact IDs or short search terms. For Windows, the agent can auto-resolve terms like chrome and returns suggestions when multiple matches exist.";
+        softwareInstallHint.textContent = "Tip: click Search Catalog first to find exact IDs, then run Install Software.";
     }
 
     function renderSoftwareInventoryForSelectedAgent() {
@@ -3173,6 +3220,7 @@
             softwareLastUpdatedCopy.textContent = "Inventory updated: n/a";
             softwareInventoryTableBody.innerHTML = '<tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>';
             queueSoftwareInstallBtn.disabled = true;
+            searchSoftwareCatalogBtn.disabled = true;
             return;
         }
 
@@ -3205,6 +3253,7 @@
                 ? '<tr><td colspan="5" class="hint">No installed software entries were reported in this snapshot.</td></tr>'
                 : '<tr><td colspan="5" class="hint">Installed software exists but did not match your search.</td></tr>';
             queueSoftwareInstallBtn.disabled = !canInstall;
+            searchSoftwareCatalogBtn.disabled = !canInstall;
             return;
         }
 
@@ -3226,6 +3275,7 @@
         }
 
         queueSoftwareInstallBtn.disabled = !canInstall;
+        searchSoftwareCatalogBtn.disabled = !canInstall;
     }
 
     function parseSoftwarePackageInput(rawValue) {
@@ -3276,6 +3326,30 @@
         });
 
         return { response: response, type: "software_install" };
+    }
+
+    async function queueSoftwareSearchJob(agent, query, manager) {
+        const agentRecordId = String(agent.agent_record_id || "");
+        const correlationRaw = updateCorrelationIdInput.value.trim();
+        const correlationId = correlationRaw || ("software-search-" + Date.now());
+        const response = await apiFetch("/v1/admin/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                target_agent_id: agentRecordId,
+                type: "software_search",
+                correlation_id: correlationId,
+                payload: {
+                    software_search: {
+                        manager: manager || "auto",
+                        query: String(query || "").trim(),
+                        limit: 30
+                    }
+                },
+                policy: {}
+            })
+        });
+
+        return { response: response, type: "software_search" };
     }
 
     async function queuePackageInstallJob(agent, installAll, packageIds) {
