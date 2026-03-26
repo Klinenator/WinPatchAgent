@@ -149,6 +149,7 @@ try {
 
     $imported = 0;
     $skipped = 0;
+    $failed = 0;
 
     foreach ($iterator as $entry) {
         if (!$entry->isFile()) {
@@ -169,11 +170,31 @@ try {
             continue;
         }
 
-        $store->writeRaw($relativePath, $content);
-        $imported++;
+        try {
+            $store->writeRaw($relativePath, $content);
+            $imported++;
+        } catch (\Throwable $entryException) {
+            fwrite(
+                STDERR,
+                sprintf(
+                    "Skipping file due to import error (%s): %s\n",
+                    $relativePath,
+                    $entryException->getMessage()
+                )
+            );
+            $failed++;
+        }
     }
 
-    fwrite(STDOUT, sprintf("MySQL import complete. Imported: %d, Skipped: %d\n", $imported, $skipped));
+    fwrite(
+        STDOUT,
+        sprintf(
+            "MySQL import complete. Imported: %d, Skipped: %d, Failed: %d\n",
+            $imported,
+            $skipped,
+            $failed
+        )
+    );
     exit(0);
 } catch (\Throwable $exception) {
     fwrite(STDERR, 'Migration failed: ' . $exception->getMessage() . PHP_EOL);

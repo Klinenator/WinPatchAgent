@@ -191,10 +191,15 @@ final class MySqlDocumentStore
         }
 
         if (str_ends_with($path, '.json')) {
-            $decoded = Json::decodeObject($content);
-            if (is_array($decoded)) {
-                $this->writeJson($path, $decoded);
-                return;
+            try {
+                $decoded = Json::decodeObject($content);
+                if (is_array($decoded)) {
+                    $this->writeJson($path, $decoded);
+                    return;
+                }
+            } catch (\Throwable) {
+                // Some legacy cache files may contain malformed JSON.
+                // Preserve raw content instead of failing the entire migration/write.
             }
         }
 
@@ -1173,4 +1178,3 @@ final class MySqlDocumentStore
         return $trimmed === '' ? null : $trimmed;
     }
 }
-
