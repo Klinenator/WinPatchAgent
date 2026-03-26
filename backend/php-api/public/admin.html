@@ -737,6 +737,13 @@
             margin-left: 2px;
         }
 
+        .software-install-note {
+            grid-column: 1 / -1;
+            margin: 0;
+            font-size: 12px;
+            color: #5b6f85;
+        }
+
         .software-install-toggle {
             display: inline-flex;
             align-items: center;
@@ -1259,7 +1266,7 @@
                         </div>
                     </div>
                     <div class="software-install-row">
-                        <input id="softwarePackageInput" type="text" placeholder="Install package IDs (comma or space separated)">
+                        <input id="softwarePackageInput" type="text" placeholder="Install package names or IDs (comma/space separated)">
                         <select id="softwareManagerSelect">
                             <option value="auto">auto</option>
                             <option value="winget">winget (Windows)</option>
@@ -1271,6 +1278,7 @@
                             Allow update
                         </label>
                         <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
+                        <p id="softwareInstallHint" class="hint software-install-note">Tip: enter exact IDs or short search terms. For Windows, the agent can auto-resolve terms like `chrome` and returns suggestions when multiple matches exist.</p>
                     </div>
                     <div class="table-wrap compact software-table-wrap">
                         <table>
@@ -1431,6 +1439,7 @@
     const softwarePackageInput = document.getElementById("softwarePackageInput");
     const softwareManagerSelect = document.getElementById("softwareManagerSelect");
     const softwareAllowUpdateInput = document.getElementById("softwareAllowUpdateInput");
+    const softwareInstallHint = document.getElementById("softwareInstallHint");
     const windowsScriptCorrelationIdInput = document.getElementById("windowsScriptCorrelationId");
     const windowsScriptUrlInput = document.getElementById("windowsScriptUrlInput");
     const windowsScriptInput = document.getElementById("windowsScriptInput");
@@ -1654,7 +1663,7 @@
 
         const packages = parseSoftwarePackageInput(softwarePackageInput.value);
         if (!packages.length) {
-            setStatus(agentActionStatus, "Enter one or more package IDs to install.", "error");
+            setStatus(agentActionStatus, "Enter one or more package names or IDs to install.", "error");
             return;
         }
 
@@ -3121,6 +3130,7 @@
     function syncSoftwareManagerForSelectedAgent(agent) {
         if (!agent) {
             softwareManagerSelect.value = "auto";
+            refreshSoftwareInstallHints(null);
             return;
         }
 
@@ -3128,11 +3138,37 @@
         if (current === "" || current === "auto" || !["winget", "apt", "brew"].includes(current)) {
             softwareManagerSelect.value = defaultSoftwareManagerForAgent(agent);
         }
+        refreshSoftwareInstallHints(agent);
+    }
+
+    function refreshSoftwareInstallHints(agent) {
+        const deviceType = agent ? getDeviceType(agent).value : "unknown";
+        if (deviceType === "windows") {
+            softwarePackageInput.placeholder = "Install package names or IDs (e.g. chrome vscode \"Google Chrome\")";
+            softwareInstallHint.textContent = "Tip: enter exact IDs or short search terms. Windows installs auto-resolve terms and return suggestions when multiple matches exist.";
+            return;
+        }
+
+        if (deviceType === "linux") {
+            softwarePackageInput.placeholder = "Install apt package names (e.g. curl coreutils docker.io)";
+            softwareInstallHint.textContent = "Tip: use apt package names. If you need spaces, wrap the package token in quotes.";
+            return;
+        }
+
+        if (deviceType === "mac") {
+            softwarePackageInput.placeholder = "Install brew formula/cask (e.g. wget cask:google-chrome)";
+            softwareInstallHint.textContent = "Tip: use brew names and prefix GUI apps with cask:.";
+            return;
+        }
+
+        softwarePackageInput.placeholder = "Install package names or IDs (comma/space separated)";
+        softwareInstallHint.textContent = "Tip: enter exact IDs or short search terms. For Windows, the agent can auto-resolve terms like chrome and returns suggestions when multiple matches exist.";
     }
 
     function renderSoftwareInventoryForSelectedAgent() {
         const agent = selectedAgentId ? findAgent(selectedAgentId) : null;
         if (!agent) {
+            refreshSoftwareInstallHints(null);
             softwareInventoryMeta.textContent = "Select an agent to view installed software and queue installs.";
             softwareLastUpdatedCopy.textContent = "Inventory updated: n/a";
             softwareInventoryTableBody.innerHTML = '<tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>';
@@ -3193,15 +3229,16 @@
     }
 
     function parseSoftwarePackageInput(rawValue) {
-        const tokens = String(rawValue || "")
-            .split(/[\s,]+/)
-            .map((token) => token.trim())
+        const raw = String(rawValue || "");
+        const rawTokens = raw.match(/"[^"]+"|'[^']+'|[^\s,]+/g) || [];
+        const tokens = rawTokens
+            .map((token) => token.trim().replace(/^"(.*)"$|^'(.*)'$/, "$1$2").trim())
             .filter((token) => token !== "");
         const unique = [];
         const seen = new Set();
 
         tokens.forEach((token) => {
-            if (!/^[A-Za-z0-9][A-Za-z0-9._:+@/-]{0,127}$/.test(token)) {
+            if (!/^[A-Za-z0-9][A-Za-z0-9._:+@\/ -]{0,127}$/.test(token)) {
                 return;
             }
 

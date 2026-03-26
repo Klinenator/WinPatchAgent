@@ -4180,7 +4180,7 @@ BASH;
                 continue;
             }
 
-            if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+@\/-]{0,127}$/', $value) !== 1) {
+            if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+@\/ -]{0,127}$/', $value) !== 1) {
                 continue;
             }
 
@@ -4191,7 +4191,7 @@ BASH;
             throw new ApiException(
                 422,
                 'invalid_request',
-                'software_install requires at least one valid package in software_install.packages.'
+                'software_install requires at least one valid package name or ID in software_install.packages.'
             );
         }
 

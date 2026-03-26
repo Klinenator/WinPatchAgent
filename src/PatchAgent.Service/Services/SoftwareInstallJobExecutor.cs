@@ -237,8 +237,89 @@ public sealed class SoftwareInstallJobExecutor : IJobExecutor
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
 
-        foreach (var packageId in packages)
+        foreach (var requestedPackage in packages)
         {
+            var packageId = requestedPackage;
+            var commandTimeout = TimeSpan.FromSeconds(Math.Max(30, _options.WindowsPowerShellScriptCommandTimeoutSeconds));
+
+            var exactSearch = await RunProcessAsync(
+                "winget",
+                [
+                    "search",
+                    "--id",
+                    requestedPackage,
+                    "--exact",
+                    "--accept-source-agreements"
+                ],
+                commandTimeout,
+                cancellationToken);
+
+            if (exactSearch.TimedOut)
+            {
+                return SoftwareInstallExecutionResult.Fail(
+                    "SOFTWARE_INSTALL_WINGET_TIMEOUT",
+                    $"winget search timed out for '{requestedPackage}'.",
+                    standardOutput: exactSearch.StandardOutput,
+                    standardError: exactSearch.StandardError);
+            }
+
+            if (exactSearch.StartFailed)
+            {
+                return SoftwareInstallExecutionResult.Fail(
+                    "SOFTWARE_INSTALL_WINGET_FAILED",
+                    "winget search failed to start.",
+                    standardOutput: exactSearch.StandardOutput,
+                    standardError: exactSearch.StandardError);
+            }
+
+            if (exactSearch.ExitCode != 0 || IsWingetNoMatchMessage(exactSearch.StandardOutput, exactSearch.StandardError))
+            {
+                var broadSearch = await RunProcessAsync(
+                    "winget",
+                    [
+                        "search",
+                        requestedPackage,
+                        "--accept-source-agreements"
+                    ],
+                    commandTimeout,
+                    cancellationToken);
+
+                AppendCommandOutput(stdout, stderr, $"winget search {requestedPackage}", broadSearch);
+
+                if (broadSearch.TimedOut)
+                {
+                    return SoftwareInstallExecutionResult.Fail(
+                        "SOFTWARE_INSTALL_WINGET_TIMEOUT",
+                        $"winget search timed out for '{requestedPackage}'.",
+                        standardOutput: stdout.ToString(),
+                        standardError: stderr.ToString());
+                }
+
+                var candidateIds = ExtractWingetCandidateIds(broadSearch.StandardOutput);
+                if (candidateIds.Count == 1)
+                {
+                    packageId = candidateIds[0];
+                    stdout.AppendLine($"Resolved '{requestedPackage}' to '{packageId}'.");
+                }
+                else if (candidateIds.Count > 1)
+                {
+                    var suggestions = string.Join(", ", candidateIds.Take(8));
+                    return SoftwareInstallExecutionResult.Fail(
+                        "SOFTWARE_INSTALL_AMBIGUOUS",
+                        $"Multiple packages match '{requestedPackage}'. Use an exact ID. Suggestions: {suggestions}",
+                        standardOutput: stdout.ToString(),
+                        standardError: stderr.ToString());
+                }
+                else
+                {
+                    return SoftwareInstallExecutionResult.Fail(
+                        "SOFTWARE_INSTALL_NOT_FOUND",
+                        $"No package match found for '{requestedPackage}'. Try `winget search {requestedPackage}` for exact IDs.",
+                        standardOutput: stdout.ToString(),
+                        standardError: stderr.ToString());
+                }
+            }
+
             if (allowUpdate)
             {
                 var upgradeResult = await RunProcessAsync(
@@ -253,7 +334,7 @@ public sealed class SoftwareInstallJobExecutor : IJobExecutor
                         "--accept-package-agreements",
                         "--disable-interactivity"
                     ],
-                    TimeSpan.FromSeconds(Math.Max(30, _options.WindowsPowerShellScriptCommandTimeoutSeconds)),
+                    commandTimeout,
                     cancellationToken);
 
                 AppendCommandOutput(stdout, stderr, $"winget upgrade --id {packageId}", upgradeResult);
@@ -294,7 +375,7 @@ public sealed class SoftwareInstallJobExecutor : IJobExecutor
                     "--accept-package-agreements",
                     "--disable-interactivity"
                 ],
-                TimeSpan.FromSeconds(Math.Max(30, _options.WindowsPowerShellScriptCommandTimeoutSeconds)),
+                commandTimeout,
                 cancellationToken);
 
             AppendCommandOutput(stdout, stderr, $"winget install --id {packageId}", installResult);
@@ -612,7 +693,7 @@ public sealed class SoftwareInstallJobExecutor : IJobExecutor
         {
             var allowed =
                 char.IsLetterOrDigit(character)
-                || character is '.' or '_' or '-' or ':' or '+' or '@' or '/';
+                || character is '.' or '_' or '-' or ':' or '+' or '@' or '/' or ' ';
             if (!allowed)
             {
                 return false;
@@ -666,6 +747,145 @@ public sealed class SoftwareInstallJobExecutor : IJobExecutor
         }
 
         return (token, false);
+    }
+
+    private static bool IsWingetNoMatchMessage(string stdout, string stderr)
+    {
+        var combined = (stdout + "\n" + stderr).ToLowerInvariant();
+        return combined.Contains("no package found matching input criteria", StringComparison.Ordinal)
+            || combined.Contains("no package found among", StringComparison.Ordinal)
+            || combined.Contains("no package found in current sources", StringComparison.Ordinal)
+            || combined.Contains("no package found in source", StringComparison.Ordinal)
+            || (combined.Contains("no package found", StringComparison.Ordinal) && combined.Contains("matching", StringComparison.Ordinal));
+    }
+
+    private static List<string> ExtractWingetCandidateIds(string stdout)
+    {
+        var ids = new List<string>();
+        if (string.IsNullOrWhiteSpace(stdout))
+        {
+            return ids;
+        }
+
+        var lines = stdout
+            .Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0)
+        {
+            return ids;
+        }
+
+        var headerIndex = -1;
+        var idColumnStart = -1;
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (!line.Contains("name", StringComparison.OrdinalIgnoreCase)
+                || !line.Contains("id", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var columnStart = line.IndexOf("Id", StringComparison.OrdinalIgnoreCase);
+            if (columnStart < 0)
+            {
+                continue;
+            }
+
+            headerIndex = index;
+            idColumnStart = columnStart;
+            break;
+        }
+
+        if (headerIndex < 0 || idColumnStart < 0)
+        {
+            return ids;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = headerIndex + 1; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (line.Length <= idColumnStart)
+            {
+                continue;
+            }
+
+            if (IsWingetSeparatorLine(line)
+                || line.StartsWith("No package found", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("The following", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Found ", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var idSegment = line[idColumnStart..].TrimStart();
+            if (idSegment.Length == 0)
+            {
+                continue;
+            }
+
+            var splitIndex = idSegment.IndexOfAny([' ', '\t']);
+            var candidate = (splitIndex >= 0 ? idSegment[..splitIndex] : idSegment).Trim();
+            if (!IsLikelyWingetId(candidate))
+            {
+                continue;
+            }
+
+            if (seen.Add(candidate))
+            {
+                ids.Add(candidate);
+            }
+        }
+
+        return ids;
+    }
+
+    private static bool IsLikelyWingetId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128)
+        {
+            return false;
+        }
+
+        var hasLetter = false;
+        foreach (var character in value)
+        {
+            var allowed =
+                char.IsLetterOrDigit(character)
+                || character is '.' or '_' or '-' or ':' or '+' or '@' or '/';
+            if (!allowed)
+            {
+                return false;
+            }
+
+            if (!hasLetter && char.IsLetter(character))
+            {
+                hasLetter = true;
+            }
+        }
+
+        return hasLetter;
+    }
+
+    private static bool IsWingetSeparatorLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return true;
+        }
+
+        foreach (var character in line)
+        {
+            if (character is '-' or '+' or '|' or ' ')
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private static bool IsWingetNotInstalledMessage(string stdout, string stderr)
