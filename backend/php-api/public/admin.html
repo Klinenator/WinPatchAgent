@@ -1430,6 +1430,7 @@
                 </div>
                 <div class="button-row">
                     <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue Script Job</button>
+                    <button id="queueWindowsScriptAllBtn" type="button" class="btn subtle">Queue on All Windows Agents</button>
                     <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
                     <button id="loadSplashtopTemplateBtn" type="button" class="btn subtle">Load Splashtop Template</button>
                 </div>
@@ -1535,6 +1536,7 @@
     const searchSoftwareCatalogBtn = document.getElementById("searchSoftwareCatalogBtn");
     const queueSoftwareInstallBtn = document.getElementById("queueSoftwareInstallBtn");
     const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
+    const queueWindowsScriptAllBtn = document.getElementById("queueWindowsScriptAllBtn");
     const loadGcpwTemplateBtn = document.getElementById("loadGcpwTemplateBtn");
     const loadSplashtopTemplateBtn = document.getElementById("loadSplashtopTemplateBtn");
     const refreshSelectedInventoryBtn = document.getElementById("refreshSelectedInventoryBtn");
@@ -1915,6 +1917,88 @@
             await loadDashboard();
         } catch (error) {
             setStatus(agentActionStatus, String(error.message || error), "error");
+        }
+    });
+
+    queueWindowsScriptAllBtn.addEventListener("click", async () => {
+        const scriptBody = windowsScriptInput.value.trim();
+        const scriptUrl = windowsScriptUrlInput.value.trim();
+        if (!scriptBody && !scriptUrl) {
+            setStatus(agentActionStatus, "Provide either a script body or a script URL.", "error");
+            return;
+        }
+
+        if (scriptBody && scriptUrl) {
+            setStatus(agentActionStatus, "Use either script body or script URL, not both.", "error");
+            return;
+        }
+
+        if (scriptUrl && !/^https?:\/\//i.test(scriptUrl)) {
+            setStatus(agentActionStatus, "Script URL must start with http:// or https://.", "error");
+            return;
+        }
+
+        const windowsAgents = latestAgents.filter((agent) => getDeviceType(agent).value === "windows");
+        if (!windowsAgents.length) {
+            setStatus(agentActionStatus, "No Windows agents are currently available.", "error");
+            return;
+        }
+
+        const confirmed = window.confirm(
+            "Queue this script on all " + windowsAgents.length + " Windows agents?"
+        );
+        if (!confirmed) {
+            setStatus(agentActionStatus, "Bulk script queue canceled.", "");
+            return;
+        }
+
+        const baseCorrelation = windowsScriptCorrelationIdInput.value.trim() || ("windows-bulk-script-" + Date.now());
+        let queuedCount = 0;
+        let duplicateCount = 0;
+        let failedCount = 0;
+        const failureSamples = [];
+
+        queueWindowsScriptBtn.disabled = true;
+        queueWindowsScriptAllBtn.disabled = true;
+        setStatus(agentActionStatus, "Queueing script across " + windowsAgents.length + " Windows agents...", "");
+
+        try {
+            for (let index = 0; index < windowsAgents.length; index += 1) {
+                const agent = windowsAgents[index];
+                const correlationId = baseCorrelation + "-a" + String(index + 1);
+                const targetLabel = String(agent.display_name || agent.hostname || agent.agent_record_id || "unknown");
+
+                try {
+                    const queued = await queueWindowsScriptJob(agent, scriptBody, scriptUrl, correlationId);
+                    if (queued.response?.duplicate === true) {
+                        duplicateCount += 1;
+                    } else {
+                        queuedCount += 1;
+                    }
+                } catch (error) {
+                    failedCount += 1;
+                    if (failureSamples.length < 3) {
+                        failureSamples.push(targetLabel + ": " + String(error.message || error));
+                    }
+                }
+            }
+
+            let statusMessage = "Bulk Windows script queue complete. Created "
+                + queuedCount
+                + ", duplicates "
+                + duplicateCount
+                + ", failed "
+                + failedCount
+                + ".";
+            if (failureSamples.length) {
+                statusMessage += " Sample failures: " + failureSamples.join(" | ");
+            }
+
+            setStatus(agentActionStatus, statusMessage, failedCount > 0 ? "error" : "success");
+            await loadDashboard();
+        } finally {
+            queueWindowsScriptBtn.disabled = false;
+            queueWindowsScriptAllBtn.disabled = false;
         }
     });
 
@@ -3834,9 +3918,11 @@
         return { response: response, type: "agent_self_update" };
     }
 
-    async function queueWindowsScriptJob(agent, scriptBody, scriptUrl) {
+    async function queueWindowsScriptJob(agent, scriptBody, scriptUrl, correlationIdOverride) {
         const agentRecordId = String(agent.agent_record_id || "");
-        const correlationRaw = windowsScriptCorrelationIdInput.value.trim();
+        const correlationRaw = (typeof correlationIdOverride === "string" && correlationIdOverride.trim() !== "")
+            ? correlationIdOverride.trim()
+            : windowsScriptCorrelationIdInput.value.trim();
         const correlationId = correlationRaw || ("windows-script-" + Date.now());
         const windowsScriptPayload = {};
 

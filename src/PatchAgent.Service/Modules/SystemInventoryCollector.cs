@@ -1165,10 +1165,60 @@ $items |
         const string script = @"
 $ErrorActionPreference = 'SilentlyContinue'
 $user = ''
+
 try {
-  $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
-  if ($null -ne $cs -and $null -ne $cs.UserName) {
-    $user = [string]$cs.UserName
+  $quserLines = & quser 2>$null
+  foreach ($rawLine in $quserLines) {
+    $line = [string]$rawLine
+    if ([string]::IsNullOrWhiteSpace($line)) {
+      continue
+    }
+
+    $trimmed = $line.Trim()
+    if ($trimmed -match '^(?i)USERNAME\s+') {
+      continue
+    }
+
+    if ($trimmed.StartsWith('>')) {
+      $trimmed = $trimmed.Substring(1).TrimStart()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+      continue
+    }
+
+    $parts = $trimmed -split '\s+'
+    if ($parts.Count -lt 1) {
+      continue
+    }
+
+    $candidate = [string]$parts[0]
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+
+    if ($candidate -match '^(?i)(DWM-|UMFD-)') {
+      continue
+    }
+
+    if ($trimmed -match '(?i)\bActive\b') {
+      $user = $candidate
+      break
+    }
+
+    if ([string]::IsNullOrWhiteSpace($user)) {
+      $user = $candidate
+    }
+  }
+} catch {
+}
+
+try {
+  if ([string]::IsNullOrWhiteSpace($user)) {
+    $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+    if ($null -ne $cs -and $null -ne $cs.UserName) {
+      $user = [string]$cs.UserName
+    }
   }
 } catch {
 }
