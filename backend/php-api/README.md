@@ -49,7 +49,7 @@ Current endpoints:
 
 Storage model:
 - File-backed JSON and NDJSON under `storage/runtime/` by default
-- Optional MySQL document store mode when `PATCH_API_DB_DRIVER=mysql`
+- Optional MySQL relational mode when `PATCH_API_DB_DRIVER=mysql`
 - Production deployments should use MySQL mode with backups
 
 Files:
@@ -87,7 +87,9 @@ Environment variables:
 - `PATCH_API_DB_NAME`: MySQL database name (required when driver is `mysql`)
 - `PATCH_API_DB_USER`: MySQL username (required when driver is `mysql`)
 - `PATCH_API_DB_PASSWORD`: MySQL password (required when driver is `mysql`)
-- `PATCH_API_DB_TABLE`: MySQL table for key-document storage (default `patchapi_documents`)
+- `PATCH_API_DB_TABLE`: base document table name and table prefix source (default `patchapi_documents`)
+  - document fallback table: `patchapi_documents`
+  - typed relational tables (derived prefix `patchapi_...`): `agents`, `jobs`, `enrollments`, `inventory`, `events`, `admin_users`, `admin_passkeys`, `automation_profiles`
 - `PATCH_API_HEARTBEAT_SECONDS`: default `300`
 - `PATCH_API_JOBS_SECONDS`: default `120`
 - `PATCH_API_INVENTORY_SECONDS`: default `21600`
@@ -103,7 +105,7 @@ php backend/php-api/scripts/migrate_runtime_to_mysql.php \
   --db-user winpatch_app
 ```
 
-The script prompts for the DB password via env/arg if omitted from config and imports current runtime files into the MySQL document table.
+The script prompts for the DB password via env/arg if omitted and imports current runtime files into typed MySQL tables (with document fallback table for uncategorized paths such as CVE cache blobs).
 
 Local run example once PHP is installed:
 
@@ -177,9 +179,9 @@ add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-ac
 This allows inline admin scripts only when they carry the server-generated nonce.
 
 Suggested next steps:
-- Replace file storage with MySQL or PostgreSQL
+- Add secondary indexes/tuning for your largest queries (jobs + events + inventory)
 - Add agent key rotation and signed enrollment flow
-- Add admin APIs for job creation and rollout targeting
+- Add rollout targeting with groups/tags
 
 Job seeding example:
 

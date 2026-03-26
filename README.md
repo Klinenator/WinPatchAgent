@@ -135,7 +135,7 @@ The admin main page now surfaces a Windows SOC2 baseline status card (Defender s
 The admin main page also provides one-click SOC2 evidence exports (JSON/CSV) suitable for audit packages.
 Windows install links from `/install/windows.ps1` support `mode=prebuilt` (default, no endpoint compile) or `mode=source` (compile on endpoint after downloading source).
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
-Backend storage now supports either file mode (`storage/runtime`) or MySQL document mode (`PATCH_API_DB_DRIVER=mysql`) for more durable production persistence.
+Backend storage now supports either file mode (`storage/runtime`) or MySQL relational mode (`PATCH_API_DB_DRIVER=mysql`) for more durable production persistence and easier SQL debugging.
 
 To migrate current runtime files into MySQL:
 
