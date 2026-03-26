@@ -14,6 +14,7 @@ use PatchAgent\Api\Storage\InventoryRepository;
 use PatchAgent\Api\Storage\JobRepository;
 use PatchAgent\Api\Storage\AutomationProfileRepository;
 use PatchAgent\Api\Storage\AdminPasskeyRepository;
+use PatchAgent\Api\Storage\AdminUserRepository;
 use PatchAgent\Api\Support\Json;
 use RuntimeException;
 use Throwable;
@@ -46,6 +47,7 @@ final class App
     private JobRepository $jobs;
     private AutomationProfileRepository $automations;
     private AdminPasskeyRepository $passkeys;
+    private AdminUserRepository $adminUsers;
 
     public function __construct()
     {
@@ -60,6 +62,7 @@ final class App
         $this->jobs = new JobRepository($store);
         $this->automations = new AutomationProfileRepository($store);
         $this->passkeys = new AdminPasskeyRepository($store);
+        $this->adminUsers = new AdminUserRepository($store);
     }
 
     public function run(): void
@@ -141,6 +144,12 @@ final class App
             if ($method === 'GET' && $path === '/v1/admin/jobs') {
                 $this->requireAdmin($request);
                 $this->handleListJobs();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/users') {
+                $this->requireAdminRole($request, AdminUserRepository::ROLE_ADMIN);
+                $this->handleListAdminUsers();
                 return;
             }
 
@@ -257,6 +266,12 @@ final class App
                 return;
             }
 
+            if ($method === 'POST' && preg_match('#^/v1/admin/users/([^/]+)/delete$#', $path, $matches) === 1) {
+                $this->requireAdminRole($request, AdminUserRepository::ROLE_ADMIN);
+                $this->handleDeleteAdminUser(rawurldecode($matches[1]));
+                return;
+            }
+
             if ($method === 'POST' && preg_match('#^/v1/admin/automations/([^/]+)/run$#', $path, $matches) === 1) {
                 $this->requireAdmin($request);
                 $this->handleRunAutomation(rawurldecode($matches[1]));
@@ -315,8 +330,13 @@ final class App
                     $this->handleUpsertAutomation($request);
                     return;
 
+                case '/v1/admin/users':
+                    $this->requireAdminRole($request, AdminUserRepository::ROLE_ADMIN);
+                    $this->handleUpsertAdminUser($request);
+                    return;
+
                 case '/v1/admin/enrollments':
-                    $this->requireAdmin($request);
+                    $this->requireAdminRole($request, AdminUserRepository::ROLE_ADMIN);
                     $this->handleCreateEnrollment($request);
                     return;
             }
@@ -589,6 +609,93 @@ final class App
                 'command' => $installCommand,
                 'windows_install_mode' => $platform === 'windows' ? $windowsInstallMode : null,
             ],
+        ]);
+    }
+
+    private function handleListAdminUsers(): void
+    {
+        JsonResponse::ok([
+            'users' => $this->adminUsers->listUsers(),
+            'active_admin_count' => $this->adminUsers->countActiveAdmins(),
+            'roles' => [
+                AdminUserRepository::ROLE_ADMIN,
+                AdminUserRepository::ROLE_TECHNICIAN,
+            ],
+        ]);
+    }
+
+    private function handleUpsertAdminUser(Request $request): void
+    {
+        $body = $request->json();
+        $email = strtolower(trim($this->requireString($body, 'email')));
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new ApiException(422, 'invalid_request', 'Field "email" must be a valid email address.');
+        }
+
+        $role = $this->normalizeAdminRole((string) ($body['role'] ?? AdminUserRepository::ROLE_TECHNICIAN));
+        if ($role === null) {
+            throw new ApiException(422, 'invalid_request', 'Field "role" must be "admin" or "technician".');
+        }
+
+        $activeRaw = $body['active'] ?? true;
+        $active = filter_var($activeRaw, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        if ($active === null) {
+            throw new ApiException(422, 'invalid_request', 'Field "active" must be a boolean.');
+        }
+
+        $name = trim((string) ($body['name'] ?? ''));
+        $existing = $this->adminUsers->findUser($email);
+        if (
+            $existing !== null
+            && ($existing['active'] ?? false) === true
+            && (string) ($existing['role'] ?? '') === AdminUserRepository::ROLE_ADMIN
+            && ($active !== true || $role !== AdminUserRepository::ROLE_ADMIN)
+            && $this->adminUsers->countActiveAdmins() <= 1
+        ) {
+            throw new ApiException(409, 'last_admin_protected', 'At least one active admin user is required.');
+        }
+
+        $actorEmail = $this->currentAdminActorEmail();
+        $saved = $this->adminUsers->upsertUser($email, $name, $role, $active, $actorEmail);
+        JsonResponse::ok([
+            'user' => $saved,
+        ]);
+    }
+
+    private function handleDeleteAdminUser(string $email): void
+    {
+        $normalizedEmail = strtolower(trim($email));
+        if (filter_var($normalizedEmail, FILTER_VALIDATE_EMAIL) === false) {
+            throw new ApiException(422, 'invalid_request', 'A valid user email is required.');
+        }
+
+        $existing = $this->adminUsers->findUser($normalizedEmail);
+        if ($existing === null) {
+            throw new ApiException(404, 'admin_user_not_found', 'The requested admin user was not found.');
+        }
+
+        if (
+            ($existing['active'] ?? false) === true
+            && (string) ($existing['role'] ?? '') === AdminUserRepository::ROLE_ADMIN
+            && $this->adminUsers->countActiveAdmins() <= 1
+        ) {
+            throw new ApiException(409, 'last_admin_protected', 'At least one active admin user is required.');
+        }
+
+        $deleted = $this->adminUsers->deleteUser($normalizedEmail);
+        if (!$deleted) {
+            throw new ApiException(404, 'admin_user_not_found', 'The requested admin user was not found.');
+        }
+
+        $current = $this->currentAdminUser();
+        if ($current !== null && strtolower((string) ($current['email'] ?? '')) === $normalizedEmail) {
+            $this->startAdminSession();
+            unset($_SESSION[self::ADMIN_SESSION_USER_KEY]);
+        }
+
+        JsonResponse::ok([
+            'deleted' => true,
+            'email' => $normalizedEmail,
         ]);
     }
 
@@ -1862,6 +1969,14 @@ final class App
 
     private function handleAdminSettingsView(): void
     {
+        if ($this->isGoogleOAuthEnabled()) {
+            $user = $this->currentAdminUser();
+            if ($user !== null && (string) ($user['role'] ?? '') !== AdminUserRepository::ROLE_ADMIN) {
+                $this->redirect('/admin');
+                return;
+            }
+        }
+
         $this->handleAdminProtectedView('admin-settings.html', 'Admin settings page is missing.');
     }
 
@@ -1920,6 +2035,9 @@ final class App
             'oauth_enabled' => $this->isGoogleOAuthEnabled(),
             'logged_in' => $user !== null,
             'user' => $user,
+            'role' => $user !== null ? (string) ($user['role'] ?? AdminUserRepository::ROLE_TECHNICIAN) : null,
+            'can_manage_users' => $user !== null
+                && (string) ($user['role'] ?? AdminUserRepository::ROLE_TECHNICIAN) === AdminUserRepository::ROLE_ADMIN,
             'login_url' => '/v1/admin/auth/google/start',
             'logout_url' => '/v1/admin/auth/logout',
             'totp_enabled' => $totpEnabled,
@@ -2492,6 +2610,7 @@ final class App
 
     private function authenticateAdminUser(array $claims): void
     {
+        $account = $this->resolveOrBootstrapAdminAccount($claims);
         $sessionTtl = max(300, $this->config->adminSessionTtlSeconds);
         $_SESSION[self::ADMIN_SESSION_USER_KEY] = [
             'email' => strtolower(trim((string) ($claims['email'] ?? ''))),
@@ -2499,6 +2618,7 @@ final class App
             'picture' => trim((string) ($claims['picture'] ?? '')),
             'sub' => trim((string) ($claims['sub'] ?? '')),
             'hd' => trim((string) ($claims['hd'] ?? '')),
+            'role' => (string) ($account['role'] ?? AdminUserRepository::ROLE_TECHNICIAN),
             'authenticated_at' => gmdate(DATE_ATOM),
             'expires_at' => time() + $sessionTtl,
         ];
@@ -2507,6 +2627,30 @@ final class App
             $_SESSION[self::ADMIN_SESSION_PASSKEY_ASSERTION_KEY]
         );
         session_regenerate_id(true);
+    }
+
+    private function resolveOrBootstrapAdminAccount(array $claims): array
+    {
+        $email = strtolower(trim((string) ($claims['email'] ?? '')));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new ApiException(401, 'invalid_admin_identity', 'Could not determine the authenticated admin email.');
+        }
+
+        $name = trim((string) ($claims['name'] ?? ''));
+        $account = $this->adminUsers->findUser($email);
+        if ($account === null) {
+            $account = $this->adminUsers->bootstrapAdminIfEmpty($email, $name);
+        }
+
+        if ($account === null) {
+            throw new ApiException(403, 'admin_user_not_allowed', 'Your account is not authorized for this admin console.');
+        }
+
+        if (($account['active'] ?? false) !== true) {
+            throw new ApiException(403, 'admin_user_disabled', 'Your admin account is disabled.');
+        }
+
+        return $account;
     }
 
     private function startPendingTotpChallenge(array $claims): void
@@ -4633,6 +4777,12 @@ BASH;
 
     private function requireAdmin(Request $request): void
     {
+        $this->requireAdminRole($request, AdminUserRepository::ROLE_TECHNICIAN);
+    }
+
+    private function requireAdminRole(Request $request, string $requiredRole): array
+    {
+        $required = $this->normalizeAdminRole($requiredRole) ?? AdminUserRepository::ROLE_TECHNICIAN;
         $token = $request->bearerToken();
         if (
             $token !== null
@@ -4640,11 +4790,21 @@ BASH;
             && $this->config->adminKey !== ''
             && hash_equals($this->config->adminKey, $token)
         ) {
-            return;
+            return [
+                'email' => 'token_admin',
+                'role' => AdminUserRepository::ROLE_ADMIN,
+            ];
         }
 
-        if ($this->isAdminSessionAuthenticated()) {
-            return;
+        $user = $this->currentAdminUser();
+        if ($user !== null) {
+            $actualRole = $this->normalizeAdminRole((string) ($user['role'] ?? ''))
+                ?? AdminUserRepository::ROLE_TECHNICIAN;
+            if (!$this->adminRoleHasAccess($actualRole, $required)) {
+                throw new ApiException(403, 'insufficient_admin_role', 'Your role does not have access to this operation.');
+            }
+
+            return $user;
         }
 
         if ($token !== null && $token !== '' && $this->config->adminKey !== '') {
@@ -4658,6 +4818,41 @@ BASH;
         if ($this->config->adminKey !== '') {
             throw new ApiException(401, 'missing_admin_token', 'The admin bearer token is required.');
         }
+
+        throw new ApiException(401, 'admin_auth_required', 'Admin login is required.');
+    }
+
+    private function normalizeAdminRole(string $value): ?string
+    {
+        $role = strtolower(trim($value));
+        if ($role === AdminUserRepository::ROLE_ADMIN || $role === AdminUserRepository::ROLE_TECHNICIAN) {
+            return $role;
+        }
+
+        return null;
+    }
+
+    private function adminRoleHasAccess(string $actualRole, string $requiredRole): bool
+    {
+        if ($requiredRole === AdminUserRepository::ROLE_ADMIN) {
+            return $actualRole === AdminUserRepository::ROLE_ADMIN;
+        }
+
+        return $actualRole === AdminUserRepository::ROLE_ADMIN
+            || $actualRole === AdminUserRepository::ROLE_TECHNICIAN;
+    }
+
+    private function currentAdminActorEmail(): string
+    {
+        $user = $this->currentAdminUser();
+        if ($user !== null) {
+            $email = strtolower(trim((string) ($user['email'] ?? '')));
+            if ($email !== '') {
+                return $email;
+            }
+        }
+
+        return 'token_admin';
     }
 
     private function isGoogleOAuthEnabled(): bool
@@ -4751,12 +4946,23 @@ BASH;
             return null;
         }
 
+        $account = $this->adminUsers->findUser($email);
+        if ($account === null) {
+            $account = $this->adminUsers->bootstrapAdminIfEmpty($email, (string) ($user['name'] ?? ''));
+        }
+
+        if ($account === null || ($account['active'] ?? false) !== true) {
+            unset($_SESSION[self::ADMIN_SESSION_USER_KEY]);
+            return null;
+        }
+
         return [
             'email' => $email,
             'name' => trim((string) ($user['name'] ?? '')),
             'picture' => trim((string) ($user['picture'] ?? '')),
             'sub' => trim((string) ($user['sub'] ?? '')),
             'hd' => trim((string) ($user['hd'] ?? '')),
+            'role' => (string) ($account['role'] ?? AdminUserRepository::ROLE_TECHNICIAN),
             'authenticated_at' => trim((string) ($user['authenticated_at'] ?? '')),
             'expires_at' => $expiresAt,
         ];

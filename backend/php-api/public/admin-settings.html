@@ -272,6 +272,15 @@
             font-weight: 600;
         }
 
+        .field-grid {
+            display: grid;
+            gap: 8px;
+        }
+
+        .field-grid.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .actions {
             display: flex;
             flex-wrap: wrap;
@@ -323,6 +332,108 @@
             font-size: 12px;
         }
 
+        .user-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .user-item {
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
+            background: #f8fbfd;
+            padding: 9px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .user-title {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-meta {
+            margin: 2px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .role-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .role-pill.admin {
+            background: #e2eefc;
+            color: #1f4f87;
+        }
+
+        .role-pill.technician {
+            background: #e8f5ec;
+            color: #1d6a45;
+        }
+
+        .active-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            background: #eceff3;
+            color: #4a596f;
+        }
+
+        .active-pill.on {
+            background: #daf4e6;
+            color: #1f7b4f;
+        }
+
+        .active-pill.off {
+            background: #fbe3e7;
+            color: #a12f40;
+        }
+
+        .inline-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .inline-check input[type="checkbox"] {
+            width: auto;
+        }
+
+        .inline-check.tight {
+            margin-top: 2px;
+            color: #2f475d;
+            font-weight: 500;
+        }
+
+        .user-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
         @keyframes rise {
             0% {
                 opacity: 0;
@@ -351,6 +462,10 @@
             .command-actions {
                 justify-content: flex-start;
                 width: 100%;
+            }
+
+            .field-grid.two {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -381,7 +496,7 @@
         <section class="top-command">
             <div class="top-copy">
                 <h1>Admin Settings</h1>
-                <p>Manage optional bearer token storage and authentication diagnostics.</p>
+                <p>Manage user roles, bearer token preferences, and authentication diagnostics.</p>
             </div>
             <div class="command-actions">
                 <button id="refreshStatusBtn" type="button" class="btn subtle">Refresh Status</button>
@@ -390,6 +505,50 @@
         <div id="pageStatus" class="status-line"></div>
 
         <section class="panel-wrap">
+            <section id="usersPanel" class="panel">
+                <h2>User Access</h2>
+                <p class="hint">Limit admin console access and set each user as admin or technician.</p>
+                <div id="usersHint" class="status-line"></div>
+
+                <div class="field-grid two">
+                    <div class="field-block">
+                        <label for="userEmail">User Email</label>
+                        <input id="userEmail" type="email" placeholder="tech@accessrrs.com" autocomplete="off">
+                    </div>
+                    <div class="field-block">
+                        <label for="userName">Display Name (Optional)</label>
+                        <input id="userName" type="text" placeholder="Technician Name" maxlength="120" autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="field-grid two" style="margin-top: 8px;">
+                    <div class="field-block">
+                        <label for="userRole">Role</label>
+                        <select id="userRole">
+                            <option value="technician">Technician</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="field-block">
+                        <label>&nbsp;</label>
+                        <label class="inline-check tight">
+                            <input id="userActive" type="checkbox" checked>
+                            Active account
+                        </label>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button id="saveUserBtn" type="button" class="btn primary">Save User</button>
+                    <button id="clearUserFormBtn" type="button" class="btn subtle">Clear Form</button>
+                    <button id="refreshUsersBtn" type="button" class="btn subtle">Refresh Users</button>
+                </div>
+                <div id="userStatus" class="status-line"></div>
+                <div id="usersList" class="user-list">
+                    <p class="hint">Sign in as admin to manage users.</p>
+                </div>
+            </section>
+
             <section class="panel">
                 <h2>Bearer Token</h2>
                 <p class="hint">Only needed if you prefer API bearer auth instead of Google OAuth session.</p>
@@ -436,6 +595,13 @@
     const pageStatus = document.getElementById("pageStatus");
     const tokenStatus = document.getElementById("tokenStatus");
     const tokenInput = document.getElementById("adminToken");
+    const usersHint = document.getElementById("usersHint");
+    const userEmailInput = document.getElementById("userEmail");
+    const userNameInput = document.getElementById("userName");
+    const userRoleSelect = document.getElementById("userRole");
+    const userActiveInput = document.getElementById("userActive");
+    const userStatus = document.getElementById("userStatus");
+    const usersList = document.getElementById("usersList");
     const passkeyNameInput = document.getElementById("passkeyName");
     const passkeyStatus = document.getElementById("passkeyStatus");
     const passkeyList = document.getElementById("passkeyList");
@@ -444,11 +610,15 @@
     const refreshStatusBtn = document.getElementById("refreshStatusBtn");
     const saveTokenBtn = document.getElementById("saveTokenBtn");
     const clearTokenBtn = document.getElementById("clearTokenBtn");
+    const saveUserBtn = document.getElementById("saveUserBtn");
+    const clearUserFormBtn = document.getElementById("clearUserFormBtn");
+    const refreshUsersBtn = document.getElementById("refreshUsersBtn");
     const registerPasskeyBtn = document.getElementById("registerPasskeyBtn");
     const refreshPasskeysBtn = document.getElementById("refreshPasskeysBtn");
 
     const STORAGE_KEY = "patchagent_admin_token";
     let authState = null;
+    let canManageUsers = false;
 
     const savedToken = localStorage.getItem(STORAGE_KEY);
     if (savedToken) {
@@ -477,6 +647,63 @@
 
     refreshStatusBtn.addEventListener("click", async () => {
         await loadAuthStatus();
+    });
+
+    saveUserBtn.addEventListener("click", async () => {
+        if (!canManageUsers) {
+            setStatus(userStatus, "Only admin users can manage access.", "error");
+            return;
+        }
+
+        const email = String(userEmailInput.value || "").trim().toLowerCase();
+        const name = String(userNameInput.value || "").trim();
+        const role = String(userRoleSelect.value || "technician").trim().toLowerCase();
+        const active = userActiveInput.checked === true;
+
+        if (!email) {
+            setStatus(userStatus, "Enter a user email first.", "error");
+            return;
+        }
+
+        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailPattern.test(email)) {
+            setStatus(userStatus, "Enter a valid email address.", "error");
+            return;
+        }
+
+        if (role !== "admin" && role !== "technician") {
+            setStatus(userStatus, "Role must be admin or technician.", "error");
+            return;
+        }
+
+        saveUserBtn.disabled = true;
+        try {
+            await apiFetch("/v1/admin/users", {
+                method: "POST",
+                body: JSON.stringify({
+                    email: email,
+                    name: name,
+                    role: role,
+                    active: active
+                })
+            });
+            setStatus(userStatus, "User access saved.", "success");
+            await loadUsers();
+            await loadAuthStatus();
+        } catch (error) {
+            setStatus(userStatus, String(error.message || error), "error");
+        } finally {
+            saveUserBtn.disabled = false;
+        }
+    });
+
+    clearUserFormBtn.addEventListener("click", () => {
+        resetUserForm();
+        setStatus(userStatus, "Form cleared.", "");
+    });
+
+    refreshUsersBtn.addEventListener("click", async () => {
+        await loadUsers(true);
     });
 
     logoutBtn.addEventListener("click", async () => {
@@ -569,8 +796,10 @@
                 const name = String(user.name || "").trim();
                 authUser.textContent = name ? (name + " <" + email + ">") : email;
                 const passkeyCount = Number.parseInt(String(data.passkey_count || "0"), 10) || 0;
-                authSummary.textContent = "OAuth session is active. Registered passkeys: " + passkeyCount + ".";
+                const role = String(data.role || user.role || "technician").trim().toLowerCase();
+                authSummary.textContent = "OAuth session is active as " + role + ". Registered passkeys: " + passkeyCount + ".";
                 setStatus(pageStatus, "Authenticated session is active.", "success");
+                await syncUsersPanel();
                 return;
             }
 
@@ -580,6 +809,7 @@
                 setStatus(pageStatus, "Sign in via Google OAuth or rely on bearer token.", "");
                 passkeyList.innerHTML = "<p class=\"hint\">Sign in with OAuth to manage passkeys.</p>";
                 setStatus(passkeyStatus, "", "");
+                await syncUsersPanel();
                 return;
             }
 
@@ -588,12 +818,160 @@
             setStatus(pageStatus, "Bearer token auth can still be used for API requests.", "");
             passkeyList.innerHTML = "<p class=\"hint\">Passkeys require OAuth session login.</p>";
             setStatus(passkeyStatus, "", "");
+            await syncUsersPanel();
         } catch {
             authUser.textContent = "Unknown";
             authSummary.textContent = "Could not determine auth state.";
             setStatus(pageStatus, "Could not load auth status.", "error");
             setStatus(passkeyStatus, "Could not load passkey status.", "error");
+            await syncUsersPanel();
         }
+    }
+
+    async function loadUsers(withMessage) {
+        if (!canManageUsers) {
+            return;
+        }
+
+        try {
+            const payload = await apiFetch("/v1/admin/users", { method: "GET" });
+            const users = Array.isArray(payload.users) ? payload.users : [];
+            const activeAdminCount = Number.parseInt(String(payload.active_admin_count || "0"), 10) || 0;
+            renderUsers(users, activeAdminCount);
+            if (withMessage === true) {
+                setStatus(userStatus, "User access list refreshed.", "success");
+            }
+        } catch (error) {
+            usersList.innerHTML = "<p class=\"hint\">Could not load users.</p>";
+            setStatus(userStatus, String(error.message || error), "error");
+        }
+    }
+
+    async function deleteUser(email) {
+        if (!canManageUsers) {
+            setStatus(userStatus, "Only admin users can manage access.", "error");
+            return;
+        }
+
+        const normalizedEmail = String(email || "").trim().toLowerCase();
+        if (!normalizedEmail) {
+            return;
+        }
+
+        if (!window.confirm("Delete access for " + normalizedEmail + "?")) {
+            return;
+        }
+
+        try {
+            await apiFetch("/v1/admin/users/" + encodeURIComponent(normalizedEmail) + "/delete", {
+                method: "POST"
+            });
+            setStatus(userStatus, "User removed: " + normalizedEmail, "success");
+            await loadUsers();
+            await loadAuthStatus();
+        } catch (error) {
+            setStatus(userStatus, String(error.message || error), "error");
+        }
+    }
+
+    async function syncUsersPanel() {
+        const loggedIn = authState && authState.logged_in === true;
+        const role = String(authState?.role || "").trim().toLowerCase();
+        canManageUsers = loggedIn && authState?.can_manage_users === true && role === "admin";
+        setUsersControlsEnabled(canManageUsers);
+
+        if (!loggedIn) {
+            usersHint.textContent = "Sign in as an admin user to manage access.";
+            usersHint.className = "status-line";
+            usersList.innerHTML = "<p class=\"hint\">No user access data available.</p>";
+            return;
+        }
+
+        if (!canManageUsers) {
+            usersHint.textContent = "Your role is technician. Only admins can change user access.";
+            usersHint.className = "status-line";
+            usersList.innerHTML = "<p class=\"hint\">User management is restricted to admin role.</p>";
+            return;
+        }
+
+        usersHint.textContent = "";
+        usersHint.className = "status-line";
+        await loadUsers();
+    }
+
+    function setUsersControlsEnabled(enabled) {
+        userEmailInput.disabled = !enabled;
+        userNameInput.disabled = !enabled;
+        userRoleSelect.disabled = !enabled;
+        userActiveInput.disabled = !enabled;
+        saveUserBtn.disabled = !enabled;
+        clearUserFormBtn.disabled = !enabled;
+        refreshUsersBtn.disabled = !enabled;
+    }
+
+    function renderUsers(users, activeAdminCount) {
+        if (!Array.isArray(users) || users.length === 0) {
+            usersList.innerHTML = "<p class=\"hint\">No users configured yet.</p>";
+            return;
+        }
+
+        usersList.innerHTML = users.map((user) => {
+            const email = String(user.email || "").trim().toLowerCase();
+            const name = String(user.name || "").trim();
+            const role = String(user.role || "technician").trim().toLowerCase();
+            const active = user.active === true;
+            const roleLabel = role === "admin" ? "Admin" : "Technician";
+            const activeLabel = active ? "Active" : "Disabled";
+            const createdAt = formatTimestamp(user.created_at);
+            const updatedAt = formatTimestamp(user.updated_at);
+            const subtitle = name ? (escapeHtml(name) + " • " + escapeHtml(email)) : escapeHtml(email);
+            return "<div class=\"user-item\">"
+                + "<div>"
+                + "<p class=\"user-title\">"
+                + escapeHtml(subtitle)
+                + " <span class=\"role-pill " + escapeAttribute(role) + "\">" + escapeHtml(roleLabel) + "</span>"
+                + " <span class=\"active-pill " + (active ? "on" : "off") + "\">" + escapeHtml(activeLabel) + "</span>"
+                + "</p>"
+                + "<p class=\"user-meta\">Created: " + escapeHtml(createdAt) + " • Updated: " + escapeHtml(updatedAt) + "</p>"
+                + "</div>"
+                + "<div class=\"user-actions\">"
+                + "<button type=\"button\" class=\"btn subtle\" data-user-action=\"edit\" data-user-email=\"" + escapeAttribute(email) + "\">Edit</button>"
+                + "<button type=\"button\" class=\"btn danger\" data-user-action=\"delete\" data-user-email=\"" + escapeAttribute(email) + "\">Delete</button>"
+                + "</div>"
+                + "</div>";
+        }).join("");
+
+        usersList.insertAdjacentHTML("afterbegin", "<p class=\"hint\">Active admins: " + escapeHtml(String(activeAdminCount)) + "</p>");
+
+        usersList.querySelectorAll("button[data-user-action=\"edit\"]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const email = String(button.getAttribute("data-user-email") || "").trim().toLowerCase();
+                const found = users.find((entry) => String(entry.email || "").trim().toLowerCase() === email);
+                if (!found) {
+                    return;
+                }
+
+                userEmailInput.value = String(found.email || "");
+                userNameInput.value = String(found.name || "");
+                userRoleSelect.value = String(found.role || "technician");
+                userActiveInput.checked = found.active === true;
+                setStatus(userStatus, "Loaded " + email + " into form.", "");
+            });
+        });
+
+        usersList.querySelectorAll("button[data-user-action=\"delete\"]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const email = String(button.getAttribute("data-user-email") || "").trim().toLowerCase();
+                await deleteUser(email);
+            });
+        });
+    }
+
+    function resetUserForm() {
+        userEmailInput.value = "";
+        userNameInput.value = "";
+        userRoleSelect.value = "technician";
+        userActiveInput.checked = true;
     }
 
     async function loadPasskeys() {
