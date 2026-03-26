@@ -1366,7 +1366,7 @@
                             <button id="searchSoftwareCatalogBtn" type="button" class="btn subtle">Search Catalog</button>
                             <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
                         </div>
-                        <p id="softwareInstallHint" class="hint software-install-note">Tip: click Search Catalog first, then open Recent Jobs -> View Logs to see matching IDs.</p>
+                        <p id="softwareInstallHint" class="hint software-install-note">Tip: winget catalog search is instant. apt/brew catalog lookups run as jobs on the selected agent.</p>
                     </div>
                     <div id="softwareSearchResultsPanel" class="software-search-results">
                         <div class="software-search-head">
@@ -1565,6 +1565,7 @@
     let activePatchTab = "available";
     let installActionInFlight = false;
     let signedInUserEmail = "";
+    let softwareSearchResultsByAgentId = {};
 
     logoutBtn.addEventListener("click", async () => {
         try {
@@ -1601,6 +1602,11 @@
 
     softwareSearchInput.addEventListener("input", () => {
         renderSoftwareInventoryForSelectedAgent();
+    });
+
+    softwareManagerSelect.addEventListener("change", () => {
+        const selectedAgent = selectedAgentId ? findAgent(selectedAgentId) : null;
+        refreshSoftwareInstallHints(selectedAgent);
     });
 
     selectAllVisiblePatches.addEventListener("change", () => {
@@ -1773,9 +1779,32 @@
             return;
         }
 
-        const manager = String(softwareManagerSelect.value || "auto").trim().toLowerCase();
+        const managerInput = String(softwareManagerSelect.value || "auto").trim().toLowerCase();
+        const manager = resolveSoftwareSearchManager(selectedAgent, managerInput);
 
         try {
+            if (manager === "winget") {
+                const result = await searchSoftwareCatalogInstant(query, manager);
+                const agentRecordId = String(selectedAgent.agent_record_id || "");
+                if (agentRecordId !== "") {
+                    softwareSearchResultsByAgentId[agentRecordId] = result;
+                }
+
+                renderSoftwareSearchResultsForSelectedAgent(selectedAgent);
+
+                const returnedCount = Number(result?.returned_count || 0);
+                const totalCount = Number(result?.total_count || 0);
+                const countLabel = returnedCount === 1 ? "1 match" : (String(returnedCount) + " matches");
+                const suffix = totalCount > returnedCount ? " Showing top matches." : "";
+                setStatus(agentActionStatus, "Catalog search complete (" + countLabel + ")." + suffix, "success");
+                return;
+            }
+
+            const agentRecordId = String(selectedAgent.agent_record_id || "");
+            if (agentRecordId !== "" && softwareSearchResultsByAgentId[agentRecordId]) {
+                delete softwareSearchResultsByAgentId[agentRecordId];
+            }
+
             const queued = await queueSoftwareSearchJob(selectedAgent, query, manager);
             const response = queued.response;
             const jobId = response?.job?.job_id || "";
@@ -2008,6 +2037,7 @@
             latestAgents = agents.slice().sort((a, b) => {
                 return Date.parse(String(b.last_seen_at || "")) - Date.parse(String(a.last_seen_at || ""));
             });
+            pruneSoftwareSearchResultCache(latestAgents);
 
             renderMetrics(latestAgents, latestJobs);
             renderAgents(latestAgents);
@@ -3296,24 +3326,92 @@
         const deviceType = agent ? getDeviceType(agent).value : "unknown";
         if (deviceType === "windows") {
             softwarePackageInput.placeholder = "Install package names or IDs (e.g. chrome vscode \"Google Chrome\")";
-            softwareInstallHint.textContent = "Tip: use Search Catalog to find winget IDs, then install. Installs can auto-resolve short terms and return suggestions when ambiguous.";
+            softwareInstallHint.textContent = "Tip: Search Catalog for winget runs instantly and returns IDs you can install directly.";
             return;
         }
 
         if (deviceType === "linux") {
             softwarePackageInput.placeholder = "Search or install apt package names (e.g. curl coreutils docker.io)";
-            softwareInstallHint.textContent = "Tip: use Search Catalog to confirm apt package names before install.";
+            softwareInstallHint.textContent = "Tip: apt catalog search runs on the agent as a job. Use View Logs for full output.";
             return;
         }
 
         if (deviceType === "mac") {
             softwarePackageInput.placeholder = "Search or install brew formula/cask (e.g. wget cask:google-chrome)";
-            softwareInstallHint.textContent = "Tip: use Search Catalog to find brew names. Prefix GUI apps with cask: when installing.";
+            softwareInstallHint.textContent = "Tip: brew catalog search runs on the agent as a job. Prefix GUI apps with cask: when installing.";
             return;
         }
 
         softwarePackageInput.placeholder = "Install package names or IDs (comma/space separated)";
-        softwareInstallHint.textContent = "Tip: click Search Catalog first to find exact IDs, then run Install Software.";
+        softwareInstallHint.textContent = "Tip: Search Catalog first to find exact IDs, then run Install Software.";
+    }
+
+    function resolveSoftwareSearchManager(agent, requestedManager) {
+        const normalized = String(requestedManager || "").trim().toLowerCase();
+        if (normalized === "winget" || normalized === "apt" || normalized === "brew") {
+            return normalized;
+        }
+        return defaultSoftwareManagerForAgent(agent);
+    }
+
+    function pruneSoftwareSearchResultCache(agents) {
+        const validAgentIds = new Set(
+            (Array.isArray(agents) ? agents : [])
+                .map((agent) => String(agent?.agent_record_id || ""))
+                .filter((agentId) => agentId !== "")
+        );
+
+        Object.keys(softwareSearchResultsByAgentId).forEach((agentId) => {
+            if (!validAgentIds.has(agentId)) {
+                delete softwareSearchResultsByAgentId[agentId];
+            }
+        });
+    }
+
+    function renderSoftwareSearchResultsFromInstant(result) {
+        const manager = String(result?.manager || "winget").toLowerCase();
+        const source = String(result?.source || "catalog");
+        const query = String(result?.query || "").trim();
+        const fetchedAt = String(result?.fetched_at || "");
+        const returnedCount = Number(result?.returned_count || 0);
+        const totalCount = Number(result?.total_count || 0);
+        const results = Array.isArray(result?.results) ? result.results : [];
+
+        softwareSearchResultsPanel.style.display = "grid";
+        softwareSearchResultsMeta.textContent = "Instant " + manager + " catalog search"
+            + (fetchedAt ? (" • " + describeLastSeen(fetchedAt)) : "");
+        softwareSearchResultsSummary.textContent = "Query: "
+            + (query || "(none)")
+            + " • Returned: "
+            + String(returnedCount)
+            + (totalCount > returnedCount ? (" of " + String(totalCount)) : "")
+            + " • Source: "
+            + source;
+        softwareSearchRawOutput.textContent = JSON.stringify(result, null, 2);
+
+        if (!results.length) {
+            softwareSearchMatchList.innerHTML = '<span class="hint">No catalog matches returned for this query.</span>';
+            return;
+        }
+
+        softwareSearchMatchList.innerHTML = results
+            .slice(0, 40)
+            .map((entry) => {
+                const packageId = String(entry?.id || "").trim();
+                if (packageId === "") {
+                    return "";
+                }
+
+                const version = String(entry?.version || "").trim();
+                const label = version ? (packageId + " (" + version + ")") : packageId;
+                return "<span class=\"software-search-match-item\">" + escapeHtml(label) + "</span>";
+            })
+            .filter((label) => label !== "")
+            .join("");
+
+        if (softwareSearchMatchList.innerHTML === "") {
+            softwareSearchMatchList.innerHTML = '<span class="hint">Matches were returned but no package IDs could be parsed.</span>';
+        }
     }
 
     function isSoftwareSearchType(type) {
@@ -3418,6 +3516,15 @@
             softwareSearchMatchList.innerHTML = "";
             softwareSearchRawOutput.textContent = "No output captured yet.";
             return;
+        }
+
+        const agentRecordId = String(agent.agent_record_id || "");
+        if (agentRecordId !== "") {
+            const instantResult = softwareSearchResultsByAgentId[agentRecordId];
+            if (instantResult && typeof instantResult === "object") {
+                renderSoftwareSearchResultsFromInstant(instantResult);
+                return;
+            }
         }
 
         const latestSearchJob = findLatestSoftwareSearchJobForAgent(agent.agent_record_id);
@@ -3602,6 +3709,16 @@
         });
 
         return { response: response, type: "software_search" };
+    }
+
+    async function searchSoftwareCatalogInstant(query, manager) {
+        const params = new URLSearchParams();
+        params.set("q", String(query || "").trim());
+        params.set("manager", String(manager || "winget").trim().toLowerCase());
+        params.set("limit", "30");
+        return apiFetch("/v1/admin/catalog/search?" + params.toString(), {
+            method: "GET"
+        });
     }
 
     async function queuePackageInstallJob(agent, installAll, packageIds) {

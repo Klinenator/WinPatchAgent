@@ -26,6 +26,7 @@ final class App
     private const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
     private const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
     private const GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo';
+    private const GITHUB_CODE_SEARCH_URL = 'https://api.github.com/search/code';
     private const OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
     private const OAUTH_SESSION_STATE_KEY = 'google_oauth_state';
     private const OAUTH_SESSION_NONCE_KEY = 'google_oauth_nonce';
@@ -151,6 +152,12 @@ final class App
             if ($method === 'GET' && $path === '/v1/admin/agents') {
                 $this->requireAdmin($request);
                 $this->handleListAgents();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/catalog/search') {
+                $this->requireAdmin($request);
+                $this->handleAdminCatalogSearch($request);
                 return;
             }
 
@@ -979,6 +986,145 @@ final class App
         JsonResponse::ok([
             'agents' => $agents,
         ]);
+    }
+
+    private function handleAdminCatalogSearch(Request $request): void
+    {
+        $query = trim((string) ($request->queryParam('q') ?? $request->queryParam('query') ?? ''));
+        if ($query === '' || preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+@\/ -]{0,127}$/', $query) !== 1) {
+            throw new ApiException(
+                422,
+                'invalid_request',
+                'Catalog search requires a valid query string (?q=...).'
+            );
+        }
+
+        $manager = strtolower(trim((string) ($request->queryParam('manager') ?? 'auto')));
+        if ($manager === '' || $manager === 'auto') {
+            $manager = 'winget';
+        }
+
+        $limitRaw = $request->queryParam('limit');
+        $limit = $limitRaw !== null ? (int) $limitRaw : 30;
+        if ($limit < 1) {
+            $limit = 1;
+        } elseif ($limit > 100) {
+            $limit = 100;
+        }
+
+        if ($manager !== 'winget') {
+            throw new ApiException(
+                422,
+                'unsupported_manager',
+                'Instant catalog search currently supports manager=winget only. Use agent-backed search jobs for apt/brew.'
+            );
+        }
+
+        try {
+            $results = $this->searchWingetCatalog($query, $limit);
+        } catch (\Throwable $exception) {
+            throw new ApiException(
+                502,
+                'catalog_search_failed',
+                'Could not complete instant catalog search: ' . $exception->getMessage()
+            );
+        }
+
+        JsonResponse::ok($results);
+    }
+
+    private function searchWingetCatalog(string $query, int $limit): array
+    {
+        $perPage = min(100, max(20, $limit * 3));
+        $searchQuery = trim($query) . ' repo:microsoft/winget-pkgs path:manifests filename:installer.yaml';
+
+        $url = self::GITHUB_CODE_SEARCH_URL . '?' . http_build_query([
+            'q' => $searchQuery,
+            'per_page' => $perPage,
+            'page' => 1,
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        $headers = [
+            'Accept: application/vnd.github+json',
+            'X-GitHub-Api-Version: 2022-11-28',
+            'User-Agent: WinPatchAgent/1.0',
+        ];
+        $githubToken = trim((string) getenv('PATCH_API_GITHUB_TOKEN'));
+        if ($githubToken !== '') {
+            $headers[] = 'Authorization: Bearer ' . $githubToken;
+        }
+
+        $decoded = $this->requestJsonFromUrl('GET', $url, null, $headers);
+        $items = is_array($decoded['items'] ?? null) ? $decoded['items'] : [];
+        $totalCount = (int) ($decoded['total_count'] ?? 0);
+
+        $resultsById = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $parsed = $this->parseWingetManifestSearchItem($item);
+            if ($parsed === null) {
+                continue;
+            }
+
+            $key = strtolower((string) $parsed['id']);
+            if (isset($resultsById[$key])) {
+                continue;
+            }
+
+            $resultsById[$key] = $parsed;
+            if (count($resultsById) >= $limit) {
+                break;
+            }
+        }
+
+        return [
+            'manager' => 'winget',
+            'query' => $query,
+            'source' => 'github:microsoft/winget-pkgs',
+            'fetched_at' => gmdate(DATE_ATOM),
+            'total_count' => max(0, $totalCount),
+            'returned_count' => count($resultsById),
+            'results' => array_values($resultsById),
+        ];
+    }
+
+    private function parseWingetManifestSearchItem(array $item): ?array
+    {
+        $path = trim((string) ($item['path'] ?? ''));
+        if ($path === '' || !str_ends_with($path, '.installer.yaml')) {
+            return null;
+        }
+
+        $segments = explode('/', $path);
+        if (count($segments) < 5 || $segments[0] !== 'manifests') {
+            return null;
+        }
+
+        $filename = (string) end($segments);
+        $suffix = '.installer.yaml';
+        $id = str_ends_with($filename, $suffix)
+            ? substr($filename, 0, strlen($filename) - strlen($suffix))
+            : '';
+
+        if ($id === '') {
+            return null;
+        }
+
+        $version = trim((string) ($segments[count($segments) - 2] ?? ''));
+        $manifestUrl = trim((string) ($item['html_url'] ?? ''));
+        if ($manifestUrl === '') {
+            $manifestUrl = 'https://github.com/microsoft/winget-pkgs/blob/master/' . $path;
+        }
+
+        return [
+            'id' => $id,
+            'version' => $version,
+            'manifest_path' => $path,
+            'manifest_url' => $manifestUrl,
+        ];
     }
 
     private function handleGetAgentInventory(string $agentRecordId): void
@@ -4623,7 +4769,10 @@ BASH;
         if ($result['status'] < 200 || $result['status'] >= 300) {
             $errorDescription = trim((string) ($decoded['error_description'] ?? ''));
             $error = trim((string) ($decoded['error'] ?? ''));
-            $message = $errorDescription !== '' ? $errorDescription : ($error !== '' ? $error : 'Request failed.');
+            $remoteMessage = trim((string) ($decoded['message'] ?? ''));
+            $message = $errorDescription !== ''
+                ? $errorDescription
+                : ($error !== '' ? $error : ($remoteMessage !== '' ? $remoteMessage : 'Request failed.'));
             throw new RuntimeException($message);
         }
 
