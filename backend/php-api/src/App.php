@@ -1463,6 +1463,10 @@ final class App
                     'defender_service_present' => null,
                     'defender_service_state' => 'unknown',
                     'defender_realtime_enabled' => null,
+                    'defender_antivirus_enabled' => null,
+                    'defender_amservice_enabled' => null,
+                    'defender_tamper_protected' => null,
+                    'defender_running_mode' => 'unknown',
                     'firewall_domain_enabled' => null,
                     'firewall_private_enabled' => null,
                     'firewall_public_enabled' => null,
@@ -1508,6 +1512,10 @@ final class App
                 'defender_service_present' => $security['defender_service_present'] ?? null,
                 'defender_service_state' => (string) ($security['defender_service_state'] ?? 'unknown'),
                 'defender_realtime_enabled' => $security['defender_realtime_enabled'] ?? null,
+                'defender_antivirus_enabled' => $security['defender_antivirus_enabled'] ?? null,
+                'defender_amservice_enabled' => $security['defender_amservice_enabled'] ?? null,
+                'defender_tamper_protected' => $security['defender_tamper_protected'] ?? null,
+                'defender_running_mode' => (string) ($security['defender_running_mode'] ?? 'unknown'),
                 'firewall_domain_enabled' => $security['firewall_domain_enabled'] ?? null,
                 'firewall_private_enabled' => $security['firewall_private_enabled'] ?? null,
                 'firewall_public_enabled' => $security['firewall_public_enabled'] ?? null,
@@ -1559,6 +1567,19 @@ final class App
         $defenderRealtimeEnabled = array_key_exists('defender_realtime_enabled', $security) && is_bool($security['defender_realtime_enabled'])
             ? $security['defender_realtime_enabled']
             : null;
+        $defenderAntivirusEnabled = array_key_exists('defender_antivirus_enabled', $security) && is_bool($security['defender_antivirus_enabled'])
+            ? $security['defender_antivirus_enabled']
+            : null;
+        $defenderAmServiceEnabled = array_key_exists('defender_amservice_enabled', $security) && is_bool($security['defender_amservice_enabled'])
+            ? $security['defender_amservice_enabled']
+            : null;
+        $defenderTamperProtected = array_key_exists('defender_tamper_protected', $security) && is_bool($security['defender_tamper_protected'])
+            ? $security['defender_tamper_protected']
+            : null;
+        $defenderRunningMode = strtolower(trim((string) ($security['defender_running_mode'] ?? 'unknown')));
+        if (!in_array($defenderRunningMode, ['normal', 'passive', 'edr_block_mode', 'unknown'], true)) {
+            $defenderRunningMode = 'unknown';
+        }
         $firewallDomainEnabled = array_key_exists('firewall_domain_enabled', $security) && is_bool($security['firewall_domain_enabled'])
             ? $security['firewall_domain_enabled']
             : null;
@@ -1588,12 +1609,34 @@ final class App
                 : 'WinDefend service not found.',
         ];
 
+        $defenderStateParts = [];
+        if ($defenderRunningMode !== 'unknown') {
+            $defenderStateParts[] = 'running_mode=' . $defenderRunningMode;
+        }
+        if ($defenderAntivirusEnabled !== null) {
+            $defenderStateParts[] = 'antivirus=' . ($defenderAntivirusEnabled ? 'enabled' : 'disabled');
+        }
+        if ($defenderAmServiceEnabled !== null) {
+            $defenderStateParts[] = 'am_service=' . ($defenderAmServiceEnabled ? 'enabled' : 'disabled');
+        }
+        if ($defenderTamperProtected !== null) {
+            $defenderStateParts[] = 'tamper=' . ($defenderTamperProtected ? 'enabled' : 'disabled');
+        }
+        $defenderStateSuffix = $defenderStateParts === [] ? '' : ' (' . implode(', ', $defenderStateParts) . ').';
+
         if ($defenderRealtimeEnabled === true) {
-            $controls['defender_realtime'] = ['status' => 'pass', 'detail' => 'Real-time protection is enabled.'];
+            $controls['defender_realtime'] = ['status' => 'pass', 'detail' => 'Real-time protection is enabled.' . $defenderStateSuffix];
         } elseif ($defenderRealtimeEnabled === false) {
-            $controls['defender_realtime'] = ['status' => 'fail', 'detail' => 'Real-time protection is disabled.'];
+            if ($defenderRunningMode === 'passive') {
+                $controls['defender_realtime'] = [
+                    'status' => 'warn',
+                    'detail' => 'Real-time protection is disabled while Defender is in passive mode. Verify approved third-party AV policy.' . $defenderStateSuffix,
+                ];
+            } else {
+                $controls['defender_realtime'] = ['status' => 'fail', 'detail' => 'Real-time protection is disabled.' . $defenderStateSuffix];
+            }
         } else {
-            $controls['defender_realtime'] = ['status' => 'warn', 'detail' => 'Real-time protection status is unknown.'];
+            $controls['defender_realtime'] = ['status' => 'warn', 'detail' => 'Real-time protection status is unknown.' . $defenderStateSuffix];
         }
 
         if ($firewallDomainEnabled === false || $firewallPrivateEnabled === false || $firewallPublicEnabled === false) {
@@ -1678,6 +1721,10 @@ final class App
             'defender_service_present',
             'defender_service_state',
             'defender_realtime_enabled',
+            'defender_antivirus_enabled',
+            'defender_amservice_enabled',
+            'defender_tamper_protected',
+            'defender_running_mode',
             'firewall_domain_enabled',
             'firewall_private_enabled',
             'firewall_public_enabled',
@@ -1730,6 +1777,10 @@ final class App
                 $this->formatCsvBool($row['defender_service_present'] ?? null),
                 (string) ($row['defender_service_state'] ?? ''),
                 $this->formatCsvBool($row['defender_realtime_enabled'] ?? null),
+                $this->formatCsvBool($row['defender_antivirus_enabled'] ?? null),
+                $this->formatCsvBool($row['defender_amservice_enabled'] ?? null),
+                $this->formatCsvBool($row['defender_tamper_protected'] ?? null),
+                (string) ($row['defender_running_mode'] ?? ''),
                 $this->formatCsvBool($row['firewall_domain_enabled'] ?? null),
                 $this->formatCsvBool($row['firewall_private_enabled'] ?? null),
                 $this->formatCsvBool($row['firewall_public_enabled'] ?? null),
@@ -3544,6 +3595,20 @@ function Ensure-WindowsDefender {
         return
     }
 
+    function Format-DefenderStateBool {
+        param([object]\$Value)
+
+        if (\$null -eq \$Value) {
+            return "unknown"
+        }
+
+        if ([bool]\$Value) {
+            return "enabled"
+        }
+
+        return "disabled"
+    }
+
     \$defenderService = Get-Service -Name "WinDefend" -ErrorAction SilentlyContinue
 
     if (-not \$defenderService) {
@@ -3588,7 +3653,12 @@ function Ensure-WindowsDefender {
     try {
         Set-Service -Name "WinDefend" -StartupType Automatic -ErrorAction Stop
     } catch {
-        Write-Warning ("SOC2 hardening: failed to set WinDefend startup type: {0}" -f \$_.Exception.Message)
+        \$setStartupMessage = [string]\$_.Exception.Message
+        if (\$setStartupMessage -match "Access is denied") {
+            Write-Host "SOC2 hardening: WinDefend startup type unchanged (access denied; likely managed by tamper protection or policy)."
+        } else {
+            Write-Warning ("SOC2 hardening: failed to set WinDefend startup type: {0}" -f \$setStartupMessage)
+        }
     }
 
     try {
@@ -3596,18 +3666,76 @@ function Ensure-WindowsDefender {
             Start-Service -Name "WinDefend" -ErrorAction Stop
         }
     } catch {
-        Write-Warning ("SOC2 hardening: failed to start WinDefend: {0}" -f \$_.Exception.Message)
+        \$startMessage = [string]\$_.Exception.Message
+        if (\$startMessage -match "Access is denied") {
+            Write-Host "SOC2 hardening: WinDefend start was blocked by policy/tamper controls; continuing with status verification."
+        } else {
+            Write-Warning ("SOC2 hardening: failed to start WinDefend: {0}" -f \$startMessage)
+        }
     }
 
     if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
         try {
             Set-MpPreference -DisableRealtimeMonitoring \$false -ErrorAction Stop
         } catch {
-            Write-Warning ("SOC2 hardening: could not set Defender real-time monitoring preference: {0}" -f \$_.Exception.Message)
+            \$preferenceMessage = [string]\$_.Exception.Message
+            if (\$preferenceMessage -match "Access is denied") {
+                Write-Host "SOC2 hardening: Defender realtime preference is policy-managed (access denied)."
+            } else {
+                Write-Warning ("SOC2 hardening: could not set Defender real-time monitoring preference: {0}" -f \$preferenceMessage)
+            }
         }
     }
 
-    Write-Host "SOC2 hardening: Windows Defender service verified."
+    \$serviceState = "unknown"
+    try {
+        \$currentService = Get-Service -Name "WinDefend" -ErrorAction SilentlyContinue
+        if (\$currentService) {
+            \$serviceState = [string]\$currentService.Status
+        }
+    } catch {
+    }
+
+    \$defenderStatus = \$null
+    if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+        try {
+            \$defenderStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
+        } catch {
+        }
+    }
+
+    if (-not \$defenderStatus) {
+        Write-Host ("SOC2 hardening: Windows Defender service state: {0}" -f \$serviceState)
+        return
+    }
+
+    \$runningMode = "unknown"
+    if (\$null -ne \$defenderStatus.AMRunningMode) {
+        \$runningModeCandidate = [string]\$defenderStatus.AMRunningMode
+        if (-not [string]::IsNullOrWhiteSpace(\$runningModeCandidate)) {
+            \$runningMode = \$runningModeCandidate.Trim()
+        }
+    }
+
+    \$realtimeState = Format-DefenderStateBool -Value \$defenderStatus.RealTimeProtectionEnabled
+    \$antivirusState = Format-DefenderStateBool -Value \$defenderStatus.AntivirusEnabled
+    \$amServiceState = Format-DefenderStateBool -Value \$defenderStatus.AMServiceEnabled
+    \$tamperState = Format-DefenderStateBool -Value \$defenderStatus.IsTamperProtected
+
+    Write-Host ("SOC2 hardening: Defender status => service={0}; realtime={1}; antivirus={2}; am_service={3}; tamper={4}; running_mode={5}" -f \$serviceState, \$realtimeState, \$antivirusState, \$amServiceState, \$tamperState, \$runningMode)
+
+    \$realtimeEnabled = \$null
+    if (\$null -ne \$defenderStatus.RealTimeProtectionEnabled) {
+        \$realtimeEnabled = [bool]\$defenderStatus.RealTimeProtectionEnabled
+    }
+
+    if (\$realtimeEnabled -eq \$false) {
+        if (\$runningMode.ToLowerInvariant().Contains("passive")) {
+            Write-Warning "SOC2 hardening: Defender realtime protection is off because running mode is passive. Verify an approved third-party AV control is enforced."
+        } else {
+            Write-Warning "SOC2 hardening: Defender realtime protection is off."
+        }
+    }
 }
 
 function Ensure-ServiceAndStart {
@@ -3888,6 +4016,75 @@ BASH;
             break;
         }
 
+        $defenderAntivirusEnabled = null;
+        foreach (['defender_antivirus_enabled', 'defenderAntivirusEnabled', 'DefenderAntivirusEnabled'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $defenderAntivirusEnabled = null;
+                break;
+            }
+
+            $defenderAntivirusEnabled = $this->toBool($value);
+            break;
+        }
+
+        $defenderAmServiceEnabled = null;
+        foreach (['defender_amservice_enabled', 'defenderAmServiceEnabled', 'DefenderAmServiceEnabled'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $defenderAmServiceEnabled = null;
+                break;
+            }
+
+            $defenderAmServiceEnabled = $this->toBool($value);
+            break;
+        }
+
+        $defenderTamperProtected = null;
+        foreach (['defender_tamper_protected', 'defenderTamperProtected', 'DefenderTamperProtected'] as $key) {
+            if (!array_key_exists($key, $windowsSecurity)) {
+                continue;
+            }
+
+            $value = $windowsSecurity[$key];
+            if ($value === null) {
+                $defenderTamperProtected = null;
+                break;
+            }
+
+            $defenderTamperProtected = $this->toBool($value);
+            break;
+        }
+
+        $defenderRunningMode = strtolower(trim((string) (
+            $windowsSecurity['defender_running_mode']
+            ?? $windowsSecurity['defenderRunningMode']
+            ?? $windowsSecurity['DefenderRunningMode']
+            ?? ''
+        )));
+        if ($defenderRunningMode !== '') {
+            $defenderRunningMode = str_replace([' ', '-'], '_', $defenderRunningMode);
+        }
+        if ($defenderRunningMode !== 'unknown') {
+            if (str_contains($defenderRunningMode, 'passive')) {
+                $defenderRunningMode = 'passive';
+            } elseif (str_contains($defenderRunningMode, 'block')) {
+                $defenderRunningMode = 'edr_block_mode';
+            } elseif (str_contains($defenderRunningMode, 'normal') || str_contains($defenderRunningMode, 'active')) {
+                $defenderRunningMode = 'normal';
+            } else {
+                $defenderRunningMode = 'unknown';
+            }
+        }
+
         $firewallDomainEnabled = null;
         foreach (['firewall_domain_enabled', 'firewallDomainEnabled', 'FirewallDomainEnabled'] as $key) {
             if (!array_key_exists($key, $windowsSecurity)) {
@@ -3946,6 +4143,10 @@ BASH;
             ),
             'defender_service_state' => $defenderServiceState,
             'defender_realtime_enabled' => $defenderRealtimeEnabled,
+            'defender_antivirus_enabled' => $defenderAntivirusEnabled,
+            'defender_amservice_enabled' => $defenderAmServiceEnabled,
+            'defender_tamper_protected' => $defenderTamperProtected,
+            'defender_running_mode' => $defenderRunningMode,
             'firewall_domain_enabled' => $firewallDomainEnabled,
             'firewall_private_enabled' => $firewallPrivateEnabled,
             'firewall_public_enabled' => $firewallPublicEnabled,

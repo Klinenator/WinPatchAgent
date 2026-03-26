@@ -174,6 +174,10 @@ public sealed class HttpPolicyClient : IPolicyClient
                     DefenderServicePresent = snapshot.WindowsSecurity.DefenderServicePresent,
                     DefenderServiceState = snapshot.WindowsSecurity.DefenderServiceState,
                     DefenderRealtimeEnabled = snapshot.WindowsSecurity.DefenderRealtimeEnabled,
+                    DefenderAntivirusEnabled = snapshot.WindowsSecurity.DefenderAntivirusEnabled,
+                    DefenderAmServiceEnabled = snapshot.WindowsSecurity.DefenderAmServiceEnabled,
+                    DefenderTamperProtected = snapshot.WindowsSecurity.DefenderTamperProtected,
+                    DefenderRunningMode = snapshot.WindowsSecurity.DefenderRunningMode,
                     FirewallDomainEnabled = snapshot.WindowsSecurity.FirewallDomainEnabled,
                     FirewallPrivateEnabled = snapshot.WindowsSecurity.FirewallPrivateEnabled,
                     FirewallPublicEnabled = snapshot.WindowsSecurity.FirewallPublicEnabled,
@@ -187,6 +191,7 @@ public sealed class HttpPolicyClient : IPolicyClient
                 Hostname = snapshot.Hostname,
                 DomainOrWorkgroup = snapshot.DomainOrWorkgroup,
                 PrimaryMacAddress = snapshot.PrimaryMacAddress,
+                LoggedInUser = string.IsNullOrWhiteSpace(snapshot.LoggedInUser) ? null : snapshot.LoggedInUser,
                 FreeDiskMb = snapshot.FreeDiskMb
             },
             Applications = snapshot.Applications

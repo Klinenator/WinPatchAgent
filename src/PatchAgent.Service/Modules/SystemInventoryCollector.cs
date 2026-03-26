@@ -41,6 +41,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
         {
             CollectedAtUtc = DateTimeOffset.UtcNow,
             PrimaryMacAddress = ReadPrimaryMacAddress(),
+            LoggedInUser = await ReadLoggedInUserAsync(cancellationToken),
             FreeDiskMb = freeDiskMb
         };
 
@@ -248,6 +249,10 @@ $result = [ordered]@{
   defender_service_present = $false
   defender_service_state = 'not_found'
   defender_realtime_enabled = $null
+  defender_antivirus_enabled = $null
+  defender_amservice_enabled = $null
+  defender_tamper_protected = $null
+  defender_running_mode = 'unknown'
   firewall_domain_enabled = $null
   firewall_private_enabled = $null
   firewall_public_enabled = $null
@@ -289,6 +294,21 @@ try {
     $mp = Get-MpComputerStatus -ErrorAction SilentlyContinue
     if ($null -ne $mp -and $null -ne $mp.RealTimeProtectionEnabled) {
       $result.defender_realtime_enabled = [bool]$mp.RealTimeProtectionEnabled
+    }
+    if ($null -ne $mp -and $null -ne $mp.AntivirusEnabled) {
+      $result.defender_antivirus_enabled = [bool]$mp.AntivirusEnabled
+    }
+    if ($null -ne $mp -and $null -ne $mp.AMServiceEnabled) {
+      $result.defender_amservice_enabled = [bool]$mp.AMServiceEnabled
+    }
+    if ($null -ne $mp -and $null -ne $mp.IsTamperProtected) {
+      $result.defender_tamper_protected = [bool]$mp.IsTamperProtected
+    }
+    if ($null -ne $mp -and $null -ne $mp.AMRunningMode) {
+      $runningMode = [string]$mp.AMRunningMode
+      if (-not [string]::IsNullOrWhiteSpace($runningMode)) {
+        $result.defender_running_mode = $runningMode
+      }
     }
   }
 } catch {
@@ -845,6 +865,10 @@ $items |
             snapshot.DefenderServicePresent = ReadBoolean(root, "defender_service_present") ?? false;
             snapshot.DefenderServiceState = NormalizeDefenderServiceState(ReadString(root, "defender_service_state"));
             snapshot.DefenderRealtimeEnabled = ReadBoolean(root, "defender_realtime_enabled");
+            snapshot.DefenderAntivirusEnabled = ReadBoolean(root, "defender_antivirus_enabled");
+            snapshot.DefenderAmServiceEnabled = ReadBoolean(root, "defender_amservice_enabled");
+            snapshot.DefenderTamperProtected = ReadBoolean(root, "defender_tamper_protected");
+            snapshot.DefenderRunningMode = NormalizeDefenderRunningMode(ReadString(root, "defender_running_mode"));
             snapshot.FirewallDomainEnabled = ReadBoolean(root, "firewall_domain_enabled");
             snapshot.FirewallPrivateEnabled = ReadBoolean(root, "firewall_private_enabled");
             snapshot.FirewallPublicEnabled = ReadBoolean(root, "firewall_public_enabled");
@@ -1016,6 +1040,34 @@ $items |
         };
     }
 
+    private static string NormalizeDefenderRunningMode(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return "unknown";
+        }
+
+        normalized = normalized.Replace(' ', '_').Replace('-', '_');
+
+        if (normalized.Contains("passive", StringComparison.Ordinal))
+        {
+            return "passive";
+        }
+
+        if (normalized.Contains("block", StringComparison.Ordinal))
+        {
+            return "edr_block_mode";
+        }
+
+        if (normalized.Contains("normal", StringComparison.Ordinal) || normalized.Contains("active", StringComparison.Ordinal))
+        {
+            return "normal";
+        }
+
+        return "unknown";
+    }
+
     private static string NormalizeBitlockerSupport(string? value)
     {
         var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
@@ -1080,6 +1132,146 @@ $items |
         {
             return string.Empty;
         }
+    }
+
+    private static async Task<string> ReadLoggedInUserAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return await ReadWindowsLoggedInUserAsync(cancellationToken);
+            }
+
+            if (OperatingSystem.IsLinux())
+            {
+                return await ReadLinuxLoggedInUserAsync(cancellationToken);
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                return await ReadMacLoggedInUserAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+        }
+
+        return string.Empty;
+    }
+
+    private static async Task<string> ReadWindowsLoggedInUserAsync(CancellationToken cancellationToken)
+    {
+        const string script = @"
+$ErrorActionPreference = 'SilentlyContinue'
+$user = ''
+try {
+  $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+  if ($null -ne $cs -and $null -ne $cs.UserName) {
+    $user = [string]$cs.UserName
+  }
+} catch {
+}
+
+if (-not [string]::IsNullOrWhiteSpace($user)) {
+  Write-Output $user
+}
+";
+
+        var result = await RunProcessAsync(
+            "powershell",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            TimeSpan.FromSeconds(5),
+            cancellationToken);
+
+        if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            return string.Empty;
+        }
+
+        return NormalizeLoggedInUserLine(result.StandardOutput);
+    }
+
+    private static async Task<string> ReadLinuxLoggedInUserAsync(CancellationToken cancellationToken)
+    {
+        var whoExecutable = File.Exists("/usr/bin/who") ? "/usr/bin/who" : "who";
+        var whoResult = await RunProcessAsync(
+            whoExecutable,
+            [],
+            TimeSpan.FromSeconds(3),
+            cancellationToken);
+
+        if (whoResult.ExitCode == 0)
+        {
+            foreach (var rawLine in whoResult.StandardOutput.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length == 0)
+                {
+                    continue;
+                }
+
+                var candidate = parts[0].Trim();
+                if (candidate.Length == 0 || string.Equals(candidate, "reboot", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                return candidate;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static async Task<string> ReadMacLoggedInUserAsync(CancellationToken cancellationToken)
+    {
+        var statResult = await RunProcessAsync(
+            "/usr/bin/stat",
+            ["-f%Su", "/dev/console"],
+            TimeSpan.FromSeconds(3),
+            cancellationToken);
+
+        if (statResult.ExitCode != 0)
+        {
+            return string.Empty;
+        }
+
+        var value = NormalizeLoggedInUserLine(statResult.StandardOutput);
+        if (string.Equals(value, "root", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "loginwindow", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return value;
+    }
+
+    private static string NormalizeLoggedInUserLine(string rawOutput)
+    {
+        if (string.IsNullOrWhiteSpace(rawOutput))
+        {
+            return string.Empty;
+        }
+
+        var firstLine = rawOutput
+            .Split('\n')
+            .Select(static line => line.Trim())
+            .FirstOrDefault(static line => !string.IsNullOrWhiteSpace(line))
+            ?? string.Empty;
+
+        if (firstLine.Length > 120)
+        {
+            firstLine = firstLine[..120];
+        }
+
+        return firstLine;
     }
 
     private static Dictionary<string, string> ParseOsRelease()

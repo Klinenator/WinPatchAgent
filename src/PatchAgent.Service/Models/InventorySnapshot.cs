@@ -12,6 +12,8 @@ public sealed class InventorySnapshot
 
     public string PrimaryMacAddress { get; set; } = string.Empty;
 
+    public string LoggedInUser { get; set; } = string.Empty;
+
     public string OsDescription { get; set; } = RuntimeInformation.OSDescription;
 
     public string OsArchitecture { get; set; } = RuntimeInformation.OSArchitecture.ToString();
@@ -108,6 +110,14 @@ public sealed class WindowsSecuritySnapshot
     public string DefenderServiceState { get; set; } = "unknown";
 
     public bool? DefenderRealtimeEnabled { get; set; }
+
+    public bool? DefenderAntivirusEnabled { get; set; }
+
+    public bool? DefenderAmServiceEnabled { get; set; }
+
+    public bool? DefenderTamperProtected { get; set; }
+
+    public string DefenderRunningMode { get; set; } = "unknown";
 
     public bool? FirewallDomainEnabled { get; set; }
 

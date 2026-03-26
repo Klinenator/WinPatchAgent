@@ -1217,7 +1217,7 @@
                     <p class="hint" id="agentsSummary">Showing 0 of 0 agents</p>
                 </div>
                 <div class="toolbar-row">
-                    <input id="agentSearchInput" type="search" placeholder="Search by name, hostname, or agent ID">
+                    <input id="agentSearchInput" type="search" placeholder="Search by name, user, hostname, or agent ID">
                     <select id="availabilityFilter">
                         <option value="all">All Availability</option>
                         <option value="online">Online</option>
@@ -1231,6 +1231,7 @@
                         <thead>
                         <tr>
                             <th>Device</th>
+                            <th>Logged-in User</th>
                             <th>Device Type</th>
                             <th>Agent ID</th>
                             <th>Last Seen</th>
@@ -1242,7 +1243,7 @@
                         </tr>
                         </thead>
                         <tbody id="agentsTableBody">
-                        <tr><td colspan="9" class="hint">No agents loaded.</td></tr>
+                        <tr><td colspan="10" class="hint">No agents loaded.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1260,6 +1261,10 @@
                     <div class="field-block">
                         <label for="selectedAgentDisplayName">Display Name</label>
                         <input id="selectedAgentDisplayName" type="text" placeholder="Production Node 01">
+                    </div>
+                    <div class="field-block">
+                        <label for="selectedAgentLoggedInUser">Logged-in User</label>
+                        <input id="selectedAgentLoggedInUser" class="mono" type="text" readonly placeholder="n/a">
                     </div>
                 </div>
                 <div class="button-row">
@@ -1536,6 +1541,7 @@
 
     const selectedAgentIdInput = document.getElementById("selectedAgentId");
     const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
+    const selectedAgentLoggedInUserInput = document.getElementById("selectedAgentLoggedInUser");
     const updateCorrelationIdInput = document.getElementById("updateCorrelationId");
     const softwarePackageInput = document.getElementById("softwarePackageInput");
     const softwareManagerSelect = document.getElementById("softwareManagerSelect");
@@ -2080,8 +2086,9 @@
             const agentId = String(agent.agent_record_id || "");
             const hostname = String(agent.hostname || "");
             const deviceId = String(agent.device_id || "");
+            const loggedInUser = getAgentLoggedInUser(agent);
             const deviceType = getDeviceType(agent);
-            const haystack = (displayName + " " + agentId + " " + hostname + " " + deviceId + " " + deviceType.label).toLowerCase();
+            const haystack = (displayName + " " + agentId + " " + hostname + " " + deviceId + " " + loggedInUser + " " + deviceType.label).toLowerCase();
             const availability = availabilityState(agent).value;
 
             const queryMatch = query === "" || haystack.includes(query);
@@ -2092,7 +2099,7 @@
         agentsSummary.textContent = "Showing " + filtered.length + " of " + agents.length + " agents";
 
         if (!filtered.length) {
-            agentsTableBody.innerHTML = '<tr><td colspan="9" class="hint">No agents match your filters.</td></tr>';
+            agentsTableBody.innerHTML = '<tr><td colspan="10" class="hint">No agents match your filters.</td></tr>';
             return;
         }
 
@@ -2115,12 +2122,15 @@
             const serviceState = String(heartbeat.service_state || "unknown");
             const deviceType = getDeviceType(agent);
             const canConnect = deviceType.value === "windows" || deviceType.value === "mac";
+            const loggedInUser = getAgentLoggedInUser(agent);
+            const loggedInUserDisplay = loggedInUser || "n/a";
 
             return "<tr class=\"" + selectedClass.trim() + "\">" +
                 "<td>" +
                 "<div class=\"cell-main\">" + escapeHtml(displayName) + "</div>" +
                 "<div class=\"cell-sub\">" + escapeHtml(String(agent.hostname || "")) + "</div>" +
                 "</td>" +
+                "<td><code class=\"mono\">" + escapeHtml(loggedInUserDisplay) + "</code></td>" +
                 "<td><span class=\"pill " + escapeHtml(deviceType.value) + "\">" + escapeHtml(deviceType.label) + "</span></td>" +
                 "<td><code class=\"mono\">" + escapeHtml(agentId) + "</code></td>" +
                 "<td>" + escapeHtml(describeLastSeen(String(agent.last_seen_at || ""))) + "</td>" +
@@ -2203,6 +2213,7 @@
         selectedAgentId = nextSelectedAgentId;
         selectedAgentIdInput.value = selectedAgentId;
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
+        selectedAgentLoggedInUserInput.value = getAgentLoggedInUser(agent);
         renderPatchTableForSelectedAgent();
         syncSoftwareManagerForSelectedAgent(agent);
         renderSoftwareInventoryForSelectedAgent();
@@ -2214,6 +2225,7 @@
     function syncSelectedAgent() {
         if (!selectedAgentId) {
             selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue patch or software installs, self-update, run scripts, or connect.";
+            selectedAgentLoggedInUserInput.value = "";
             renderPatchTableForSelectedAgent();
             renderSoftwareInventoryForSelectedAgent();
             return;
@@ -2224,6 +2236,7 @@
             selectedAgentId = "";
             selectedAgentIdInput.value = "";
             selectedAgentDisplayNameInput.value = "";
+            selectedAgentLoggedInUserInput.value = "";
             selectedAvailablePackageIds = new Set();
             renderPatchTableForSelectedAgent();
             renderSoftwareInventoryForSelectedAgent();
@@ -2234,6 +2247,7 @@
         }
 
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
+        selectedAgentLoggedInUserInput.value = getAgentLoggedInUser(agent);
         renderPatchTableForSelectedAgent();
         syncSoftwareManagerForSelectedAgent(agent);
         renderSoftwareInventoryForSelectedAgent();
@@ -2329,6 +2343,34 @@
         jobLogStdout.textContent = stdout.trim() || "No stdout captured.";
         jobLogStderr.textContent = stderr.trim() || (errorMessage || "No stderr captured.");
         jobLogCompletionJson.textContent = JSON.stringify(completion, null, 2) || "{}";
+    }
+
+    function getAgentHardwareSection(agent) {
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        return (typeof inventory.hardware === "object" && inventory.hardware !== null)
+            ? inventory.hardware
+            : {};
+    }
+
+    function getAgentLoggedInUser(agent) {
+        const hardware = getAgentHardwareSection(agent);
+        const candidates = [
+            hardware.logged_in_user,
+            hardware.loggedInUser,
+            hardware.current_user,
+            hardware.currentUser,
+            hardware.user,
+            hardware.username
+        ];
+
+        for (const candidate of candidates) {
+            const value = String(candidate || "").trim();
+            if (value) {
+                return value;
+            }
+        }
+
+        return "";
     }
 
     function getWindowsUpdateSection(agent) {

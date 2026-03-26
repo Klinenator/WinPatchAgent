@@ -139,6 +139,14 @@ public sealed class InventoryWindowsSecurity
 
     public bool? DefenderRealtimeEnabled { get; set; }
 
+    public bool? DefenderAntivirusEnabled { get; set; }
+
+    public bool? DefenderAmServiceEnabled { get; set; }
+
+    public bool? DefenderTamperProtected { get; set; }
+
+    public string DefenderRunningMode { get; set; } = "unknown";
+
     public bool? FirewallDomainEnabled { get; set; }
 
     public bool? FirewallPrivateEnabled { get; set; }
@@ -197,6 +205,8 @@ public sealed class InventoryHardware
     public string DomainOrWorkgroup { get; set; } = string.Empty;
 
     public string? PrimaryMacAddress { get; set; }
+
+    public string? LoggedInUser { get; set; }
 
     public long? FreeDiskMb { get; set; }
 }
