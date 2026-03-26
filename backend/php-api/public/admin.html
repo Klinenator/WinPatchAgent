@@ -684,6 +684,75 @@
             max-height: 360px;
         }
 
+        .software-browser {
+            margin-top: 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            overflow: hidden;
+        }
+
+        .software-browser-head {
+            padding: 12px 12px 6px;
+            border-bottom: 1px solid #d9e7f0;
+            background: #f4f9fc;
+        }
+
+        .software-browser-head h3 {
+            margin: 0;
+            font-size: 16px;
+            letter-spacing: 0.01em;
+            text-transform: none;
+            color: #22384e;
+        }
+
+        .software-toolbar {
+            padding: 10px 12px;
+            border-bottom: 1px solid #d9e7f0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            background: #fff;
+        }
+
+        .software-toolbar-right {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .software-install-row {
+            padding: 10px 12px;
+            border-bottom: 1px solid #d9e7f0;
+            background: #fff;
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) 160px auto auto;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .software-install-row .hint {
+            margin-left: 2px;
+        }
+
+        .software-install-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #334e68;
+            white-space: nowrap;
+        }
+
+        .software-table-wrap {
+            border: none;
+            border-radius: 0;
+            background: #fff;
+            max-height: 300px;
+        }
+
         .patch-checkbox-col {
             width: 56px;
         }
@@ -941,6 +1010,18 @@
                 justify-content: flex-start;
             }
 
+            .software-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .software-toolbar-right {
+                justify-content: flex-start;
+            }
+
+            .software-install-row {
+                grid-template-columns: 1fr;
+            }
+
             .patch-actions {
                 flex-direction: column;
                 align-items: stretch;
@@ -1002,7 +1083,7 @@
         <section class="top-command">
             <div class="top-copy">
                 <h1>Devices</h1>
-                <p>Monitor agents, queue package jobs, and track rollout status in one console.</p>
+                <p>Monitor agents, queue patch and software jobs, and track rollout status in one console.</p>
             </div>
             <div class="command-actions">
                 <button id="refreshBtn" type="button" class="btn primary">Refresh</button>
@@ -1077,7 +1158,7 @@
 
             <section class="panel">
                 <h2>Selected Agent</h2>
-                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue packages, self-update, run scripts, or connect.</p>
+                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue patch or software installs, self-update, run scripts, or connect.</p>
 
                 <div class="field-grid">
                     <div class="field-block">
@@ -1161,6 +1242,49 @@
                             </thead>
                             <tbody id="patchPackagesTableBody">
                             <tr><td colspan="6" class="hint">Select an agent to view package details.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="software-browser">
+                    <div class="software-browser-head">
+                        <h3>Software Inventory</h3>
+                        <p id="softwareInventoryMeta" class="hint">Select an agent to view installed software and queue installs.</p>
+                    </div>
+                    <div class="software-toolbar">
+                        <input id="softwareSearchInput" type="search" placeholder="Search installed software by name, version, publisher, or source">
+                        <div class="software-toolbar-right">
+                            <span id="softwareLastUpdatedCopy" class="hint">Inventory updated: n/a</span>
+                        </div>
+                    </div>
+                    <div class="software-install-row">
+                        <input id="softwarePackageInput" type="text" placeholder="Install package IDs (comma or space separated)">
+                        <select id="softwareManagerSelect">
+                            <option value="auto">auto</option>
+                            <option value="winget">winget (Windows)</option>
+                            <option value="apt">apt (Linux)</option>
+                            <option value="brew">brew (macOS)</option>
+                        </select>
+                        <label class="software-install-toggle">
+                            <input id="softwareAllowUpdateInput" type="checkbox">
+                            Allow update
+                        </label>
+                        <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
+                    </div>
+                    <div class="table-wrap compact software-table-wrap">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Version</th>
+                                <th>Publisher</th>
+                                <th>Source</th>
+                                <th>Installed</th>
+                            </tr>
+                            </thead>
+                            <tbody id="softwareInventoryTableBody">
+                            <tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1266,6 +1390,10 @@
     const patchPackagesTableBody = document.getElementById("patchPackagesTableBody");
     const patchInventoryMeta = document.getElementById("patchInventoryMeta");
     const patchLastUpdatedCopy = document.getElementById("patchLastUpdatedCopy");
+    const softwareInventoryMeta = document.getElementById("softwareInventoryMeta");
+    const softwareLastUpdatedCopy = document.getElementById("softwareLastUpdatedCopy");
+    const softwareInventoryTableBody = document.getElementById("softwareInventoryTableBody");
+    const softwareSearchInput = document.getElementById("softwareSearchInput");
     const availablePackagesTabBtn = document.getElementById("availablePackagesTabBtn");
     const installedPackagesTabBtn = document.getElementById("installedPackagesTabBtn");
     const patchSearchInput = document.getElementById("patchSearchInput");
@@ -1291,6 +1419,7 @@
     const queueSelfUpdateBtn = document.getElementById("queueSelfUpdateBtn");
     const installListedUpdatesBtn = document.getElementById("installListedUpdatesBtn");
     const installAllUpdatesBtn = document.getElementById("installAllUpdatesBtn");
+    const queueSoftwareInstallBtn = document.getElementById("queueSoftwareInstallBtn");
     const queueWindowsScriptBtn = document.getElementById("queueWindowsScriptBtn");
     const loadGcpwTemplateBtn = document.getElementById("loadGcpwTemplateBtn");
     const loadSplashtopTemplateBtn = document.getElementById("loadSplashtopTemplateBtn");
@@ -1299,6 +1428,9 @@
     const selectedAgentIdInput = document.getElementById("selectedAgentId");
     const selectedAgentDisplayNameInput = document.getElementById("selectedAgentDisplayName");
     const updateCorrelationIdInput = document.getElementById("updateCorrelationId");
+    const softwarePackageInput = document.getElementById("softwarePackageInput");
+    const softwareManagerSelect = document.getElementById("softwareManagerSelect");
+    const softwareAllowUpdateInput = document.getElementById("softwareAllowUpdateInput");
     const windowsScriptCorrelationIdInput = document.getElementById("windowsScriptCorrelationId");
     const windowsScriptUrlInput = document.getElementById("windowsScriptUrlInput");
     const windowsScriptInput = document.getElementById("windowsScriptInput");
@@ -1350,6 +1482,10 @@
 
     patchSearchInput.addEventListener("input", () => {
         renderPatchTableForSelectedAgent();
+    });
+
+    softwareSearchInput.addEventListener("input", () => {
+        renderSoftwareInventoryForSelectedAgent();
     });
 
     selectAllVisiblePatches.addEventListener("change", () => {
@@ -1495,6 +1631,48 @@
         } finally {
             installActionInFlight = false;
             renderPatchTableForSelectedAgent();
+        }
+    });
+
+    queueSoftwareInstallBtn.addEventListener("click", async () => {
+        if (!selectedAgentId) {
+            setStatus(agentActionStatus, "Select an agent first.", "error");
+            return;
+        }
+
+        const selectedAgent = findAgent(selectedAgentId);
+        if (!selectedAgent) {
+            setStatus(agentActionStatus, "Selected agent is no longer available.", "error");
+            return;
+        }
+
+        const deviceType = getDeviceType(selectedAgent).value;
+        if (deviceType !== "windows" && deviceType !== "linux" && deviceType !== "mac") {
+            setStatus(agentActionStatus, "Software install jobs are supported only for Windows, Linux, or macOS agents.", "error");
+            return;
+        }
+
+        const packages = parseSoftwarePackageInput(softwarePackageInput.value);
+        if (!packages.length) {
+            setStatus(agentActionStatus, "Enter one or more package IDs to install.", "error");
+            return;
+        }
+
+        const manager = String(softwareManagerSelect.value || "auto").trim().toLowerCase();
+        const allowUpdate = softwareAllowUpdateInput.checked === true;
+
+        try {
+            const queued = await queueSoftwareInstallJob(selectedAgent, packages, manager, allowUpdate);
+            const response = queued.response;
+            const jobId = response?.job?.job_id || "(unknown)";
+            if (response?.duplicate === true) {
+                setStatus(agentActionStatus, "Matching software install job already active: " + jobId, "success");
+            } else {
+                setStatus(agentActionStatus, "Software install job queued: " + jobId, "success");
+            }
+            await loadDashboard();
+        } catch (error) {
+            setStatus(agentActionStatus, String(error.message || error), "error");
         }
     });
 
@@ -1836,6 +2014,8 @@
         selectedAgentIdInput.value = selectedAgentId;
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
         renderPatchTableForSelectedAgent();
+        syncSoftwareManagerForSelectedAgent(agent);
+        renderSoftwareInventoryForSelectedAgent();
         selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         setStatus(agentActionStatus, "Selected " + selectedAgentDisplayNameInput.value + ".", "");
         renderAgents(latestAgents);
@@ -1843,8 +2023,9 @@
 
     function syncSelectedAgent() {
         if (!selectedAgentId) {
-            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue packages, self-update, run scripts, or connect.";
+            selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue patch or software installs, self-update, run scripts, or connect.";
             renderPatchTableForSelectedAgent();
+            renderSoftwareInventoryForSelectedAgent();
             return;
         }
 
@@ -1855,6 +2036,7 @@
             selectedAgentDisplayNameInput.value = "";
             selectedAvailablePackageIds = new Set();
             renderPatchTableForSelectedAgent();
+            renderSoftwareInventoryForSelectedAgent();
             selectedAgentHint.textContent = "Selected agent is no longer present.";
             setStatus(agentActionStatus, "Selected agent is no longer present.", "error");
             renderAgents(latestAgents);
@@ -1863,6 +2045,8 @@
 
         selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
         renderPatchTableForSelectedAgent();
+        syncSoftwareManagerForSelectedAgent(agent);
+        renderSoftwareInventoryForSelectedAgent();
         selectedAgentHint.textContent = "Managing " + selectedAgentDisplayNameInput.value + ".";
         renderAgents(latestAgents);
     }
@@ -2880,6 +3064,181 @@
         activePatchTab = tabName;
         selectAllVisiblePatches.checked = false;
         renderPatchTableForSelectedAgent();
+    }
+
+    function getApplicationsForAgent(agent) {
+        if (!agent || typeof agent !== "object") {
+            return [];
+        }
+
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        const applications = Array.isArray(inventory.applications) ? inventory.applications : [];
+        return applications
+            .filter((entry) => typeof entry === "object" && entry !== null)
+            .map((entry) => ({
+                name: String(entry.name || entry.display_name || "").trim(),
+                version: String(entry.version || entry.display_version || "").trim(),
+                publisher: String(entry.publisher || entry.vendor || "").trim(),
+                source: String(entry.source || entry.channel || "").trim(),
+                installedAt: String(entry.installed_at || entry.install_date || "").trim()
+            }))
+            .filter((entry) => entry.name !== "");
+    }
+
+    function getFilteredApplicationsForAgent(agent) {
+        const rows = getApplicationsForAgent(agent);
+        const query = softwareSearchInput.value.trim().toLowerCase();
+        if (query === "") {
+            return rows;
+        }
+
+        return rows.filter((row) => {
+            const haystack = (
+                row.name + " "
+                + row.version + " "
+                + row.publisher + " "
+                + row.source + " "
+                + row.installedAt
+            ).toLowerCase();
+            return haystack.includes(query);
+        });
+    }
+
+    function defaultSoftwareManagerForAgent(agent) {
+        const deviceType = getDeviceType(agent).value;
+        if (deviceType === "windows") {
+            return "winget";
+        }
+        if (deviceType === "linux") {
+            return "apt";
+        }
+        if (deviceType === "mac") {
+            return "brew";
+        }
+        return "auto";
+    }
+
+    function syncSoftwareManagerForSelectedAgent(agent) {
+        if (!agent) {
+            softwareManagerSelect.value = "auto";
+            return;
+        }
+
+        const current = String(softwareManagerSelect.value || "").trim().toLowerCase();
+        if (current === "" || current === "auto" || !["winget", "apt", "brew"].includes(current)) {
+            softwareManagerSelect.value = defaultSoftwareManagerForAgent(agent);
+        }
+    }
+
+    function renderSoftwareInventoryForSelectedAgent() {
+        const agent = selectedAgentId ? findAgent(selectedAgentId) : null;
+        if (!agent) {
+            softwareInventoryMeta.textContent = "Select an agent to view installed software and queue installs.";
+            softwareLastUpdatedCopy.textContent = "Inventory updated: n/a";
+            softwareInventoryTableBody.innerHTML = '<tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>';
+            queueSoftwareInstallBtn.disabled = true;
+            return;
+        }
+
+        const deviceType = getDeviceType(agent).value;
+        const canInstall = deviceType === "windows" || deviceType === "linux" || deviceType === "mac";
+
+        const allRows = getApplicationsForAgent(agent);
+        const rows = getFilteredApplicationsForAgent(agent);
+        const snapshotTimestamp = getInventorySnapshotTimestamp(agent);
+        const agentName = String(agent.display_name || agent.hostname || "selected agent");
+        softwareInventoryMeta.textContent = "Showing "
+            + String(rows.length)
+            + " of "
+            + String(allRows.length)
+            + " installed software entr"
+            + (allRows.length === 1 ? "y" : "ies")
+            + " for "
+            + agentName
+            + ".";
+        if (!canInstall) {
+            softwareInventoryMeta.textContent += " Install jobs are not supported for this device type.";
+        }
+        softwareLastUpdatedCopy.textContent = snapshotTimestamp
+            ? ("Inventory updated: " + describeLastSeen(snapshotTimestamp))
+            : "Inventory updated: unknown";
+
+        if (!rows.length) {
+            const query = softwareSearchInput.value.trim();
+            softwareInventoryTableBody.innerHTML = query === ""
+                ? '<tr><td colspan="5" class="hint">No installed software entries were reported in this snapshot.</td></tr>'
+                : '<tr><td colspan="5" class="hint">Installed software exists but did not match your search.</td></tr>';
+            queueSoftwareInstallBtn.disabled = !canInstall;
+            return;
+        }
+
+        const displayRows = rows.slice(0, 800);
+        softwareInventoryTableBody.innerHTML = displayRows.map((row) => {
+            return "<tr>" +
+                "<td>" + escapeHtml(row.name || "") + "</td>" +
+                "<td>" + escapeHtml(row.version || "") + "</td>" +
+                "<td>" + escapeHtml(row.publisher || "") + "</td>" +
+                "<td>" + escapeHtml(row.source || "") + "</td>" +
+                "<td>" + escapeHtml(row.installedAt || "") + "</td>" +
+                "</tr>";
+        }).join("");
+
+        if (rows.length > displayRows.length) {
+            softwareInventoryTableBody.innerHTML += "<tr><td colspan=\"5\" class=\"hint\">Showing first "
+                + String(displayRows.length)
+                + " rows. Refine search to narrow results.</td></tr>";
+        }
+
+        queueSoftwareInstallBtn.disabled = !canInstall;
+    }
+
+    function parseSoftwarePackageInput(rawValue) {
+        const tokens = String(rawValue || "")
+            .split(/[\s,]+/)
+            .map((token) => token.trim())
+            .filter((token) => token !== "");
+        const unique = [];
+        const seen = new Set();
+
+        tokens.forEach((token) => {
+            if (!/^[A-Za-z0-9][A-Za-z0-9._:+@/-]{0,127}$/.test(token)) {
+                return;
+            }
+
+            const key = token.toLowerCase();
+            if (seen.has(key)) {
+                return;
+            }
+
+            seen.add(key);
+            unique.push(token);
+        });
+
+        return unique;
+    }
+
+    async function queueSoftwareInstallJob(agent, packages, manager, allowUpdate) {
+        const agentRecordId = String(agent.agent_record_id || "");
+        const correlationRaw = updateCorrelationIdInput.value.trim();
+        const correlationId = correlationRaw || ("software-install-" + Date.now());
+        const response = await apiFetch("/v1/admin/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                target_agent_id: agentRecordId,
+                type: "software_install",
+                correlation_id: correlationId,
+                payload: {
+                    software_install: {
+                        manager: manager || "auto",
+                        allow_update: allowUpdate === true,
+                        packages: packages
+                    }
+                },
+                policy: {}
+            })
+        });
+
+        return { response: response, type: "software_install" };
     }
 
     async function queuePackageInstallJob(agent, installAll, packageIds) {

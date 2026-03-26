@@ -11,6 +11,7 @@ public sealed class DispatchingJobExecutor : IJobExecutor
     private readonly WindowsPowerShellScriptJobExecutor _windowsPowerShellScriptJobExecutor;
     private readonly MacSoftwareUpdateJobExecutor _macSoftwareUpdateJobExecutor;
     private readonly MacShellScriptJobExecutor _macShellScriptJobExecutor;
+    private readonly SoftwareInstallJobExecutor _softwareInstallJobExecutor;
     private readonly StubJobExecutor _stubJobExecutor;
 
     public DispatchingJobExecutor(
@@ -20,6 +21,7 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         WindowsPowerShellScriptJobExecutor windowsPowerShellScriptJobExecutor,
         MacSoftwareUpdateJobExecutor macSoftwareUpdateJobExecutor,
         MacShellScriptJobExecutor macShellScriptJobExecutor,
+        SoftwareInstallJobExecutor softwareInstallJobExecutor,
         StubJobExecutor stubJobExecutor)
     {
         _agentSelfUpdateJobExecutor = agentSelfUpdateJobExecutor;
@@ -28,6 +30,7 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         _windowsPowerShellScriptJobExecutor = windowsPowerShellScriptJobExecutor;
         _macSoftwareUpdateJobExecutor = macSoftwareUpdateJobExecutor;
         _macShellScriptJobExecutor = macShellScriptJobExecutor;
+        _softwareInstallJobExecutor = softwareInstallJobExecutor;
         _stubJobExecutor = stubJobExecutor;
     }
 
@@ -59,6 +62,11 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         }
 
         if (await _macShellScriptJobExecutor.TryAdvanceAsync(state, cancellationToken))
+        {
+            return true;
+        }
+
+        if (await _softwareInstallJobExecutor.TryAdvanceAsync(state, cancellationToken))
         {
             return true;
         }

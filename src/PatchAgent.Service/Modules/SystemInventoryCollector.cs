@@ -50,6 +50,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             snapshot.InstalledWindowsPatches = await CollectInstalledWindowsPatchesAsync(cancellationToken);
             snapshot.AvailableWindowsPatches = await CollectAvailableWindowsPatchesAsync(cancellationToken);
             snapshot.WindowsSecurity = await CollectWindowsSecuritySnapshotAsync(cancellationToken);
+            snapshot.Applications = await CollectInstalledWindowsApplicationsAsync(cancellationToken);
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -75,6 +76,8 @@ public sealed class SystemInventoryCollector : IInventoryCollector
                 snapshot.LinuxAvailablePackages = linuxUpdateSnapshot.AvailablePackages;
                 snapshot.LinuxAvailablePackageDetails = linuxUpdateSnapshot.AvailablePackageDetails;
             }
+
+            snapshot.Applications = await CollectInstalledLinuxApplicationsAsync(cancellationToken);
         }
         else if (OperatingSystem.IsMacOS())
         {
@@ -88,6 +91,7 @@ public sealed class SystemInventoryCollector : IInventoryCollector
             snapshot.MacAvailableUpdatesCount = macOsUpdateSnapshot.AvailableUpdateLabels.Count > 0
                 ? macOsUpdateSnapshot.AvailableUpdateLabels.Count
                 : (macOsUpdateSnapshot.SoftwareUpdateAvailable ? 1 : 0);
+            snapshot.Applications = await CollectInstalledMacApplicationsAsync(cancellationToken);
         }
 
         _logger.LogInformation(
@@ -390,6 +394,338 @@ $result | ConvertTo-Json -Depth 4 -Compress
         }
 
         return ParseWindowsSecurityInventoryJson(result.StandardOutput);
+    }
+
+    private async Task<List<InstalledApplicationSnapshot>> CollectInstalledWindowsApplicationsAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return [];
+        }
+
+        var script = @"
+$ErrorActionPreference = 'SilentlyContinue'
+$items = @()
+$paths = @(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+  'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+)
+
+foreach ($path in $paths) {
+  try {
+    $entries = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+    foreach ($entry in $entries) {
+      $name = [string]($entry.DisplayName)
+      if ([string]::IsNullOrWhiteSpace($name)) {
+        continue
+      }
+
+      $installDate = ''
+      if ($entry.InstallDate) {
+        $candidate = [string]$entry.InstallDate
+        try {
+          if ($candidate -match '^\d{8}$') {
+            $installDate = [datetime]::ParseExact($candidate, 'yyyyMMdd', $null).ToString('o')
+          } else {
+            $installDate = (Get-Date $candidate).ToString('o')
+          }
+        } catch {
+          $installDate = $candidate
+        }
+      }
+
+      $items += [PSCustomObject]@{
+        name = $name.Trim()
+        version = [string]($entry.DisplayVersion)
+        publisher = [string]($entry.Publisher)
+        source = 'windows-registry'
+        installed_at = $installDate
+      }
+    }
+  } catch {
+  }
+}
+
+$items |
+  Sort-Object -Property name, version -Unique |
+  Select-Object -First 2500 |
+  ConvertTo-Json -Depth 5 -Compress
+";
+
+        var result = await RunProcessAsync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
+            ],
+            TimeSpan.FromSeconds(45),
+            cancellationToken);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            _logger.LogDebug(
+                "Windows application inventory query failed with exit code {ExitCode}: {Error}",
+                result.ExitCode,
+                result.StandardError);
+            return [];
+        }
+
+        return ParseInstalledApplicationsJson(result.StandardOutput, "windows-registry");
+    }
+
+    private async Task<List<InstalledApplicationSnapshot>> CollectInstalledLinuxApplicationsAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return [];
+        }
+
+        if (File.Exists("/usr/bin/dpkg-query"))
+        {
+            var dpkgResult = await RunProcessAsync(
+                "/usr/bin/dpkg-query",
+                ["-W", "-f=${binary:Package}\t${Version}\n"],
+                TimeSpan.FromSeconds(60),
+                cancellationToken);
+
+            if (dpkgResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(dpkgResult.StandardOutput))
+            {
+                return ParseLinuxPackageInventory(dpkgResult.StandardOutput, "dpkg");
+            }
+        }
+
+        if (File.Exists("/usr/bin/rpm"))
+        {
+            var rpmResult = await RunProcessAsync(
+                "/usr/bin/rpm",
+                ["-qa", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\n"],
+                TimeSpan.FromSeconds(60),
+                cancellationToken);
+
+            if (rpmResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(rpmResult.StandardOutput))
+            {
+                return ParseLinuxPackageInventory(rpmResult.StandardOutput, "rpm");
+            }
+        }
+
+        return [];
+    }
+
+    private async Task<List<InstalledApplicationSnapshot>> CollectInstalledMacApplicationsAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return [];
+        }
+
+        if (!File.Exists("/opt/homebrew/bin/brew")
+            && !File.Exists("/usr/local/bin/brew")
+            && !File.Exists("/usr/bin/brew"))
+        {
+            return [];
+        }
+
+        var applications = new List<InstalledApplicationSnapshot>();
+        applications.AddRange(await CollectMacBrewApplicationsAsync(["list", "--formula", "--versions"], "brew-formula", cancellationToken));
+        applications.AddRange(await CollectMacBrewApplicationsAsync(["list", "--cask", "--versions"], "brew-cask", cancellationToken));
+
+        return NormalizeApplications(applications);
+    }
+
+    private async Task<List<InstalledApplicationSnapshot>> CollectMacBrewApplicationsAsync(
+        IReadOnlyList<string> args,
+        string source,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunProcessAsync(
+            "brew",
+            args,
+            TimeSpan.FromSeconds(45),
+            cancellationToken);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            return [];
+        }
+
+        var applications = new List<InstalledApplicationSnapshot>();
+        foreach (var rawLine in result.StandardOutput.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                continue;
+            }
+
+            var name = parts[0].Trim();
+            if (name.Length == 0)
+            {
+                continue;
+            }
+
+            var version = parts.Length > 1
+                ? string.Join(' ', parts.Skip(1)).Trim()
+                : string.Empty;
+
+            applications.Add(new InstalledApplicationSnapshot
+            {
+                Name = name,
+                Version = version,
+                Source = source
+            });
+        }
+
+        return NormalizeApplications(applications);
+    }
+
+    private static List<InstalledApplicationSnapshot> ParseLinuxPackageInventory(string output, string source)
+    {
+        var applications = new List<InstalledApplicationSnapshot>();
+
+        foreach (var rawLine in output.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var parts = line.Split('\t', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0]))
+            {
+                continue;
+            }
+
+            applications.Add(new InstalledApplicationSnapshot
+            {
+                Name = parts[0].Trim(),
+                Version = parts.Length > 1 ? parts[1].Trim() : string.Empty,
+                Source = source
+            });
+        }
+
+        return NormalizeApplications(applications);
+    }
+
+    private static List<InstalledApplicationSnapshot> ParseInstalledApplicationsJson(string rawJson, string defaultSource)
+    {
+        var applications = new List<InstalledApplicationSnapshot>();
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in root.EnumerateArray())
+                {
+                    AddInstalledApplicationFromJson(item, applications, defaultSource);
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                AddInstalledApplicationFromJson(root, applications, defaultSource);
+            }
+        }
+        catch
+        {
+            return [];
+        }
+
+        return NormalizeApplications(applications);
+    }
+
+    private static void AddInstalledApplicationFromJson(
+        JsonElement item,
+        List<InstalledApplicationSnapshot> applications,
+        string defaultSource)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var name = (ReadString(item, "name") ?? ReadString(item, "display_name") ?? string.Empty).Trim();
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        var version = (ReadString(item, "version") ?? ReadString(item, "display_version") ?? string.Empty).Trim();
+        var publisher = (ReadString(item, "publisher") ?? string.Empty).Trim();
+        var source = (ReadString(item, "source") ?? defaultSource ?? string.Empty).Trim();
+        var installedAt = (ReadString(item, "installed_at") ?? ReadString(item, "install_date") ?? string.Empty).Trim();
+
+        applications.Add(new InstalledApplicationSnapshot
+        {
+            Name = name,
+            Version = version,
+            Publisher = publisher,
+            Source = source,
+            InstalledAt = installedAt
+        });
+    }
+
+    private static List<InstalledApplicationSnapshot> NormalizeApplications(
+        IEnumerable<InstalledApplicationSnapshot> applications)
+    {
+        var normalized = new Dictionary<string, InstalledApplicationSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var application in applications)
+        {
+            var name = (application.Name ?? string.Empty).Trim();
+            if (name.Length == 0)
+            {
+                continue;
+            }
+
+            var version = (application.Version ?? string.Empty).Trim();
+            var source = (application.Source ?? string.Empty).Trim();
+            var key = (name + "|" + version + "|" + source).ToLowerInvariant();
+
+            if (!normalized.TryGetValue(key, out var existing))
+            {
+                normalized[key] = new InstalledApplicationSnapshot
+                {
+                    Name = name,
+                    Version = version,
+                    Publisher = (application.Publisher ?? string.Empty).Trim(),
+                    Source = source,
+                    InstalledAt = (application.InstalledAt ?? string.Empty).Trim()
+                };
+                continue;
+            }
+
+            if (existing.Publisher.Length == 0 && !string.IsNullOrWhiteSpace(application.Publisher))
+            {
+                existing.Publisher = application.Publisher.Trim();
+            }
+
+            if (existing.InstalledAt.Length == 0 && !string.IsNullOrWhiteSpace(application.InstalledAt))
+            {
+                existing.InstalledAt = application.InstalledAt.Trim();
+            }
+        }
+
+        return normalized
+            .Values
+            .OrderBy(static application => application.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static application => application.Version, StringComparer.OrdinalIgnoreCase)
+            .Take(2500)
+            .ToList();
     }
 
     private static bool IsWindowsRebootPending()

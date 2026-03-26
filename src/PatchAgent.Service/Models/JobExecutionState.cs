@@ -51,4 +51,10 @@ public sealed class JobExecutionState
     public string AgentSelfUpdateRepoRef { get; set; } = string.Empty;
 
     public string AgentSelfUpdatePackageUrl { get; set; } = string.Empty;
+
+    public string SoftwareInstallManager { get; set; } = string.Empty;
+
+    public bool SoftwareInstallAllowUpdate { get; set; }
+
+    public List<string> SoftwareInstallPackages { get; set; } = [];
 }

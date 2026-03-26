@@ -461,6 +461,16 @@ final class App
         $type = $this->optionalString($body, 'type') ?? 'windows_update_install';
         $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
         $policy = is_array($body['policy'] ?? null) ? $body['policy'] : [];
+        $typeNormalized = strtolower(trim($type));
+
+        if (in_array($typeNormalized, ['application_install', 'package_install'], true)) {
+            $type = 'software_install';
+            $typeNormalized = 'software_install';
+        }
+
+        if ($typeNormalized === 'software_install') {
+            $payload = $this->normalizeSoftwareInstallPayload($payload);
+        }
 
         if ($targetAgentId === null && $targetDeviceId === null) {
             throw new ApiException(
@@ -949,6 +959,9 @@ final class App
                         ? $inventory['mac_os']
                         : (is_array($inventory['macos'] ?? null) ? $inventory['macos'] : [])
                 );
+                $inventory['applications'] = $this->normalizeApplicationsInventory(
+                    is_array($inventory['applications'] ?? null) ? $inventory['applications'] : []
+                );
             }
 
             $agents[$index]['inventory'] = $inventory;
@@ -979,6 +992,9 @@ final class App
             is_array($inventory['mac_os'] ?? null)
                 ? $inventory['mac_os']
                 : (is_array($inventory['macos'] ?? null) ? $inventory['macos'] : [])
+        );
+        $inventory['applications'] = $this->normalizeApplicationsInventory(
+            is_array($inventory['applications'] ?? null) ? $inventory['applications'] : []
         );
 
         JsonResponse::ok([
@@ -4136,6 +4152,147 @@ BASH;
             'software_update_available' => $updateAvailable,
             'available_update_labels' => array_slice($labels, 0, 500),
             'available_updates_count' => max(0, $count),
+        ];
+    }
+
+    private function normalizeSoftwareInstallPayload(array $payload): array
+    {
+        $software = is_array($payload['software_install'] ?? null)
+            ? $payload['software_install']
+            : (is_array($payload['software'] ?? null) ? $payload['software'] : []);
+
+        $rawPackages = $software['packages'] ?? ($software['ids'] ?? ($software['package_ids'] ?? []));
+        $packageCandidates = [];
+        if (is_string($rawPackages)) {
+            $packageCandidates = preg_split('/[\s,]+/', $rawPackages) ?: [];
+        } elseif (is_array($rawPackages)) {
+            $packageCandidates = $rawPackages;
+        }
+
+        $normalizedPackages = [];
+        foreach ($packageCandidates as $package) {
+            if (!is_string($package)) {
+                continue;
+            }
+
+            $value = trim($package);
+            if ($value === '') {
+                continue;
+            }
+
+            if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+@\/-]{0,127}$/', $value) !== 1) {
+                continue;
+            }
+
+            $normalizedPackages[strtolower($value)] = $value;
+        }
+
+        if (count($normalizedPackages) === 0) {
+            throw new ApiException(
+                422,
+                'invalid_request',
+                'software_install requires at least one valid package in software_install.packages.'
+            );
+        }
+
+        $manager = strtolower(trim((string) ($software['manager'] ?? 'auto')));
+        if ($manager === '') {
+            $manager = 'auto';
+        }
+
+        if (!in_array($manager, ['auto', 'winget', 'apt', 'brew'], true)) {
+            throw new ApiException(
+                422,
+                'invalid_request',
+                'software_install.manager must be one of: auto, winget, apt, brew.'
+            );
+        }
+
+        return [
+            'software_install' => [
+                'manager' => $manager,
+                'allow_update' => $this->toBool(
+                    $software['allow_update'] ?? ($software['allow_upgrade'] ?? false)
+                ),
+                'packages' => array_values($normalizedPackages),
+            ],
+        ];
+    }
+
+    private function normalizeApplicationsInventory(array $applications): array
+    {
+        $normalized = [];
+
+        foreach ($applications as $application) {
+            $entry = $this->normalizeApplicationInventoryEntry($application);
+            if ($entry === null) {
+                continue;
+            }
+
+            $key = strtolower(
+                trim((string) $entry['name'])
+                . '|'
+                . trim((string) ($entry['version'] ?? ''))
+                . '|'
+                . trim((string) ($entry['source'] ?? ''))
+            );
+            $normalized[$key] = $entry;
+        }
+
+        $rows = array_values($normalized);
+        usort($rows, static function (array $left, array $right): int {
+            $leftName = strtolower((string) ($left['name'] ?? ''));
+            $rightName = strtolower((string) ($right['name'] ?? ''));
+            if ($leftName === $rightName) {
+                return strcmp((string) ($left['version'] ?? ''), (string) ($right['version'] ?? ''));
+            }
+
+            return strcmp($leftName, $rightName);
+        });
+
+        return array_slice($rows, 0, 3000);
+    }
+
+    private function normalizeApplicationInventoryEntry(mixed $application): ?array
+    {
+        if (!is_array($application)) {
+            return null;
+        }
+
+        $name = trim((string) (
+            $application['name']
+            ?? $application['display_name']
+            ?? $application['displayName']
+            ?? ''
+        ));
+        if ($name === '') {
+            return null;
+        }
+
+        return [
+            'name' => $name,
+            'version' => trim((string) (
+                $application['version']
+                ?? $application['display_version']
+                ?? $application['displayVersion']
+                ?? ''
+            )),
+            'publisher' => trim((string) (
+                $application['publisher']
+                ?? $application['vendor']
+                ?? ''
+            )),
+            'source' => trim((string) (
+                $application['source']
+                ?? $application['channel']
+                ?? ''
+            )),
+            'installed_at' => trim((string) (
+                $application['installed_at']
+                ?? $application['install_date']
+                ?? $application['installDate']
+                ?? ''
+            )),
         ];
     }
 

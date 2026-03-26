@@ -207,7 +207,10 @@ public sealed class AgentCoordinator
             MacShellScriptUrl = job.MacShellScriptUrl,
             AgentSelfUpdateRepoUrl = job.AgentSelfUpdateRepoUrl,
             AgentSelfUpdateRepoRef = job.AgentSelfUpdateRepoRef,
-            AgentSelfUpdatePackageUrl = job.AgentSelfUpdatePackageUrl
+            AgentSelfUpdatePackageUrl = job.AgentSelfUpdatePackageUrl,
+            SoftwareInstallManager = job.SoftwareInstallManager,
+            SoftwareInstallAllowUpdate = job.SoftwareInstallAllowUpdate,
+            SoftwareInstallPackages = job.SoftwareInstallPackages.ToList()
         };
 
         await _policyClient.AcknowledgeJobAsync(

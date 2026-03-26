@@ -46,11 +46,26 @@ public sealed class InventorySnapshot
 
     public int MacAvailableUpdatesCount { get; set; }
 
+    public List<InstalledApplicationSnapshot> Applications { get; set; } = [];
+
     public List<InstalledPatchSnapshot> InstalledWindowsPatches { get; set; } = [];
 
     public List<AvailablePatchSnapshot> AvailableWindowsPatches { get; set; } = [];
 
     public WindowsSecuritySnapshot WindowsSecurity { get; set; } = new();
+}
+
+public sealed class InstalledApplicationSnapshot
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string Version { get; set; } = string.Empty;
+
+    public string Publisher { get; set; } = string.Empty;
+
+    public string Source { get; set; } = string.Empty;
+
+    public string InstalledAt { get; set; } = string.Empty;
 }
 
 public sealed class InstalledPatchSnapshot

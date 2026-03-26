@@ -3,7 +3,7 @@
 Patch management scaffold with:
 - A `.NET` endpoint agent (`src/PatchAgent.Service/`)
 - A minimal PHP API backend (`backend/php-api/`) designed for nginx + PHP-FPM
-- Job seeding endpoints for Windows Update, Ubuntu apt, macOS softwareupdate, Windows PowerShell scripts, and macOS shell scripts
+- Job seeding endpoints for Windows Update, Ubuntu apt, macOS softwareupdate, Windows PowerShell scripts, macOS shell scripts, and cross-platform software install jobs
 
 ## Fast Start: Ubuntu Agent
 
@@ -122,6 +122,7 @@ API scaffold is under `backend/php-api/`.
 It now includes a basic admin web view at `/admin` for viewing agents, generating installer links, and seeding/listing jobs.
 Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth, with optional TOTP second factor and optional Touch ID/passkey (WebAuthn) as an MFA alternative.
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
+It now also supports software inventory (installed applications) and cross-platform software installation jobs (`software_install`) using Winget (Windows), APT (Linux), and Homebrew (macOS).
 Linux available package inventory is now CVE-enriched through OSV lookups (Ubuntu/Debian) with on-disk caching on the API server.
 It now also supports queueing script jobs for Windows and macOS (inline script or script URL), including built-in GCPW and Splashtop install templates.
 It now also supports per-agent self-update jobs (`agent_self_update`) from the main admin page.

@@ -330,6 +330,55 @@ final class JobRepository
             ];
         }
 
+        if (
+            $typeNormalized === 'software_install'
+            || $typeNormalized === 'application_install'
+            || $typeNormalized === 'package_install'
+        ) {
+            $software = is_array($payload['software_install'] ?? null)
+                ? $payload['software_install']
+                : (is_array($payload['software'] ?? null) ? $payload['software'] : []);
+            $packages = is_array($software['packages'] ?? null)
+                ? $software['packages']
+                : (
+                    is_array($software['ids'] ?? null)
+                        ? $software['ids']
+                        : (is_array($software['package_ids'] ?? null) ? $software['package_ids'] : [])
+                );
+            $normalizedPackages = [];
+            foreach ($packages as $package) {
+                if (!is_string($package)) {
+                    continue;
+                }
+
+                $value = trim($package);
+                if ($value === '') {
+                    continue;
+                }
+
+                $normalizedPackages[strtolower($value)] = $value;
+            }
+
+            $packageList = array_values($normalizedPackages);
+            sort($packageList, SORT_STRING);
+
+            $manager = strtolower(trim((string) ($software['manager'] ?? 'auto')));
+            if ($manager === '') {
+                $manager = 'auto';
+            }
+
+            return [
+                'software_install' => [
+                    'manager' => $manager,
+                    'allow_update' => filter_var(
+                        $software['allow_update'] ?? ($software['allow_upgrade'] ?? false),
+                        FILTER_VALIDATE_BOOL
+                    ),
+                    'packages' => $packageList,
+                ],
+            ];
+        }
+
         if ($typeNormalized === 'windows_powershell_script') {
             $script = is_array($payload['windows_script'] ?? null) ? $payload['windows_script'] : [];
             return [

@@ -189,6 +189,16 @@ public sealed class HttpPolicyClient : IPolicyClient
                 PrimaryMacAddress = snapshot.PrimaryMacAddress,
                 FreeDiskMb = snapshot.FreeDiskMb
             },
+            Applications = snapshot.Applications
+                .Select(application => new InventoryApplication
+                {
+                    Name = application.Name,
+                    Version = string.IsNullOrWhiteSpace(application.Version) ? null : application.Version,
+                    Publisher = string.IsNullOrWhiteSpace(application.Publisher) ? null : application.Publisher,
+                    Source = string.IsNullOrWhiteSpace(application.Source) ? null : application.Source,
+                    InstalledAt = string.IsNullOrWhiteSpace(application.InstalledAt) ? null : application.InstalledAt
+                })
+                .ToList(),
             Linux = OperatingSystem.IsLinux()
                 ? new InventoryUploadLinux
                 {
@@ -274,7 +284,10 @@ public sealed class HttpPolicyClient : IPolicyClient
             MacShellScriptUrl = ReadMacShellScriptUrl(response.Job.Payload),
             AgentSelfUpdateRepoUrl = ReadAgentSelfUpdateRepoUrl(response.Job.Payload),
             AgentSelfUpdateRepoRef = ReadAgentSelfUpdateRepoRef(response.Job.Payload),
-            AgentSelfUpdatePackageUrl = ReadAgentSelfUpdatePackageUrl(response.Job.Payload)
+            AgentSelfUpdatePackageUrl = ReadAgentSelfUpdatePackageUrl(response.Job.Payload),
+            SoftwareInstallManager = ReadSoftwareInstallManager(response.Job.Payload),
+            SoftwareInstallAllowUpdate = ReadSoftwareInstallAllowUpdate(response.Job.Payload),
+            SoftwareInstallPackages = ReadSoftwareInstallPackages(response.Job.Payload)
         };
     }
 
@@ -745,6 +758,79 @@ public sealed class HttpPolicyClient : IPolicyClient
         return string.Empty;
     }
 
+    private static string ReadSoftwareInstallManager(JsonElement? payload)
+    {
+        if (TryGetSoftwareInstallValue(payload, "manager", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var manager = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(manager))
+            {
+                return manager.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool ReadSoftwareInstallAllowUpdate(JsonElement? payload)
+    {
+        if (TryGetSoftwareInstallValue(payload, "allow_update", out var value)
+            && value is { ValueKind: JsonValueKind.True or JsonValueKind.False })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        if (TryGetSoftwareInstallValue(payload, "allow_upgrade", out value)
+            && value is { ValueKind: JsonValueKind.True or JsonValueKind.False })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return false;
+    }
+
+    private static List<string> ReadSoftwareInstallPackages(JsonElement? payload)
+    {
+        var packageSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddSoftwareInstallPackagesFromArrayValue(payload, "packages", packageSet);
+        AddSoftwareInstallPackagesFromArrayValue(payload, "ids", packageSet);
+        AddSoftwareInstallPackagesFromArrayValue(payload, "package_ids", packageSet);
+
+        return packageSet
+            .Select(static package => package.Trim())
+            .Where(static package => !string.IsNullOrWhiteSpace(package))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddSoftwareInstallPackagesFromArrayValue(
+        JsonElement? payload,
+        string key,
+        ISet<string> packageSet)
+    {
+        if (!TryGetSoftwareInstallValue(payload, key, out var value)
+            || value is not { ValueKind: JsonValueKind.Array })
+        {
+            return;
+        }
+
+        foreach (var item in value.Value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var packageName = item.GetString();
+            if (!string.IsNullOrWhiteSpace(packageName))
+            {
+                packageSet.Add(packageName.Trim());
+            }
+        }
+    }
+
     private static List<string> ReadWindowsKbIds(JsonElement? payload)
     {
         var kbSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1095,6 +1181,43 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!selfUpdateSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetSoftwareInstallValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement softwareSection;
+        if (payloadObject.TryGetProperty("software_install", out var softwareInstallSection)
+            && softwareInstallSection.ValueKind == JsonValueKind.Object)
+        {
+            softwareSection = softwareInstallSection;
+        }
+        else if (payloadObject.TryGetProperty("software", out var softwareSectionAlias)
+                 && softwareSectionAlias.ValueKind == JsonValueKind.Object)
+        {
+            softwareSection = softwareSectionAlias;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!softwareSection.TryGetProperty(key, out var child))
         {
             return false;
         }
