@@ -129,11 +129,23 @@ server {
 
     location ~ \.php$ {
         include fastcgi_params;
+        include /etc/winpatchagent/patchapi-secrets.conf;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_pass 127.0.0.1:9000;
     }
 }
 ```
+
+Create the include directory/file if missing:
+
+```bash
+sudo install -d -o root -g www-data -m 750 /etc/winpatchagent
+sudo install -o root -g www-data -m 640 /dev/null /etc/winpatchagent/patchapi-secrets.conf
+```
+
+Template file in this repo:
+
+- `docs/examples/patchapi-secrets.conf.example`
 
 If you use a strict Content-Security-Policy, admin pages now emit a per-request nonce in the
 `X-CSP-Nonce` response header. In nginx, prefer a CSP like:

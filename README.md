@@ -147,3 +147,4 @@ See backend details and endpoints in:
 - `backend/php-api/README.md`
 - `docs/php-backend-api.md`
 - `docs/server-pull-and-permissions.md` (server pull + permission fix runbook)
+- `docs/examples/patchapi-secrets.conf.example` (nginx `fastcgi_param` secrets template for `/etc/winpatchagent/`)
