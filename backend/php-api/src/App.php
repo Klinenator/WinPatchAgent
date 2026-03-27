@@ -37,6 +37,7 @@ final class App
     private const ADMIN_SESSION_TOTP_PENDING_KEY = 'admin_totp_pending';
     private const ADMIN_SESSION_PASSKEY_ASSERTION_KEY = 'admin_passkey_assertion_pending';
     private const ADMIN_SESSION_PASSKEY_REGISTRATION_KEY = 'admin_passkey_registration_pending';
+    private const TERMINAL_JOB_STATUSES = ['succeeded', 'failed', 'canceled', 'rejected'];
 
     private Config $config;
     private FileStore $store;
@@ -1069,8 +1070,23 @@ final class App
     {
         $this->processDueAutomations();
 
+        $jobStatusesById = [];
+        foreach ($this->jobs->listJobs() as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+
+            $jobId = trim((string) ($job['job_id'] ?? ''));
+            if ($jobId === '') {
+                continue;
+            }
+
+            $jobStatusesById[$jobId] = strtolower(trim((string) ($job['status'] ?? '')));
+        }
+
         $agents = $this->agents->listAgents();
         foreach ($agents as $index => $agent) {
+            $agent = $this->normalizeAgentCurrentJobForDisplay($agent, $jobStatusesById);
             $inventory = $this->inventory->loadSnapshot((string) ($agent['agent_record_id'] ?? ''));
             if ($inventory !== null) {
                 $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
@@ -1092,12 +1108,50 @@ final class App
                 );
             }
 
+            $agents[$index] = $agent;
             $agents[$index]['inventory'] = $inventory;
         }
 
         JsonResponse::ok([
             'agents' => $agents,
         ]);
+    }
+
+    /**
+     * Hide stale current-job markers in agent heartbeat data when the backend already
+     * knows the referenced job is terminal.
+     *
+     * @param array<string, mixed> $agent
+     * @param array<string, string> $jobStatusesById
+     * @return array<string, mixed>
+     */
+    private function normalizeAgentCurrentJobForDisplay(array $agent, array $jobStatusesById): array
+    {
+        $heartbeat = is_array($agent['last_heartbeat'] ?? null) ? $agent['last_heartbeat'] : [];
+        $currentJob = is_array($heartbeat['current_job'] ?? null) ? $heartbeat['current_job'] : [];
+        if ($currentJob === []) {
+            return $agent;
+        }
+
+        $jobId = trim((string) ($currentJob['job_id'] ?? ''));
+        if ($jobId === '') {
+            $heartbeat['current_job'] = null;
+            $agent['last_heartbeat'] = $heartbeat;
+            return $agent;
+        }
+
+        $jobStatus = strtolower(trim((string) ($jobStatusesById[$jobId] ?? '')));
+        $heartbeatState = strtolower(trim((string) ($currentJob['state'] ?? '')));
+
+        if (
+            ($jobStatus !== '' && in_array($jobStatus, self::TERMINAL_JOB_STATUSES, true))
+            || ($heartbeatState !== '' && in_array($heartbeatState, self::TERMINAL_JOB_STATUSES, true))
+        ) {
+            $heartbeat['current_job'] = null;
+            $agent['last_heartbeat'] = $heartbeat;
+        }
+
+        return $agent;
     }
 
     private function handleAdminCatalogSearch(Request $request): void
