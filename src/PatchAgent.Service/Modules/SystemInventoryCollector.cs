@@ -1229,7 +1229,7 @@ if (-not [string]::IsNullOrWhiteSpace($user)) {
 ";
 
         var result = await RunProcessAsync(
-            "powershell",
+            "powershell.exe",
             ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
             TimeSpan.FromSeconds(5),
             cancellationToken);
