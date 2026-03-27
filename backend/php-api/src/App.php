@@ -509,6 +509,10 @@ final class App
             $payload = $this->normalizeSoftwareSearchPayload($payload);
         }
 
+        if (in_array($typeNormalized, ['agent_self_update', 'self_update'], true)) {
+            $payload = $this->normalizeAgentSelfUpdatePayload($payload);
+        }
+
         if ($targetAgentId === null && $targetDeviceId === null) {
             throw new ApiException(
                 422,
@@ -4924,6 +4928,58 @@ BASH;
                 'manager' => $manager,
                 'query' => $query,
                 'limit' => $limit,
+            ],
+        ];
+    }
+
+    private function normalizeAgentSelfUpdatePayload(array $payload): array
+    {
+        $selfUpdate = is_array($payload['agent_self_update'] ?? null)
+            ? $payload['agent_self_update']
+            : (is_array($payload['self_update'] ?? null) ? $payload['self_update'] : []);
+
+        $repoUrl = trim((string) ($selfUpdate['repo_url'] ?? ''));
+        $repoRef = trim((string) ($selfUpdate['repo_ref'] ?? ($selfUpdate['branch'] ?? 'main')));
+        if ($repoRef === '') {
+            $repoRef = 'main';
+        }
+
+        $installMode = strtolower(trim((string) (
+            $selfUpdate['windows_install_mode']
+            ?? $selfUpdate['install_mode']
+            ?? $selfUpdate['mode']
+            ?? ''
+        )));
+        if (!in_array($installMode, ['source', 'prebuilt'], true)) {
+            $installMode = '';
+        }
+
+        $packageUrl = trim((string) ($selfUpdate['package_url'] ?? ($selfUpdate['windows_package_url'] ?? '')));
+        if ($installMode === '') {
+            $installMode = $packageUrl !== '' ? 'prebuilt' : 'source';
+        }
+
+        if ($installMode === 'prebuilt' && $packageUrl === '') {
+            $packageUrl = trim((string) $this->config->windowsAgentPackageUrl);
+        }
+
+        if (
+            $packageUrl !== ''
+            && preg_match('#^https?://#i', $packageUrl) !== 1
+        ) {
+            throw new ApiException(
+                422,
+                'invalid_request',
+                'agent_self_update.package_url must start with http:// or https://.'
+            );
+        }
+
+        return [
+            'agent_self_update' => [
+                'repo_url' => $repoUrl,
+                'repo_ref' => $repoRef,
+                'package_url' => $packageUrl,
+                'windows_install_mode' => $installMode,
             ],
         ];
     }

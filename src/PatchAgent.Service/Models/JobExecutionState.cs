@@ -52,6 +52,8 @@ public sealed class JobExecutionState
 
     public string AgentSelfUpdatePackageUrl { get; set; } = string.Empty;
 
+    public string AgentSelfUpdateWindowsInstallMode { get; set; } = string.Empty;
+
     public string SoftwareInstallManager { get; set; } = string.Empty;
 
     public bool SoftwareInstallAllowUpdate { get; set; }

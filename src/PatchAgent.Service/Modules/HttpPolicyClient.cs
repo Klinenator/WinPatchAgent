@@ -290,6 +290,7 @@ public sealed class HttpPolicyClient : IPolicyClient
             AgentSelfUpdateRepoUrl = ReadAgentSelfUpdateRepoUrl(response.Job.Payload),
             AgentSelfUpdateRepoRef = ReadAgentSelfUpdateRepoRef(response.Job.Payload),
             AgentSelfUpdatePackageUrl = ReadAgentSelfUpdatePackageUrl(response.Job.Payload),
+            AgentSelfUpdateWindowsInstallMode = ReadAgentSelfUpdateWindowsInstallMode(response.Job.Payload),
             SoftwareInstallManager = ReadSoftwareInstallManager(response.Job.Payload),
             SoftwareInstallAllowUpdate = ReadSoftwareInstallAllowUpdate(response.Job.Payload),
             SoftwareInstallPackages = ReadSoftwareInstallPackages(response.Job.Payload),
@@ -764,6 +765,47 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         return string.Empty;
+    }
+
+    private static string ReadAgentSelfUpdateWindowsInstallMode(JsonElement? payload)
+    {
+        if (TryGetAgentSelfUpdateValue(payload, "windows_install_mode", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var mode = NormalizeWindowsInstallMode(value.Value.GetString());
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                return mode;
+            }
+        }
+
+        if (TryGetAgentSelfUpdateValue(payload, "install_mode", out value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var mode = NormalizeWindowsInstallMode(value.Value.GetString());
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                return mode;
+            }
+        }
+
+        if (TryGetAgentSelfUpdateValue(payload, "mode", out value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var mode = NormalizeWindowsInstallMode(value.Value.GetString());
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                return mode;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string NormalizeWindowsInstallMode(string? rawValue)
+    {
+        var mode = (rawValue ?? string.Empty).Trim().ToLowerInvariant();
+        return mode is "source" or "prebuilt" ? mode : string.Empty;
     }
 
     private static string ReadSoftwareInstallManager(JsonElement? payload)

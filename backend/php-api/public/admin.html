@@ -273,6 +273,12 @@
             border-color: #bedff7;
         }
 
+        .btn.tiny.danger {
+            background: #fff1f2;
+            color: #b42331;
+            border-color: #f6c7cd;
+        }
+
         .agent-actions {
             display: inline-flex;
             gap: 6px;
@@ -357,6 +363,11 @@
             display: grid;
             grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
             gap: 12px;
+            align-items: start;
+        }
+
+        .agents-panel {
+            grid-row: 1 / span 2;
         }
 
         .panel {
@@ -970,7 +981,31 @@
         }
 
         .jobs-panel {
-            margin-top: 12px;
+            margin-top: 0;
+        }
+
+        .jobs-side-panel {
+            position: sticky;
+            top: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-self: start;
+        }
+
+        .jobs-side-panel .table-wrap {
+            max-height: 260px;
+        }
+
+        .jobs-action-buttons {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .jobs-panel-status {
+            margin: 0 2px;
         }
 
         .job-log-view {
@@ -1060,6 +1095,15 @@
 
             .main-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .agents-panel {
+                grid-row: auto;
+            }
+
+            .jobs-side-panel {
+                position: static;
+                top: auto;
             }
         }
 
@@ -1211,7 +1255,7 @@
         </section>
 
         <section class="main-grid">
-            <section class="panel">
+            <section class="panel agents-panel">
                 <div class="panel-top">
                     <h2>Agents</h2>
                     <p class="hint" id="agentsSummary">Showing 0 of 0 agents</p>
@@ -1249,7 +1293,7 @@
                 </div>
             </section>
 
-            <section class="panel">
+            <section class="panel selected-agent-panel">
                 <h2>Selected Agent</h2>
                 <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue patch or software installs, self-update, run scripts, or connect.</p>
 
@@ -1436,9 +1480,8 @@
                 </div>
                 <div id="agentActionStatus" class="status-line"></div>
             </section>
-        </section>
 
-        <section class="panel jobs-panel">
+            <section class="panel jobs-panel jobs-side-panel">
             <div class="panel-top">
                 <h2>Recent Jobs</h2>
                 <p class="hint">Newest jobs appear first.</p>
@@ -1461,6 +1504,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="jobsActionStatus" class="status-line jobs-panel-status"></div>
             <div class="job-log-view">
                 <div class="job-log-head">
                     <h3 id="jobLogTitle">Job Logs</h3>
@@ -1486,6 +1530,7 @@
                 </div>
             </div>
         </section>
+        </section>
     </main>
 </div>
 
@@ -1493,6 +1538,7 @@
 (() => {
     const authUser = document.getElementById("authUser");
     const tokenStatus = document.getElementById("tokenStatus");
+    const jobsActionStatus = document.getElementById("jobsActionStatus");
     const agentsTableBody = document.getElementById("agentsTableBody");
     const jobsTableBody = document.getElementById("jobsTableBody");
     const jobLogTitle = document.getElementById("jobLogTitle");
@@ -2260,6 +2306,9 @@
             const status = String(job.status || "");
             const statusClass = statusToClass(status);
             const jobId = String(job.job_id || "");
+            const canCancel = isJobCancelable(status);
+            const cancelDisabledAttr = canCancel ? "" : " disabled";
+            const cancelLabel = canCancel ? "Cancel" : "Closed";
 
             return "<tr>" +
                 "<td><code class=\"mono\">" + escapeHtml(jobId) + "</code></td>" +
@@ -2268,7 +2317,10 @@
                 "<td>" + escapeHtml(String(job.target_device_id || "")) + "</td>" +
                 "<td><code class=\"mono\">" + escapeHtml(String(job.target_agent_id || "")) + "</code></td>" +
                 "<td>" + escapeHtml(String(job.created_at || "")) + "</td>" +
-                "<td><button type=\"button\" class=\"btn tiny view-job-log-btn\" data-job-id=\"" + escapeHtml(jobId) + "\">View Logs</button></td>" +
+                "<td><div class=\"jobs-action-buttons\">" +
+                "<button type=\"button\" class=\"btn tiny view-job-log-btn\" data-job-id=\"" + escapeHtml(jobId) + "\">View Logs</button>" +
+                "<button type=\"button\" class=\"btn tiny danger cancel-job-btn\" data-job-id=\"" + escapeHtml(jobId) + "\"" + cancelDisabledAttr + ">" + escapeHtml(cancelLabel) + "</button>" +
+                "</div></td>" +
                 "</tr>";
         }).join("");
 
@@ -2279,6 +2331,43 @@
                 renderJobLog(job);
             });
         });
+
+        jobsTableBody.querySelectorAll(".cancel-job-btn").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const jobId = button.getAttribute("data-job-id") || "";
+                if (!jobId) {
+                    return;
+                }
+
+                const job = findJob(jobId);
+                const status = String(job?.status || "");
+                if (!isJobCancelable(status)) {
+                    setStatus(jobsActionStatus, "Job " + jobId + " is already terminal (" + (status || "unknown") + ").", "");
+                    return;
+                }
+
+                const confirmed = window.confirm("Cancel job " + jobId + "?");
+                if (!confirmed) {
+                    return;
+                }
+
+                try {
+                    await apiFetch("/v1/admin/jobs/" + encodeURIComponent(jobId) + "/cancel", {
+                        method: "POST",
+                        body: JSON.stringify({ reason: "Canceled from admin UI" })
+                    });
+                    setStatus(jobsActionStatus, "Canceled job " + jobId + ".", "success");
+                    await loadDashboard();
+                } catch (error) {
+                    setStatus(jobsActionStatus, "Failed to cancel " + jobId + ": " + String(error.message || error), "error");
+                }
+            });
+        });
+    }
+
+    function isJobCancelable(statusValue) {
+        const status = String(statusValue || "").trim().toLowerCase();
+        return !["succeeded", "failed", "canceled", "rejected"].includes(status);
     }
 
     function selectAgent(agentId) {
@@ -3908,7 +3997,8 @@
                 correlation_id: correlationId,
                 payload: {
                     agent_self_update: {
-                        repo_ref: "main"
+                        repo_ref: "main",
+                        windows_install_mode: "source"
                     }
                 },
                 policy: {}

@@ -208,6 +208,7 @@ public sealed class AgentCoordinator
             AgentSelfUpdateRepoUrl = job.AgentSelfUpdateRepoUrl,
             AgentSelfUpdateRepoRef = job.AgentSelfUpdateRepoRef,
             AgentSelfUpdatePackageUrl = job.AgentSelfUpdatePackageUrl,
+            AgentSelfUpdateWindowsInstallMode = job.AgentSelfUpdateWindowsInstallMode,
             SoftwareInstallManager = job.SoftwareInstallManager,
             SoftwareInstallAllowUpdate = job.SoftwareInstallAllowUpdate,
             SoftwareInstallPackages = job.SoftwareInstallPackages.ToList(),

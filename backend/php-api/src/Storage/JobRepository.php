@@ -452,6 +452,23 @@ final class JobRepository
                     'repo_url' => trim((string) ($selfUpdate['repo_url'] ?? '')),
                     'repo_ref' => trim((string) ($selfUpdate['repo_ref'] ?? $selfUpdate['branch'] ?? '')),
                     'package_url' => trim((string) ($selfUpdate['package_url'] ?? $selfUpdate['windows_package_url'] ?? '')),
+                    'windows_install_mode' => in_array(
+                        strtolower(trim((string) (
+                            $selfUpdate['windows_install_mode']
+                            ?? $selfUpdate['install_mode']
+                            ?? $selfUpdate['mode']
+                            ?? 'source'
+                        ))),
+                        ['source', 'prebuilt'],
+                        true
+                    )
+                        ? strtolower(trim((string) (
+                            $selfUpdate['windows_install_mode']
+                            ?? $selfUpdate['install_mode']
+                            ?? $selfUpdate['mode']
+                            ?? 'source'
+                        )))
+                        : 'source',
                 ],
             ];
         }
