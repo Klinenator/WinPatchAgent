@@ -2,6 +2,13 @@
 
 Use this on the API host to pull the latest code and fix nginx/php-fpm readable/writable permissions.
 
+## Use the repo script (recommended)
+
+```bash
+cd /var/www/WinPatchAgent
+sudo ./scripts/pull_and_fix_permissions.sh
+```
+
 ## One-shot command
 
 ```bash
