@@ -1223,6 +1223,30 @@ try {
 } catch {
 }
 
+try {
+  if ([string]::IsNullOrWhiteSpace($user)) {
+    $logonUiPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI'
+    $logonUi = Get-ItemProperty -Path $logonUiPath -ErrorAction SilentlyContinue
+    if ($null -ne $logonUi) {
+      $lastLoggedOnUser = [string]$logonUi.LastLoggedOnUser
+      $lastLoggedOnSamUser = [string]$logonUi.LastLoggedOnSAMUser
+
+      if (-not [string]::IsNullOrWhiteSpace($lastLoggedOnSamUser)) {
+        $user = $lastLoggedOnSamUser
+      } elseif (-not [string]::IsNullOrWhiteSpace($lastLoggedOnUser)) {
+        $user = $lastLoggedOnUser
+      }
+    }
+  }
+} catch {
+}
+
+if (-not [string]::IsNullOrWhiteSpace($user)) {
+  if ($user.StartsWith('.\')) {
+    $user = $user.Substring(2)
+  }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($user)) {
   Write-Output $user
 }
