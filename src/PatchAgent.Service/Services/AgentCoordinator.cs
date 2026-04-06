@@ -214,7 +214,23 @@ public sealed class AgentCoordinator
             SoftwareInstallPackages = job.SoftwareInstallPackages.ToList(),
             SoftwareSearchManager = job.SoftwareSearchManager,
             SoftwareSearchQuery = job.SoftwareSearchQuery,
-            SoftwareSearchLimit = job.SoftwareSearchLimit
+            SoftwareSearchLimit = job.SoftwareSearchLimit,
+            EnsureLocalUserUsername = job.EnsureLocalUserUsername,
+            EnsureLocalUserPassword = job.EnsureLocalUserPassword,
+            EnsureLocalUserAddToAdministrators = job.EnsureLocalUserAddToAdministrators,
+            RotateLocalUserPasswordUsername = job.RotateLocalUserPasswordUsername,
+            RotateLocalUserPasswordLength = job.RotateLocalUserPasswordLength,
+            BaselineDisableBuiltinAdministrator = job.BaselineDisableBuiltinAdministrator,
+            BaselineDisableGuestAccount = job.BaselineDisableGuestAccount,
+            BaselineEnforceLockoutPolicy = job.BaselineEnforceLockoutPolicy,
+            BaselineLockoutThreshold = job.BaselineLockoutThreshold,
+            BaselineLockoutDurationMinutes = job.BaselineLockoutDurationMinutes,
+            BaselineEnforceScreenLock = job.BaselineEnforceScreenLock,
+            BaselineScreenLockTimeoutSeconds = job.BaselineScreenLockTimeoutSeconds,
+            BaselineEnforceUac = job.BaselineEnforceUac,
+            BaselineEnableFirewall = job.BaselineEnableFirewall,
+            BaselineEnableDefender = job.BaselineEnableDefender,
+            BaselineEnforceAuditPolicy = job.BaselineEnforceAuditPolicy
         };
 
         await _policyClient.AcknowledgeJobAsync(

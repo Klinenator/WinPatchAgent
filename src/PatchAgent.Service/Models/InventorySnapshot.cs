@@ -130,4 +130,25 @@ public sealed class WindowsSecuritySnapshot
     public string BitlockerSupport { get; set; } = "unknown";
 
     public string BitlockerOsVolumeProtection { get; set; } = "unknown";
+
+    // CC6.1 — account controls
+    public bool? BuiltinAdministratorDisabled { get; set; }
+
+    public bool? GuestAccountDisabled { get; set; }
+
+    public int? LockoutThreshold { get; set; }
+
+    public int? LockoutDurationMinutes { get; set; }
+
+    // CC6.1 — unattended workstation
+    public int? ScreenLockTimeoutSeconds { get; set; }
+
+    public string UacLevel { get; set; } = "unknown";
+
+    // CC7.2 — audit policy
+    public string AuditLogonEvents { get; set; } = "unknown";
+
+    public string AuditPrivilegeUse { get; set; } = "unknown";
+
+    public string AuditObjectAccess { get; set; } = "unknown";
 }

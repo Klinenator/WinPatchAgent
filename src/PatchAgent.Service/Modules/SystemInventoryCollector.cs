@@ -259,6 +259,15 @@ $result = [ordered]@{
   removable_storage_deny_all = $false
   bitlocker_support = 'unknown'
   bitlocker_os_volume_protection = 'unknown'
+  builtin_administrator_disabled = $null
+  guest_account_disabled = $null
+  lockout_threshold = $null
+  lockout_duration_minutes = $null
+  screen_lock_timeout_seconds = $null
+  uac_level = 'unknown'
+  audit_logon_events = 'unknown'
+  audit_privilege_use = 'unknown'
+  audit_object_access = 'unknown'
 }
 
 try {
@@ -383,6 +392,106 @@ try {
     } elseif ($result.bitlocker_support -eq 'unknown') {
       $result.bitlocker_support = 'not_supported'
       $result.bitlocker_os_volume_protection = 'not_supported'
+    }
+  }
+} catch {
+}
+
+try {
+  $adminUser = Get-LocalUser -Name 'Administrator' -ErrorAction SilentlyContinue
+  if ($null -ne $adminUser) {
+    $result.builtin_administrator_disabled = -not [bool]$adminUser.Enabled
+  }
+} catch {
+}
+
+try {
+  $guestUser = Get-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue
+  if ($null -ne $guestUser) {
+    $result.guest_account_disabled = -not [bool]$guestUser.Enabled
+  }
+} catch {
+}
+
+try {
+  $netAccounts = & net.exe accounts 2>$null | Out-String
+  if (-not [string]::IsNullOrWhiteSpace($netAccounts)) {
+    if ($netAccounts -match 'Lockout threshold:\s*(\d+|Never)') {
+      $val = $Matches[1].Trim()
+      if ($val -match '^\d+$') { $result.lockout_threshold = [int]$val }
+      elseif ($val -eq 'Never') { $result.lockout_threshold = 0 }
+    }
+    if ($netAccounts -match 'Lockout duration \(minutes\):\s*(\d+)') {
+      $result.lockout_duration_minutes = [int]$Matches[1].Trim()
+    }
+  }
+} catch {
+}
+
+try {
+  $screenTimeout = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop' -Name 'ScreenSaveTimeOut' -ErrorAction SilentlyContinue
+  if ($null -ne $screenTimeout -and $null -ne $screenTimeout.ScreenSaveTimeOut) {
+    $result.screen_lock_timeout_seconds = [int]$screenTimeout.ScreenSaveTimeOut
+  } else {
+    $userTimeout = Get-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'ScreenSaveTimeOut' -ErrorAction SilentlyContinue
+    if ($null -ne $userTimeout -and $null -ne $userTimeout.ScreenSaveTimeOut) {
+      $result.screen_lock_timeout_seconds = [int]$userTimeout.ScreenSaveTimeOut
+    }
+  }
+} catch {
+}
+
+try {
+  $uacKey = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
+  if ($null -ne $uacKey) {
+    $enableLua = $uacKey.EnableLUA
+    $consentBehavior = $uacKey.ConsentPromptBehaviorAdmin
+    if ($null -ne $enableLua -and [int]$enableLua -eq 0) {
+      $result.uac_level = 'disabled'
+    } elseif ($null -ne $consentBehavior) {
+      $result.uac_level = switch ([int]$consentBehavior) {
+        0 { 'elevate_without_prompt' }
+        1 { 'prompt_credentials_secure_desktop' }
+        2 { 'prompt_consent_secure_desktop' }
+        3 { 'prompt_credentials' }
+        4 { 'prompt_consent' }
+        5 { 'prompt_consent_non_windows' }
+        default { 'unknown' }
+      }
+    }
+  }
+} catch {
+}
+
+try {
+  $auditpol = & auditpol.exe /get /category:* /r 2>$null | ConvertFrom-Csv
+  if ($null -ne $auditpol) {
+    foreach ($entry in $auditpol) {
+      $subcat = [string]($entry.'Subcategory' ?? $entry.Subcategory ?? '')
+      $setting = [string]($entry.'Inclusion Setting' ?? $entry.'InclusionSetting' ?? '')
+      $settingNorm = $setting.Trim().ToLower()
+      $auditValue = switch ($settingNorm) {
+        'success and failure' { 'success_and_failure' }
+        'success' { 'success' }
+        'failure' { 'failure' }
+        'no auditing' { 'no_auditing' }
+        default { 'unknown' }
+      }
+      if ($subcat -match 'Logon|Account Logon') {
+        if ($result.audit_logon_events -eq 'unknown' -or $auditValue -eq 'success_and_failure') {
+          $result.audit_logon_events = $auditValue
+        }
+      }
+      if ($subcat -match 'Privilege Use|Sensitive Privilege') {
+        if ($result.audit_privilege_use -eq 'unknown' -or $auditValue -eq 'success_and_failure') {
+          $result.audit_privilege_use = $auditValue
+        }
+      }
+      if ($subcat -match 'Object Access|File System|Registry') {
+        if ($result.audit_object_access -eq 'unknown' -or $auditValue -eq 'success_and_failure') {
+          $result.audit_object_access = $auditValue
+        }
+      }
     }
   }
 } catch {
@@ -875,6 +984,15 @@ $items |
             snapshot.RemovableStorageDenyAll = ReadBoolean(root, "removable_storage_deny_all") ?? false;
             snapshot.BitlockerSupport = NormalizeBitlockerSupport(ReadString(root, "bitlocker_support"));
             snapshot.BitlockerOsVolumeProtection = NormalizeBitlockerProtection(ReadString(root, "bitlocker_os_volume_protection"));
+            snapshot.BuiltinAdministratorDisabled = ReadBoolean(root, "builtin_administrator_disabled");
+            snapshot.GuestAccountDisabled = ReadBoolean(root, "guest_account_disabled");
+            snapshot.LockoutThreshold = ReadInt32(root, "lockout_threshold");
+            snapshot.LockoutDurationMinutes = ReadInt32(root, "lockout_duration_minutes");
+            snapshot.ScreenLockTimeoutSeconds = ReadInt32(root, "screen_lock_timeout_seconds");
+            snapshot.UacLevel = NormalizeUacLevel(ReadString(root, "uac_level"));
+            snapshot.AuditLogonEvents = NormalizeAuditSetting(ReadString(root, "audit_logon_events"));
+            snapshot.AuditPrivilegeUse = NormalizeAuditSetting(ReadString(root, "audit_privilege_use"));
+            snapshot.AuditObjectAccess = NormalizeAuditSetting(ReadString(root, "audit_object_access"));
         }
         catch
         {
@@ -1088,6 +1206,61 @@ $items |
             "off" => "off",
             "suspended" => "suspended",
             "not_supported" => "not_supported",
+            _ => "unknown"
+        };
+    }
+
+    private static int? ReadInt32(JsonElement item, string propertyName)
+    {
+        foreach (var property in item.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt32(out var intValue))
+            {
+                return intValue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.String
+                && int.TryParse(property.Value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeUacLevel(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "disabled" => "disabled",
+            "elevate_without_prompt" => "elevate_without_prompt",
+            "prompt_credentials_secure_desktop" => "prompt_credentials_secure_desktop",
+            "prompt_consent_secure_desktop" => "prompt_consent_secure_desktop",
+            "prompt_credentials" => "prompt_credentials",
+            "prompt_consent" => "prompt_consent",
+            "prompt_consent_non_windows" => "prompt_consent_non_windows",
+            _ => "unknown"
+        };
+    }
+
+    private static string NormalizeAuditSetting(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "success_and_failure" => "success_and_failure",
+            "success" => "success",
+            "failure" => "failure",
+            "no_auditing" => "no_auditing",
             _ => "unknown"
         };
     }

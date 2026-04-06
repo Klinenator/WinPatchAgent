@@ -65,4 +65,36 @@ public sealed class JobExecutionState
     public string SoftwareSearchQuery { get; set; } = string.Empty;
 
     public int SoftwareSearchLimit { get; set; } = 25;
+
+    public string EnsureLocalUserUsername { get; set; } = string.Empty;
+
+    public string EnsureLocalUserPassword { get; set; } = string.Empty;
+
+    public bool EnsureLocalUserAddToAdministrators { get; set; } = true;
+
+    public string RotateLocalUserPasswordUsername { get; set; } = string.Empty;
+
+    public int RotateLocalUserPasswordLength { get; set; } = 20;
+
+    public bool BaselineDisableBuiltinAdministrator { get; set; } = true;
+
+    public bool BaselineDisableGuestAccount { get; set; } = true;
+
+    public bool BaselineEnforceLockoutPolicy { get; set; } = true;
+
+    public int BaselineLockoutThreshold { get; set; } = 5;
+
+    public int BaselineLockoutDurationMinutes { get; set; } = 15;
+
+    public bool BaselineEnforceScreenLock { get; set; } = true;
+
+    public int BaselineScreenLockTimeoutSeconds { get; set; } = 900;
+
+    public bool BaselineEnforceUac { get; set; } = true;
+
+    public bool BaselineEnableFirewall { get; set; } = true;
+
+    public bool BaselineEnableDefender { get; set; } = true;
+
+    public bool BaselineEnforceAuditPolicy { get; set; } = true;
 }

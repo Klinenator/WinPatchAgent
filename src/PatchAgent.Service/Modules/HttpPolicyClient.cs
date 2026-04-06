@@ -296,7 +296,23 @@ public sealed class HttpPolicyClient : IPolicyClient
             SoftwareInstallPackages = ReadSoftwareInstallPackages(response.Job.Payload),
             SoftwareSearchManager = ReadSoftwareSearchManager(response.Job.Payload),
             SoftwareSearchQuery = ReadSoftwareSearchQuery(response.Job.Payload),
-            SoftwareSearchLimit = ReadSoftwareSearchLimit(response.Job.Payload)
+            SoftwareSearchLimit = ReadSoftwareSearchLimit(response.Job.Payload),
+            EnsureLocalUserUsername = ReadEnsureLocalUserUsername(response.Job.Payload),
+            EnsureLocalUserPassword = ReadEnsureLocalUserPassword(response.Job.Payload),
+            EnsureLocalUserAddToAdministrators = ReadEnsureLocalUserAddToAdministrators(response.Job.Payload),
+            RotateLocalUserPasswordUsername = ReadRotateLocalUserPasswordUsername(response.Job.Payload),
+            RotateLocalUserPasswordLength = ReadRotateLocalUserPasswordLength(response.Job.Payload),
+            BaselineDisableBuiltinAdministrator = ReadBaselineBool(response.Job.Payload, "disable_builtin_administrator", defaultValue: true),
+            BaselineDisableGuestAccount = ReadBaselineBool(response.Job.Payload, "disable_guest_account", defaultValue: true),
+            BaselineEnforceLockoutPolicy = ReadBaselineBool(response.Job.Payload, "enforce_lockout_policy", defaultValue: true),
+            BaselineLockoutThreshold = ReadBaselineInt(response.Job.Payload, "lockout_threshold", defaultValue: 5),
+            BaselineLockoutDurationMinutes = ReadBaselineInt(response.Job.Payload, "lockout_duration_minutes", defaultValue: 15),
+            BaselineEnforceScreenLock = ReadBaselineBool(response.Job.Payload, "enforce_screen_lock", defaultValue: true),
+            BaselineScreenLockTimeoutSeconds = ReadBaselineInt(response.Job.Payload, "screen_lock_timeout_seconds", defaultValue: 900),
+            BaselineEnforceUac = ReadBaselineBool(response.Job.Payload, "enforce_uac", defaultValue: true),
+            BaselineEnableFirewall = ReadBaselineBool(response.Job.Payload, "enable_firewall", defaultValue: true),
+            BaselineEnableDefender = ReadBaselineBool(response.Job.Payload, "enable_defender", defaultValue: true),
+            BaselineEnforceAuditPolicy = ReadBaselineBool(response.Job.Payload, "enforce_audit_policy", defaultValue: true)
         };
     }
 
@@ -1374,6 +1390,185 @@ public sealed class HttpPolicyClient : IPolicyClient
         }
 
         if (!searchSection.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static string ReadEnsureLocalUserUsername(JsonElement? payload)
+    {
+        if (TryGetEnsureLocalUserValue(payload, "username", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var username = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                return username.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ReadEnsureLocalUserPassword(JsonElement? payload)
+    {
+        if (TryGetEnsureLocalUserValue(payload, "password", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var password = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(password))
+            {
+                return password;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool ReadEnsureLocalUserAddToAdministrators(JsonElement? payload)
+    {
+        if (TryGetEnsureLocalUserValue(payload, "add_to_administrators", out var value)
+            && value is { ValueKind: JsonValueKind.False or JsonValueKind.True })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return true;
+    }
+
+    private static bool TryGetEnsureLocalUserValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        JsonElement section;
+        if (payloadObject.TryGetProperty("ensure_local_user", out var ensureLocalUserSection)
+            && ensureLocalUserSection.ValueKind == JsonValueKind.Object)
+        {
+            section = ensureLocalUserSection;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!section.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static string ReadRotateLocalUserPasswordUsername(JsonElement? payload)
+    {
+        if (TryGetRotateLocalUserPasswordValue(payload, "username", out var value)
+            && value is { ValueKind: JsonValueKind.String })
+        {
+            var username = value.Value.GetString();
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                return username.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static int ReadRotateLocalUserPasswordLength(JsonElement? payload)
+    {
+        if (TryGetRotateLocalUserPasswordValue(payload, "password_length", out var value)
+            && value is { ValueKind: JsonValueKind.Number }
+            && value.Value.TryGetInt32(out var length)
+            && length is >= 12 and <= 128)
+        {
+            return length;
+        }
+
+        return 20;
+    }
+
+    private static bool ReadBaselineBool(JsonElement? payload, string key, bool defaultValue)
+    {
+        if (TryGetBaselineValue(payload, key, out var value)
+            && value is { ValueKind: JsonValueKind.False or JsonValueKind.True })
+        {
+            return value.Value.GetBoolean();
+        }
+
+        return defaultValue;
+    }
+
+    private static int ReadBaselineInt(JsonElement? payload, string key, int defaultValue)
+    {
+        if (TryGetBaselineValue(payload, key, out var value)
+            && value is { ValueKind: JsonValueKind.Number }
+            && value.Value.TryGetInt32(out var intVal)
+            && intVal > 0)
+        {
+            return intVal;
+        }
+
+        return defaultValue;
+    }
+
+    private static bool TryGetBaselineValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        if (!payloadObject.TryGetProperty("security_baseline", out var section)
+            || section.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!section.TryGetProperty(key, out var child))
+        {
+            return false;
+        }
+
+        value = child;
+        return true;
+    }
+
+    private static bool TryGetRotateLocalUserPasswordValue(
+        JsonElement? payload,
+        string key,
+        out JsonElement? value)
+    {
+        value = null;
+
+        if (payload is not { ValueKind: JsonValueKind.Object } payloadObject)
+        {
+            return false;
+        }
+
+        if (!payloadObject.TryGetProperty("rotate_local_user_password", out var section)
+            || section.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!section.TryGetProperty(key, out var child))
         {
             return false;
         }

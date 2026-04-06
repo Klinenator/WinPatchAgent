@@ -37,6 +37,9 @@ builder.Services.AddSingleton<MacSoftwareUpdateJobExecutor>();
 builder.Services.AddSingleton<MacShellScriptJobExecutor>();
 builder.Services.AddSingleton<SoftwareInstallJobExecutor>();
 builder.Services.AddSingleton<SoftwareSearchJobExecutor>();
+builder.Services.AddSingleton<WindowsEnsureLocalUserJobExecutor>();
+builder.Services.AddSingleton<WindowsRotateLocalUserPasswordJobExecutor>();
+builder.Services.AddSingleton<WindowsSecurityBaselineJobExecutor>();
 builder.Services.AddSingleton<IJobExecutor, DispatchingJobExecutor>();
 builder.Services.AddHttpClient<IPolicyClient, HttpPolicyClient>((serviceProvider, client) =>
 {

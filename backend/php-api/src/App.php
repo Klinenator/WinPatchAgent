@@ -1531,12 +1531,27 @@ final class App
                     'removable_storage_deny_all' => null,
                     'bitlocker_support' => 'not_supported',
                     'bitlocker_os_volume_protection' => 'not_supported',
+                    'builtin_administrator_disabled' => null,
+                    'guest_account_disabled' => null,
+                    'lockout_threshold' => null,
+                    'lockout_duration_minutes' => null,
+                    'screen_lock_timeout_seconds' => null,
+                    'uac_level' => 'unknown',
+                    'audit_logon_events' => 'unknown',
+                    'audit_privilege_use' => 'unknown',
+                    'audit_object_access' => 'unknown',
                     'controls' => [
                         'defender_service' => ['status' => 'na', 'detail' => 'Windows-only control.'],
                         'defender_realtime' => ['status' => 'na', 'detail' => 'Windows-only control.'],
                         'firewall_profiles' => ['status' => 'na', 'detail' => 'Windows-only control.'],
                         'removable_storage_policy' => ['status' => 'na', 'detail' => 'Windows-only control.'],
                         'bitlocker_os_volume' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'builtin_administrator' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'guest_account' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'lockout_policy' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'screen_lock' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'uac_level' => ['status' => 'na', 'detail' => 'Windows-only control.'],
+                        'audit_policy' => ['status' => 'na', 'detail' => 'Windows-only control.'],
                     ],
                 ]);
                 continue;
@@ -1580,6 +1595,15 @@ final class App
                 'removable_storage_deny_all' => $security['removable_storage_deny_all'] ?? null,
                 'bitlocker_support' => (string) ($security['bitlocker_support'] ?? 'unknown'),
                 'bitlocker_os_volume_protection' => (string) ($security['bitlocker_os_volume_protection'] ?? 'unknown'),
+                'builtin_administrator_disabled' => $security['builtin_administrator_disabled'] ?? null,
+                'guest_account_disabled' => $security['guest_account_disabled'] ?? null,
+                'lockout_threshold' => $security['lockout_threshold'] ?? null,
+                'lockout_duration_minutes' => $security['lockout_duration_minutes'] ?? null,
+                'screen_lock_timeout_seconds' => $security['screen_lock_timeout_seconds'] ?? null,
+                'uac_level' => (string) ($security['uac_level'] ?? 'unknown'),
+                'audit_logon_events' => (string) ($security['audit_logon_events'] ?? 'unknown'),
+                'audit_privilege_use' => (string) ($security['audit_privilege_use'] ?? 'unknown'),
+                'audit_object_access' => (string) ($security['audit_object_access'] ?? 'unknown'),
                 'controls' => is_array($evaluation['controls'] ?? null) ? $evaluation['controls'] : [],
             ]);
         }
@@ -1601,11 +1625,17 @@ final class App
             'overall_status' => $overallStatus,
             'counts' => $counts,
             'controls_catalog' => [
-                ['id' => 'defender_service', 'description' => 'Windows Defender service present and running'],
-                ['id' => 'defender_realtime', 'description' => 'Defender real-time protection enabled'],
-                ['id' => 'firewall_profiles', 'description' => 'Windows firewall enabled on Domain/Private/Public'],
-                ['id' => 'removable_storage_policy', 'description' => 'Removable storage deny policy enforced'],
-                ['id' => 'bitlocker_os_volume', 'description' => 'BitLocker OS volume protection status'],
+                ['id' => 'defender_service', 'soc2_cc' => 'CC6.1', 'description' => 'Windows Defender service present and running'],
+                ['id' => 'defender_realtime', 'soc2_cc' => 'CC6.1', 'description' => 'Defender real-time protection enabled'],
+                ['id' => 'firewall_profiles', 'soc2_cc' => 'CC6.1', 'description' => 'Windows firewall enabled on Domain/Private/Public'],
+                ['id' => 'removable_storage_policy', 'soc2_cc' => 'CC6.1', 'description' => 'Removable storage deny policy enforced'],
+                ['id' => 'bitlocker_os_volume', 'soc2_cc' => 'CC6.1', 'description' => 'BitLocker OS volume protection status'],
+                ['id' => 'builtin_administrator', 'soc2_cc' => 'CC6.3', 'description' => 'Built-in Administrator account (RID-500) disabled'],
+                ['id' => 'guest_account', 'soc2_cc' => 'CC6.1', 'description' => 'Guest account disabled'],
+                ['id' => 'lockout_policy', 'soc2_cc' => 'CC6.1', 'description' => 'Account lockout threshold and duration configured'],
+                ['id' => 'screen_lock', 'soc2_cc' => 'CC6.1', 'description' => 'Screen lock idle timeout configured (≤15 min)'],
+                ['id' => 'uac_level', 'soc2_cc' => 'CC6.1', 'description' => 'UAC configured to prompt on secure desktop'],
+                ['id' => 'audit_policy', 'soc2_cc' => 'CC7.2', 'description' => 'Audit policy: logon events, privilege use, object access'],
             ],
             'agents' => $rows,
         ];
@@ -1732,6 +1762,103 @@ final class App
             $controls['bitlocker_os_volume'] = ['status' => 'warn', 'detail' => 'OS volume BitLocker protection status is unknown.'];
         }
 
+        // CC6.3 — built-in Administrator account disabled
+        $builtinAdminDisabled = array_key_exists('builtin_administrator_disabled', $security) && is_bool($security['builtin_administrator_disabled'])
+            ? $security['builtin_administrator_disabled']
+            : null;
+        if ($builtinAdminDisabled === true) {
+            $controls['builtin_administrator'] = ['status' => 'pass', 'detail' => 'Built-in Administrator account is disabled.'];
+        } elseif ($builtinAdminDisabled === false) {
+            $controls['builtin_administrator'] = ['status' => 'fail', 'detail' => 'Built-in Administrator account is enabled.'];
+        } else {
+            $controls['builtin_administrator'] = ['status' => 'warn', 'detail' => 'Built-in Administrator account status is unknown.'];
+        }
+
+        // CC6.1 — Guest account disabled
+        $guestDisabled = array_key_exists('guest_account_disabled', $security) && is_bool($security['guest_account_disabled'])
+            ? $security['guest_account_disabled']
+            : null;
+        if ($guestDisabled === true) {
+            $controls['guest_account'] = ['status' => 'pass', 'detail' => 'Guest account is disabled.'];
+        } elseif ($guestDisabled === false) {
+            $controls['guest_account'] = ['status' => 'fail', 'detail' => 'Guest account is enabled.'];
+        } else {
+            $controls['guest_account'] = ['status' => 'warn', 'detail' => 'Guest account status is unknown.'];
+        }
+
+        // CC6.1 — Account lockout policy
+        $lockoutThreshold = array_key_exists('lockout_threshold', $security) && is_int($security['lockout_threshold'])
+            ? $security['lockout_threshold']
+            : null;
+        $lockoutDuration = array_key_exists('lockout_duration_minutes', $security) && is_int($security['lockout_duration_minutes'])
+            ? $security['lockout_duration_minutes']
+            : null;
+        if ($lockoutThreshold === null) {
+            $controls['lockout_policy'] = ['status' => 'warn', 'detail' => 'Lockout policy could not be determined.'];
+        } elseif ($lockoutThreshold === 0) {
+            $controls['lockout_policy'] = ['status' => 'fail', 'detail' => 'Account lockout is disabled (threshold=Never).'];
+        } elseif ($lockoutThreshold <= 10) {
+            $controls['lockout_policy'] = [
+                'status' => 'pass',
+                'detail' => sprintf('Lockout threshold=%d attempts, duration=%s min.', $lockoutThreshold, $lockoutDuration ?? 'unknown'),
+            ];
+        } else {
+            $controls['lockout_policy'] = [
+                'status' => 'warn',
+                'detail' => sprintf('Lockout threshold=%d is high (recommend ≤10). Duration=%s min.', $lockoutThreshold, $lockoutDuration ?? 'unknown'),
+            ];
+        }
+
+        // CC6.1 — Screen lock / idle timeout
+        $screenLockTimeout = array_key_exists('screen_lock_timeout_seconds', $security) && is_int($security['screen_lock_timeout_seconds'])
+            ? $security['screen_lock_timeout_seconds']
+            : null;
+        if ($screenLockTimeout === null) {
+            $controls['screen_lock'] = ['status' => 'warn', 'detail' => 'Screen lock timeout could not be determined.'];
+        } elseif ($screenLockTimeout > 0 && $screenLockTimeout <= 900) {
+            $controls['screen_lock'] = ['status' => 'pass', 'detail' => sprintf('Screen lock timeout is %d seconds (%d min).', $screenLockTimeout, (int) ceil($screenLockTimeout / 60))];
+        } elseif ($screenLockTimeout > 900) {
+            $controls['screen_lock'] = ['status' => 'warn', 'detail' => sprintf('Screen lock timeout is %d seconds — recommend ≤900s (15 min).', $screenLockTimeout)];
+        } else {
+            $controls['screen_lock'] = ['status' => 'fail', 'detail' => 'Screen lock is not configured.'];
+        }
+
+        // CC6.1 — UAC level
+        $uacLevel = strtolower(trim((string) ($security['uac_level'] ?? 'unknown')));
+        if (in_array($uacLevel, ['prompt_consent_secure_desktop', 'prompt_credentials_secure_desktop'], true)) {
+            $controls['uac_level'] = ['status' => 'pass', 'detail' => 'UAC level: ' . $uacLevel . '.'];
+        } elseif ($uacLevel === 'disabled') {
+            $controls['uac_level'] = ['status' => 'fail', 'detail' => 'UAC is disabled.'];
+        } elseif ($uacLevel === 'elevate_without_prompt') {
+            $controls['uac_level'] = ['status' => 'fail', 'detail' => 'UAC is set to elevate without prompting — no protection.'];
+        } elseif (in_array($uacLevel, ['prompt_credentials', 'prompt_consent', 'prompt_consent_non_windows'], true)) {
+            $controls['uac_level'] = ['status' => 'warn', 'detail' => 'UAC level: ' . $uacLevel . ' — recommend prompt on secure desktop.'];
+        } else {
+            $controls['uac_level'] = ['status' => 'warn', 'detail' => 'UAC level could not be determined.'];
+        }
+
+        // CC7.2 — Audit policy
+        $auditLogon = strtolower(trim((string) ($security['audit_logon_events'] ?? 'unknown')));
+        $auditPrivilege = strtolower(trim((string) ($security['audit_privilege_use'] ?? 'unknown')));
+        $auditObject = strtolower(trim((string) ($security['audit_object_access'] ?? 'unknown')));
+        $auditParts = [
+            'logon=' . $auditLogon,
+            'privilege=' . $auditPrivilege,
+            'object=' . $auditObject,
+        ];
+        $auditDetail = implode(', ', $auditParts);
+        $requiredAudit = ['success_and_failure', 'success'];
+        $auditLogonOk = in_array($auditLogon, $requiredAudit, true);
+        $auditPrivilegeOk = in_array($auditPrivilege, $requiredAudit, true);
+        $auditObjectOk = in_array($auditObject, $requiredAudit, true);
+        if ($auditLogon === 'unknown' && $auditPrivilege === 'unknown' && $auditObject === 'unknown') {
+            $controls['audit_policy'] = ['status' => 'warn', 'detail' => 'Audit policy could not be determined.'];
+        } elseif ($auditLogonOk && $auditPrivilegeOk && $auditObjectOk) {
+            $controls['audit_policy'] = ['status' => 'pass', 'detail' => 'Audit policy: ' . $auditDetail . '.'];
+        } else {
+            $controls['audit_policy'] = ['status' => 'fail', 'detail' => 'Audit policy insufficient: ' . $auditDetail . '.'];
+        }
+
         $overallStatus = 'unknown';
         $actionableStatuses = array_values(array_filter(
             array_map(
@@ -1799,6 +1926,27 @@ final class App
             'control_removable_storage_policy_detail',
             'control_bitlocker_os_volume_status',
             'control_bitlocker_os_volume_detail',
+            'builtin_administrator_disabled',
+            'guest_account_disabled',
+            'lockout_threshold',
+            'lockout_duration_minutes',
+            'screen_lock_timeout_seconds',
+            'uac_level',
+            'audit_logon_events',
+            'audit_privilege_use',
+            'audit_object_access',
+            'control_builtin_administrator_status',
+            'control_builtin_administrator_detail',
+            'control_guest_account_status',
+            'control_guest_account_detail',
+            'control_lockout_policy_status',
+            'control_lockout_policy_detail',
+            'control_screen_lock_status',
+            'control_screen_lock_detail',
+            'control_uac_level_status',
+            'control_uac_level_detail',
+            'control_audit_policy_status',
+            'control_audit_policy_detail',
         ]);
 
         $evidenceId = (string) ($report['evidence_id'] ?? '');
@@ -1817,6 +1965,12 @@ final class App
             $firewallControl = is_array($controls['firewall_profiles'] ?? null) ? $controls['firewall_profiles'] : [];
             $removableControl = is_array($controls['removable_storage_policy'] ?? null) ? $controls['removable_storage_policy'] : [];
             $bitlockerControl = is_array($controls['bitlocker_os_volume'] ?? null) ? $controls['bitlocker_os_volume'] : [];
+            $builtinAdminControl = is_array($controls['builtin_administrator'] ?? null) ? $controls['builtin_administrator'] : [];
+            $guestControl = is_array($controls['guest_account'] ?? null) ? $controls['guest_account'] : [];
+            $lockoutControl = is_array($controls['lockout_policy'] ?? null) ? $controls['lockout_policy'] : [];
+            $screenLockControl = is_array($controls['screen_lock'] ?? null) ? $controls['screen_lock'] : [];
+            $uacControl = is_array($controls['uac_level'] ?? null) ? $controls['uac_level'] : [];
+            $auditControl = is_array($controls['audit_policy'] ?? null) ? $controls['audit_policy'] : [];
 
             fputcsv($handle, [
                 $evidenceId,
@@ -1855,6 +2009,27 @@ final class App
                 (string) ($removableControl['detail'] ?? ''),
                 (string) ($bitlockerControl['status'] ?? ''),
                 (string) ($bitlockerControl['detail'] ?? ''),
+                $this->formatCsvBool($row['builtin_administrator_disabled'] ?? null),
+                $this->formatCsvBool($row['guest_account_disabled'] ?? null),
+                $row['lockout_threshold'] !== null ? (string) $row['lockout_threshold'] : '',
+                $row['lockout_duration_minutes'] !== null ? (string) $row['lockout_duration_minutes'] : '',
+                $row['screen_lock_timeout_seconds'] !== null ? (string) $row['screen_lock_timeout_seconds'] : '',
+                (string) ($row['uac_level'] ?? ''),
+                (string) ($row['audit_logon_events'] ?? ''),
+                (string) ($row['audit_privilege_use'] ?? ''),
+                (string) ($row['audit_object_access'] ?? ''),
+                (string) ($builtinAdminControl['status'] ?? ''),
+                (string) ($builtinAdminControl['detail'] ?? ''),
+                (string) ($guestControl['status'] ?? ''),
+                (string) ($guestControl['detail'] ?? ''),
+                (string) ($lockoutControl['status'] ?? ''),
+                (string) ($lockoutControl['detail'] ?? ''),
+                (string) ($screenLockControl['status'] ?? ''),
+                (string) ($screenLockControl['detail'] ?? ''),
+                (string) ($uacControl['status'] ?? ''),
+                (string) ($uacControl['detail'] ?? ''),
+                (string) ($auditControl['status'] ?? ''),
+                (string) ($auditControl['detail'] ?? ''),
             ]);
         }
 
@@ -1880,11 +2055,17 @@ final class App
         $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
         $agents = is_array($report['agents'] ?? null) ? $report['agents'] : [];
         $controlColumns = [
-            'defender_service' => 'Defender Service',
+            'defender_service' => 'Defender Svc',
             'defender_realtime' => 'Realtime',
             'firewall_profiles' => 'Firewall',
-            'removable_storage_policy' => 'Removable Storage',
+            'removable_storage_policy' => 'Removable',
             'bitlocker_os_volume' => 'BitLocker',
+            'builtin_administrator' => 'Admin Acct',
+            'guest_account' => 'Guest Acct',
+            'lockout_policy' => 'Lockout',
+            'screen_lock' => 'Screen Lock',
+            'uac_level' => 'UAC',
+            'audit_policy' => 'Audit Policy',
         ];
 
         $rowsHtml = '';
@@ -1922,7 +2103,7 @@ final class App
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="12">No agents found in the evidence snapshot.</td></tr>';
+            $rowsHtml = '<tr><td colspan="18">No agents found in the evidence snapshot.</td></tr>';
         }
 
         $overallStatus = strtolower(trim((string) ($report['overall_status'] ?? 'unknown')));
@@ -1996,11 +2177,17 @@ final class App
                     <th>Baseline</th>
                     <th>Last Seen</th>
                     <th>Inventory At</th>
-                    <th>Defender Service</th>
+                    <th>Defender Svc</th>
                     <th>Realtime</th>
                     <th>Firewall</th>
-                    <th>Removable Storage</th>
+                    <th>Removable</th>
                     <th>BitLocker</th>
+                    <th>Admin Acct</th>
+                    <th>Guest Acct</th>
+                    <th>Lockout</th>
+                    <th>Screen Lock</th>
+                    <th>UAC</th>
+                    <th>Audit Policy</th>
                 </tr>
             </thead>
             <tbody>' . $rowsHtml . '</tbody>
@@ -4216,7 +4403,105 @@ BASH;
             ),
             'bitlocker_support' => $bitlockerSupport,
             'bitlocker_os_volume_protection' => $bitlockerOsVolumeProtection,
+            'builtin_administrator_disabled' => $this->nullableBool(
+                $windowsSecurity['builtin_administrator_disabled']
+                ?? $windowsSecurity['builtinAdministratorDisabled']
+                ?? $windowsSecurity['BuiltinAdministratorDisabled']
+                ?? null
+            ),
+            'guest_account_disabled' => $this->nullableBool(
+                $windowsSecurity['guest_account_disabled']
+                ?? $windowsSecurity['guestAccountDisabled']
+                ?? $windowsSecurity['GuestAccountDisabled']
+                ?? null
+            ),
+            'lockout_threshold' => $this->nullableInt(
+                $windowsSecurity['lockout_threshold']
+                ?? $windowsSecurity['lockoutThreshold']
+                ?? $windowsSecurity['LockoutThreshold']
+                ?? null
+            ),
+            'lockout_duration_minutes' => $this->nullableInt(
+                $windowsSecurity['lockout_duration_minutes']
+                ?? $windowsSecurity['lockoutDurationMinutes']
+                ?? $windowsSecurity['LockoutDurationMinutes']
+                ?? null
+            ),
+            'screen_lock_timeout_seconds' => $this->nullableInt(
+                $windowsSecurity['screen_lock_timeout_seconds']
+                ?? $windowsSecurity['screenLockTimeoutSeconds']
+                ?? $windowsSecurity['ScreenLockTimeoutSeconds']
+                ?? null
+            ),
+            'uac_level' => $this->normalizeUacLevel((string) (
+                $windowsSecurity['uac_level']
+                ?? $windowsSecurity['uacLevel']
+                ?? $windowsSecurity['UacLevel']
+                ?? 'unknown'
+            )),
+            'audit_logon_events' => $this->normalizeAuditSetting((string) (
+                $windowsSecurity['audit_logon_events']
+                ?? $windowsSecurity['auditLogonEvents']
+                ?? $windowsSecurity['AuditLogonEvents']
+                ?? 'unknown'
+            )),
+            'audit_privilege_use' => $this->normalizeAuditSetting((string) (
+                $windowsSecurity['audit_privilege_use']
+                ?? $windowsSecurity['auditPrivilegeUse']
+                ?? $windowsSecurity['AuditPrivilegeUse']
+                ?? 'unknown'
+            )),
+            'audit_object_access' => $this->normalizeAuditSetting((string) (
+                $windowsSecurity['audit_object_access']
+                ?? $windowsSecurity['auditObjectAccess']
+                ?? $windowsSecurity['AuditObjectAccess']
+                ?? 'unknown'
+            )),
         ];
+    }
+
+    private function nullableBool(mixed $value): ?bool
+    {
+        if ($value === null) {
+            return null;
+        }
+        return $this->toBool($value);
+    }
+
+    private function nullableInt(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+        return null;
+    }
+
+    private function normalizeUacLevel(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        return in_array($normalized, [
+            'disabled',
+            'elevate_without_prompt',
+            'prompt_credentials_secure_desktop',
+            'prompt_consent_secure_desktop',
+            'prompt_credentials',
+            'prompt_consent',
+            'prompt_consent_non_windows',
+        ], true) ? $normalized : 'unknown';
+    }
+
+    private function normalizeAuditSetting(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        return in_array($normalized, ['success_and_failure', 'success', 'failure', 'no_auditing'], true)
+            ? $normalized
+            : 'unknown';
     }
 
     private function normalizeLinuxInventory(array $linux): array

@@ -54,4 +54,10 @@ public sealed class AgentOptions
     public bool AptRunUpdateBeforeInstall { get; set; } = true;
 
     public int AptCommandTimeoutSeconds { get; set; } = 1800;
+
+    public bool EnableWindowsEnsureLocalUserExecution { get; set; } = true;
+
+    public bool EnableWindowsRotateLocalUserPasswordExecution { get; set; } = true;
+
+    public bool EnableWindowsSecurityBaselineExecution { get; set; } = true;
 }

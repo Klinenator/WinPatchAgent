@@ -13,6 +13,9 @@ public sealed class DispatchingJobExecutor : IJobExecutor
     private readonly MacShellScriptJobExecutor _macShellScriptJobExecutor;
     private readonly SoftwareInstallJobExecutor _softwareInstallJobExecutor;
     private readonly SoftwareSearchJobExecutor _softwareSearchJobExecutor;
+    private readonly WindowsEnsureLocalUserJobExecutor _windowsEnsureLocalUserJobExecutor;
+    private readonly WindowsRotateLocalUserPasswordJobExecutor _windowsRotateLocalUserPasswordJobExecutor;
+    private readonly WindowsSecurityBaselineJobExecutor _windowsSecurityBaselineJobExecutor;
     private readonly StubJobExecutor _stubJobExecutor;
 
     public DispatchingJobExecutor(
@@ -24,6 +27,9 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         MacShellScriptJobExecutor macShellScriptJobExecutor,
         SoftwareInstallJobExecutor softwareInstallJobExecutor,
         SoftwareSearchJobExecutor softwareSearchJobExecutor,
+        WindowsEnsureLocalUserJobExecutor windowsEnsureLocalUserJobExecutor,
+        WindowsRotateLocalUserPasswordJobExecutor windowsRotateLocalUserPasswordJobExecutor,
+        WindowsSecurityBaselineJobExecutor windowsSecurityBaselineJobExecutor,
         StubJobExecutor stubJobExecutor)
     {
         _agentSelfUpdateJobExecutor = agentSelfUpdateJobExecutor;
@@ -34,6 +40,9 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         _macShellScriptJobExecutor = macShellScriptJobExecutor;
         _softwareInstallJobExecutor = softwareInstallJobExecutor;
         _softwareSearchJobExecutor = softwareSearchJobExecutor;
+        _windowsEnsureLocalUserJobExecutor = windowsEnsureLocalUserJobExecutor;
+        _windowsRotateLocalUserPasswordJobExecutor = windowsRotateLocalUserPasswordJobExecutor;
+        _windowsSecurityBaselineJobExecutor = windowsSecurityBaselineJobExecutor;
         _stubJobExecutor = stubJobExecutor;
     }
 
@@ -75,6 +84,21 @@ public sealed class DispatchingJobExecutor : IJobExecutor
         }
 
         if (await _softwareSearchJobExecutor.TryAdvanceAsync(state, cancellationToken))
+        {
+            return true;
+        }
+
+        if (await _windowsEnsureLocalUserJobExecutor.TryAdvanceAsync(state, cancellationToken))
+        {
+            return true;
+        }
+
+        if (await _windowsRotateLocalUserPasswordJobExecutor.TryAdvanceAsync(state, cancellationToken))
+        {
+            return true;
+        }
+
+        if (await _windowsSecurityBaselineJobExecutor.TryAdvanceAsync(state, cancellationToken))
         {
             return true;
         }
