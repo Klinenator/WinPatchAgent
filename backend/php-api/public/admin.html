@@ -327,10 +327,49 @@
             background: rgba(255, 255, 255, 0.16);
         }
 
+        .view-tabs {
+            margin-top: 12px;
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 6px;
+            box-shadow: var(--shadow);
+        }
+
+        .view-tab {
+            border: 0;
+            background: transparent;
+            color: #365066;
+            border-radius: 999px;
+            padding: 9px 15px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .view-tab.active {
+            background: linear-gradient(180deg, #3a97eb 0%, #2d82da 100%);
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(45, 130, 218, 0.22);
+        }
+
+        .console-surface {
+            display: none;
+            margin-top: 12px;
+        }
+
+        .console-surface.active {
+            display: block;
+            animation: rise 0.32s ease;
+        }
+
         .metrics {
             margin-top: 12px;
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 10px;
         }
 
@@ -358,12 +397,91 @@
             line-height: 1.05;
         }
 
+        .metric-sub {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
         .main-grid {
-            margin-top: 12px;
             display: grid;
             grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
             gap: 12px;
             align-items: start;
+        }
+
+        .overview-grid {
+            display: grid;
+            grid-template-columns: minmax(320px, 1.2fr) minmax(320px, 1fr);
+            gap: 12px;
+            align-items: start;
+        }
+
+        .overview-stack,
+        .patch-side-stack {
+            display: grid;
+            gap: 12px;
+        }
+
+        .overview-progress-track {
+            margin-top: 14px;
+            width: 100%;
+            height: 14px;
+            border-radius: 999px;
+            background: #dde8ee;
+            overflow: hidden;
+        }
+
+        .overview-progress-fill {
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #1fb581 0%, #2d82da 100%);
+            width: 0%;
+            transition: width 0.25s ease;
+        }
+
+        .overview-summary-grid {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .summary-card {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            padding: 12px;
+        }
+
+        .summary-card strong {
+            display: block;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 28px;
+            line-height: 1;
+        }
+
+        .summary-card span {
+            display: block;
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .summary-card.warn strong {
+            color: var(--amber);
+        }
+
+        .summary-card.danger strong {
+            color: var(--red);
+        }
+
+        .summary-card.good strong {
+            color: var(--green);
+        }
+
+        .summary-card.info strong {
+            color: var(--blue);
         }
 
         .agents-panel {
@@ -434,6 +552,70 @@
             gap: 8px;
         }
 
+        .selected-agent-hero {
+            margin-top: 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: linear-gradient(135deg, #f6fbfe 0%, #ffffff 100%);
+            padding: 14px;
+        }
+
+        .selected-agent-hero-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .selected-agent-hero-title {
+            margin: 0;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 22px;
+            line-height: 1.1;
+        }
+
+        .selected-agent-hero-copy {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .selected-agent-pill-row {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .selected-agent-kpis {
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .selected-agent-kpi {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #fff;
+            padding: 12px;
+        }
+
+        .selected-agent-kpi strong {
+            display: block;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 24px;
+            line-height: 1;
+        }
+
+        .selected-agent-kpi span {
+            display: block;
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
         .button-row {
             margin-top: 9px;
             display: flex;
@@ -458,6 +640,13 @@
             border-radius: 12px;
             background: var(--panel);
             overflow: hidden;
+        }
+
+        .patch-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+            gap: 12px;
+            align-items: start;
         }
 
         .security-baseline {
@@ -997,6 +1186,10 @@
             max-height: 260px;
         }
 
+        .jobs-full-panel .table-wrap {
+            max-height: 360px;
+        }
+
         .jobs-action-buttons {
             display: inline-flex;
             align-items: center;
@@ -1090,10 +1283,15 @@
 
         @media (max-width: 1220px) {
             .metrics {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-template-columns: repeat(3, minmax(0, 1fr));
             }
 
             .main-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .overview-grid,
+            .patch-layout {
                 grid-template-columns: 1fr;
             }
 
@@ -1135,6 +1333,11 @@
             }
 
             .toolbar-row {
+                grid-template-columns: 1fr;
+            }
+
+            .overview-summary-grid,
+            .selected-agent-kpis {
                 grid-template-columns: 1fr;
             }
 
@@ -1218,8 +1421,8 @@
     <main class="workspace">
         <section class="top-command">
             <div class="top-copy">
-                <h1>Devices</h1>
-                <p>Monitor agents, queue patch and software jobs, and track rollout status in one console.</p>
+                <h1>Patch Management</h1>
+                <p>Review patch posture, drill into device risk, and take action without losing the audit trail.</p>
             </div>
             <div class="command-actions">
                 <button id="refreshBtn" type="button" class="btn primary">Refresh</button>
@@ -1230,8 +1433,15 @@
         </section>
         <div id="tokenStatus" class="status-line"></div>
 
+        <div class="view-tabs" role="tablist" aria-label="Patch admin views">
+            <button id="overviewViewBtn" type="button" class="view-tab active" data-console-view="overview">Overview</button>
+            <button id="devicesViewBtn" type="button" class="view-tab" data-console-view="devices">Devices</button>
+            <button id="patchesViewBtn" type="button" class="view-tab" data-console-view="patches">Patches</button>
+            <button id="jobsViewBtn" type="button" class="view-tab" data-console-view="jobs">Jobs</button>
+        </div>
+
         <section class="banner fade-up">
-            <span>Operations center is live. <strong id="activeOnlineCopy">0 online agents</strong> currently checking in.</span>
+            <span>Operations center is live. <strong id="activeOnlineCopy">0 online agents</strong> currently checking in and feeding patch telemetry.</span>
             <span class="chip" id="bannerTotalCopy">0 devices</span>
         </section>
 
@@ -1239,297 +1449,530 @@
             <article class="metric">
                 <p class="metric-label">Total Agents</p>
                 <p id="metricTotalAgents" class="metric-value">0</p>
+                <p class="metric-sub">Managed endpoints with agent registration</p>
             </article>
             <article class="metric">
                 <p class="metric-label">Online Agents</p>
                 <p id="metricOnlineAgents" class="metric-value">0</p>
+                <p class="metric-sub">Checked in recently</p>
+            </article>
+            <article class="metric">
+                <p class="metric-label">Need Patching</p>
+                <p id="metricNeedsPatching" class="metric-value">0</p>
+                <p class="metric-sub">Devices with pending updates</p>
+            </article>
+            <article class="metric">
+                <p class="metric-label">Pending Reboot</p>
+                <p id="metricPendingReboot" class="metric-value">0</p>
+                <p class="metric-sub">Endpoints requiring restart</p>
             </article>
             <article class="metric">
                 <p class="metric-label">Queued Jobs</p>
                 <p id="metricQueuedJobs" class="metric-value">0</p>
+                <p class="metric-sub">Patch, software, and script work</p>
             </article>
             <article class="metric">
                 <p class="metric-label">Failed Jobs</p>
                 <p id="metricFailedJobs" class="metric-value">0</p>
+                <p class="metric-sub">Recent rollout failures</p>
             </article>
         </section>
 
-        <section class="main-grid">
-            <section class="panel agents-panel">
-                <div class="panel-top">
-                    <h2>Agents</h2>
-                    <p class="hint" id="agentsSummary">Showing 0 of 0 agents</p>
+        <section id="overviewSurface" class="console-surface active">
+            <section class="overview-grid">
+                <div class="overview-stack">
+                    <section class="panel">
+                        <div class="panel-top">
+                            <h2>OS Patching Status</h2>
+                            <p id="overviewPatchedCopy" class="hint">0 of 0 devices fully patched</p>
+                        </div>
+                        <div class="overview-progress-track">
+                            <div id="overviewPatchedBar" class="overview-progress-fill"></div>
+                        </div>
+                        <div class="overview-summary-grid">
+                            <article class="summary-card danger">
+                                <strong id="overviewCriticalDevices">0</strong>
+                                <span>Devices missing security-relevant updates</span>
+                            </article>
+                            <article class="summary-card warn">
+                                <strong id="overviewMissingDevices">0</strong>
+                                <span>Devices missing any OS patches</span>
+                            </article>
+                            <article class="summary-card danger">
+                                <strong id="overviewFailedPatchJobs">0</strong>
+                                <span>Failed patch-related jobs</span>
+                            </article>
+                            <article class="summary-card info">
+                                <strong id="overviewPendingRebootDevices">0</strong>
+                                <span>Devices pending reboot</span>
+                            </article>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-top">
+                            <h2>Top Missing Patches</h2>
+                            <p id="overviewMissingSummary" class="hint">Most common missing packages across the fleet</p>
+                        </div>
+                        <div class="table-wrap compact">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Patch</th>
+                                    <th>Type</th>
+                                    <th>Source</th>
+                                    <th>Devices</th>
+                                </tr>
+                                </thead>
+                                <tbody id="overviewMissingPatchesTableBody">
+                                <tr><td colspan="4" class="hint">No patch inventory loaded yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
                 </div>
-                <div class="toolbar-row">
-                    <input id="agentSearchInput" type="search" placeholder="Search by name, user, hostname, or agent ID">
-                    <select id="availabilityFilter">
-                        <option value="all">All Availability</option>
-                        <option value="online">Online</option>
-                        <option value="stale">Stale</option>
-                        <option value="offline">Offline</option>
-                        <option value="unknown">Unknown</option>
-                    </select>
+
+                <div class="overview-stack">
+                    <section class="panel">
+                        <div class="panel-top">
+                            <h2>Top Vulnerable Devices</h2>
+                            <p class="hint">Jump straight into the noisiest endpoints.</p>
+                        </div>
+                        <div class="table-wrap compact">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Device</th>
+                                    <th>Type</th>
+                                    <th>Availability</th>
+                                    <th>Missing</th>
+                                    <th>Action</th>
+                                </tr>
+                                </thead>
+                                <tbody id="overviewVulnerableDevicesTableBody">
+                                <tr><td colspan="5" class="hint">No devices loaded.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-top">
+                            <h2>Rollout Activity</h2>
+                            <p class="hint">Recent patch jobs and current rollout pressure.</p>
+                        </div>
+                        <div class="table-wrap compact">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Job</th>
+                                    <th>Status</th>
+                                    <th>Type</th>
+                                    <th>Target</th>
+                                </tr>
+                                </thead>
+                                <tbody id="overviewRecentJobsTableBody">
+                                <tr><td colspan="4" class="hint">No recent jobs found.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </section>
+
+        <section id="devicesSurface" class="console-surface">
+            <section class="main-grid">
+                <section class="panel agents-panel">
+                    <div class="panel-top">
+                        <h2>Agents</h2>
+                        <p class="hint" id="agentsSummary">Showing 0 of 0 agents</p>
+                    </div>
+                    <div class="toolbar-row">
+                        <input id="agentSearchInput" type="search" placeholder="Search by name, user, hostname, or agent ID">
+                        <select id="availabilityFilter">
+                            <option value="all">All Availability</option>
+                            <option value="online">Online</option>
+                            <option value="stale">Stale</option>
+                            <option value="offline">Offline</option>
+                            <option value="unknown">Unknown</option>
+                        </select>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>Device</th>
+                                <th>Logged-in User</th>
+                                <th>Device Type</th>
+                                <th>Agent ID</th>
+                                <th>Last Seen</th>
+                                <th>Availability</th>
+                                <th>Service</th>
+                                <th>Available</th>
+                                <th>Current Job</th>
+                                <th>Action</th>
+                            </tr>
+                            </thead>
+                            <tbody id="agentsTableBody">
+                            <tr><td colspan="10" class="hint">No agents loaded.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="panel selected-agent-panel">
+                    <h2>Selected Device</h2>
+                    <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue self-updates, review baseline posture, or run scripts.</p>
+
+                    <div class="selected-agent-hero">
+                        <div class="selected-agent-hero-head">
+                            <div>
+                                <p id="selectedAgentHeroName" class="selected-agent-hero-title">No device selected</p>
+                                <p id="selectedAgentHeroCopy" class="selected-agent-hero-copy">Pick a device to see identity, baseline, and action controls here.</p>
+                            </div>
+                        </div>
+                        <div class="selected-agent-pill-row">
+                            <span id="selectedAgentAvailabilityPill" class="pill unknown">unknown</span>
+                            <span id="selectedAgentDeviceTypePill" class="pill unknown">Unknown</span>
+                        </div>
+                        <div class="selected-agent-kpis">
+                            <article class="selected-agent-kpi">
+                                <strong id="selectedAgentAvailableCount">0</strong>
+                                <span>Available updates</span>
+                            </article>
+                            <article class="selected-agent-kpi">
+                                <strong id="selectedAgentPendingReboot">No</strong>
+                                <span>Pending reboot</span>
+                            </article>
+                            <article class="selected-agent-kpi">
+                                <strong id="selectedAgentCurrentJob">None</strong>
+                                <span>Current job</span>
+                            </article>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field-block">
+                            <label for="selectedAgentId">Agent ID</label>
+                            <input id="selectedAgentId" class="mono" type="text" readonly>
+                        </div>
+                        <div class="field-block">
+                            <label for="selectedAgentDisplayName">Display Name</label>
+                            <input id="selectedAgentDisplayName" type="text" placeholder="Production Node 01">
+                        </div>
+                        <div class="field-block">
+                            <label for="selectedAgentLoggedInUser">Logged-in User</label>
+                            <input id="selectedAgentLoggedInUser" class="mono" type="text" readonly placeholder="n/a">
+                        </div>
+                    </div>
+                    <div class="button-row">
+                        <button id="renameAgentBtn" type="button" class="btn subtle">Save Agent Name</button>
+                        <button id="queueSelfUpdateBtn" type="button" class="btn subtle">Queue Agent Self-Update</button>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field-block">
+                            <label for="updateCorrelationId">Package Correlation ID (optional)</label>
+                            <input id="updateCorrelationId" type="text" placeholder="package-rollout-001">
+                        </div>
+                    </div>
+
+                    <div class="security-baseline">
+                        <div class="security-baseline-head">
+                            <h3>Security Baseline (SOC2)</h3>
+                            <span id="securityBaselineOverall" class="security-overall unknown">Not evaluated</span>
+                        </div>
+                        <p id="securityBaselineMeta" class="hint">Select a Windows agent to evaluate baseline controls.</p>
+                        <div id="securityBaselineChecks" class="security-check-list">
+                            <div class="security-check">
+                                <span class="security-check-name">
+                                    <span class="security-check-title">No data yet</span>
+                                    <span class="security-check-detail">Select an agent to evaluate controls.</span>
+                                </span>
+                                <span class="security-pill na">N/A</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3>Script Jobs (Windows/macOS)</h3>
+                    <div class="field-grid">
+                        <div class="field-block">
+                            <label for="windowsScriptCorrelationId">Script Correlation ID (optional)</label>
+                            <input id="windowsScriptCorrelationId" type="text" placeholder="windows-provision-001">
+                        </div>
+                        <div class="field-block">
+                            <label for="windowsScriptUrlInput">Script URL (optional)</label>
+                            <input id="windowsScriptUrlInput" type="url" placeholder="https://example.com/provision-script">
+                        </div>
+                    </div>
+                    <div class="field-grid">
+                        <div class="field-block">
+                            <label for="splashtopInstallerUrlInput">Splashtop Package URL (template helper)</label>
+                            <input id="splashtopInstallerUrlInput" type="url" placeholder="https://example.com/Splashtop_Streamer_Installer.pkg">
+                        </div>
+                        <div class="field-block">
+                            <label for="splashtopDeploymentCodeInput">Splashtop Deploy Code (Windows only, optional)</label>
+                            <input id="splashtopDeploymentCodeInput" type="text" placeholder="123456789012">
+                        </div>
+                    </div>
+                    <div class="field-block">
+                        <label for="windowsScriptInput">Script Body (PowerShell for Windows, shell for macOS)</label>
+                        <textarea id="windowsScriptInput" placeholder="# shell or PowerShell script body"></textarea>
+                    </div>
+                    <div class="button-row">
+                        <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue Script Job</button>
+                        <button id="queueWindowsScriptAllBtn" type="button" class="btn subtle">Queue on All Windows Agents</button>
+                        <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
+                        <button id="loadSplashtopTemplateBtn" type="button" class="btn subtle">Load Splashtop Template</button>
+                    </div>
+                    <div id="agentActionStatus" class="status-line"></div>
+                </section>
+            </section>
+        </section>
+
+        <section id="patchesSurface" class="console-surface">
+            <section class="patch-layout">
+                <div class="patch-side-stack">
+                    <section class="panel">
+                        <div class="panel-top">
+                            <h2>Devices Needing Attention</h2>
+                            <p id="patchQueueSummary" class="hint">0 devices with available patch work</p>
+                        </div>
+                        <div class="table-wrap compact">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Device</th>
+                                    <th>Type</th>
+                                    <th>Availability</th>
+                                    <th>Updates</th>
+                                    <th>Action</th>
+                                </tr>
+                                </thead>
+                                <tbody id="patchQueueTableBody">
+                                <tr><td colspan="5" class="hint">No patch inventory loaded yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-top">
+                            <h2>Top Missing Patches</h2>
+                            <p id="topMissingPatchesSummary" class="hint">Most common missing packages across the fleet</p>
+                        </div>
+                        <div class="table-wrap compact">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Patch</th>
+                                    <th>Type</th>
+                                    <th>Source</th>
+                                    <th>Devices</th>
+                                </tr>
+                                </thead>
+                                <tbody id="topMissingPatchesTableBody">
+                                <tr><td colspan="4" class="hint">No patch inventory loaded yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+
+                <section class="panel">
+                    <div class="panel-top">
+                        <h2>Patch Workbench</h2>
+                        <p id="patchWorkbenchHint" class="hint">Select a device to inspect packages, run installs, and search software catalogs.</p>
+                    </div>
+
+                    <div class="selected-agent-hero">
+                        <div class="selected-agent-hero-head">
+                            <div>
+                                <p id="selectedPatchAgentName" class="selected-agent-hero-title">No device selected</p>
+                                <p id="selectedPatchAgentMeta" class="selected-agent-hero-copy">Choose a device from Overview or Devices to focus the patch workbench.</p>
+                            </div>
+                        </div>
+                        <div class="selected-agent-pill-row">
+                            <span id="selectedPatchAgentAvailability" class="pill unknown">unknown</span>
+                            <span id="selectedPatchAgentType" class="pill unknown">Unknown</span>
+                        </div>
+                        <div class="selected-agent-kpis">
+                            <article class="selected-agent-kpi">
+                                <strong id="selectedPatchAvailableCount">0</strong>
+                                <span>Available updates</span>
+                            </article>
+                            <article class="selected-agent-kpi">
+                                <strong id="selectedPatchSecurityCount">0</strong>
+                                <span>Security-relevant updates</span>
+                            </article>
+                            <article class="selected-agent-kpi">
+                                <strong id="selectedPatchRebootState">No</strong>
+                                <span>Pending reboot</span>
+                            </article>
+                        </div>
+                    </div>
+
+                    <div class="patch-browser">
+                        <div class="patch-browser-head">
+                            <h3>Patch Inventory</h3>
+                            <p id="patchInventoryMeta" class="hint">Select an agent to view patch details.</p>
+                        </div>
+                        <div class="patch-tabs" role="tablist" aria-label="Patch views">
+                            <button id="availablePackagesTabBtn" type="button" class="patch-tab active" role="tab" aria-selected="true">Available Packages (0)</button>
+                            <button id="installedPackagesTabBtn" type="button" class="patch-tab" role="tab" aria-selected="false">Installed Packages (0)</button>
+                        </div>
+                        <div class="patch-toolbar">
+                            <input id="patchSearchInput" type="search" placeholder="Search package name, title, label, source, or CVE">
+                            <div class="patch-toolbar-right">
+                                <span id="patchLastUpdatedCopy" class="hint">Last updated: n/a</span>
+                                <button id="refreshSelectedInventoryBtn" type="button" class="btn subtle">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="patch-actions">
+                            <div class="patch-actions-left">
+                                <label class="patch-select-all">
+                                    <input id="selectAllVisiblePatches" type="checkbox">
+                                    Select visible
+                                </label>
+                                <span id="selectedPackagesCount" class="hint">0 selected</span>
+                            </div>
+                            <div class="patch-actions-right">
+                                <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Selected Packages</button>
+                                <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
+                            </div>
+                        </div>
+                        <div class="table-wrap compact patch-table-wrap">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th class="patch-checkbox-col">Pick</th>
+                                    <th>Name</th>
+                                    <th>Label</th>
+                                    <th>Classification</th>
+                                    <th>Source</th>
+                                    <th>Status / Security</th>
+                                </tr>
+                                </thead>
+                                <tbody id="patchPackagesTableBody">
+                                <tr><td colspan="6" class="hint">Select an agent to view package details.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="software-browser">
+                        <div class="software-browser-head">
+                            <h3>Software Inventory</h3>
+                            <p id="softwareInventoryMeta" class="hint">Select an agent to view installed software and queue installs.</p>
+                        </div>
+                        <div class="software-toolbar">
+                            <input id="softwareSearchInput" type="search" placeholder="Search installed software by name, version, publisher, or source">
+                            <div class="software-toolbar-right">
+                                <span id="softwareLastUpdatedCopy" class="hint">Inventory updated: n/a</span>
+                            </div>
+                        </div>
+                        <div class="software-install-row">
+                            <input id="softwarePackageInput" type="text" placeholder="Install package names or IDs (comma/space separated)">
+                            <div class="software-install-controls">
+                                <select id="softwareManagerSelect">
+                                    <option value="auto">auto</option>
+                                    <option value="winget">winget (Windows)</option>
+                                    <option value="apt">apt (Linux)</option>
+                                    <option value="brew">brew (macOS)</option>
+                                </select>
+                                <label class="software-install-toggle">
+                                    <input id="softwareAllowUpdateInput" type="checkbox">
+                                    Allow update
+                                </label>
+                                <button id="searchSoftwareCatalogBtn" type="button" class="btn subtle">Search Catalog</button>
+                                <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
+                            </div>
+                            <p id="softwareInstallHint" class="hint software-install-note">Tip: winget catalog search is instant. apt/brew catalog lookups run as jobs on the selected agent.</p>
+                        </div>
+                        <div id="softwareSearchResultsPanel" class="software-search-results">
+                            <div class="software-search-head">
+                                <span class="software-search-title">Catalog Search Results</span>
+                                <span id="softwareSearchResultsMeta" class="hint">No catalog search has run yet for this agent.</span>
+                            </div>
+                            <p id="softwareSearchResultsSummary" class="hint">Run Search Catalog to list matching package IDs/names here.</p>
+                            <div id="softwareSearchMatchList" class="software-search-match-list"></div>
+                            <details class="software-search-raw">
+                                <summary>Raw Search Output</summary>
+                                <pre id="softwareSearchRawOutput">No output captured yet.</pre>
+                            </details>
+                        </div>
+                        <div class="table-wrap compact software-table-wrap">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Version</th>
+                                    <th>Publisher</th>
+                                    <th>Source</th>
+                                    <th>Installed</th>
+                                </tr>
+                                </thead>
+                                <tbody id="softwareInventoryTableBody">
+                                <tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </section>
+        </section>
+
+        <section id="jobsSurface" class="console-surface">
+            <section class="panel jobs-panel jobs-full-panel">
+                <div class="panel-top">
+                    <h2>Recent Jobs</h2>
+                    <p class="hint">Newest jobs appear first.</p>
                 </div>
                 <div class="table-wrap">
                     <table>
                         <thead>
                         <tr>
-                            <th>Device</th>
-                            <th>Logged-in User</th>
-                            <th>Device Type</th>
-                            <th>Agent ID</th>
-                            <th>Last Seen</th>
-                            <th>Availability</th>
-                            <th>Service</th>
-                            <th>Available</th>
-                            <th>Current Job</th>
-                            <th>Action</th>
+                            <th>Job ID</th>
+                            <th>Status</th>
+                            <th>Type</th>
+                            <th>Target Device</th>
+                            <th>Target Agent</th>
+                            <th>Created</th>
+                            <th>Actions</th>
                         </tr>
                         </thead>
-                        <tbody id="agentsTableBody">
-                        <tr><td colspan="10" class="hint">No agents loaded.</td></tr>
+                        <tbody id="jobsTableBody">
+                        <tr><td colspan="7" class="hint">No jobs loaded.</td></tr>
                         </tbody>
                     </table>
                 </div>
+                <div id="jobsActionStatus" class="status-line jobs-panel-status"></div>
+                <div class="job-log-view">
+                    <div class="job-log-head">
+                        <h3 id="jobLogTitle">Job Logs</h3>
+                        <p id="jobLogMeta" class="hint">Select a job to inspect completion output.</p>
+                    </div>
+                    <div class="job-log-grid">
+                        <div class="job-log-block">
+                            <p class="job-log-label">Summary</p>
+                            <pre id="jobLogSummary" class="job-log-text">No job selected.</pre>
+                        </div>
+                        <div class="job-log-block">
+                            <p class="job-log-label">Error Output (stderr)</p>
+                            <pre id="jobLogStderr" class="job-log-text">No job selected.</pre>
+                        </div>
+                        <div class="job-log-block full">
+                            <p class="job-log-label">Standard Output (stdout)</p>
+                            <pre id="jobLogStdout" class="job-log-text">No job selected.</pre>
+                        </div>
+                        <div class="job-log-block full">
+                            <p class="job-log-label">Raw Completion Payload</p>
+                            <pre id="jobLogCompletionJson" class="job-log-text">No job selected.</pre>
+                        </div>
+                    </div>
+                </div>
             </section>
-
-            <section class="panel selected-agent-panel">
-                <h2>Selected Agent</h2>
-                <p id="selectedAgentHint" class="hint">Choose an agent from the list to rename it, queue patch or software installs, self-update, run scripts, or connect.</p>
-
-                <div class="field-grid">
-                    <div class="field-block">
-                        <label for="selectedAgentId">Agent ID</label>
-                        <input id="selectedAgentId" class="mono" type="text" readonly>
-                    </div>
-                    <div class="field-block">
-                        <label for="selectedAgentDisplayName">Display Name</label>
-                        <input id="selectedAgentDisplayName" type="text" placeholder="Production Node 01">
-                    </div>
-                    <div class="field-block">
-                        <label for="selectedAgentLoggedInUser">Logged-in User</label>
-                        <input id="selectedAgentLoggedInUser" class="mono" type="text" readonly placeholder="n/a">
-                    </div>
-                </div>
-                <div class="button-row">
-                    <button id="renameAgentBtn" type="button" class="btn subtle">Save Agent Name</button>
-                    <button id="queueSelfUpdateBtn" type="button" class="btn subtle">Queue Agent Self-Update</button>
-                </div>
-
-                <div class="field-grid">
-                    <div class="field-block">
-                        <label for="updateCorrelationId">Package Correlation ID (optional)</label>
-                        <input id="updateCorrelationId" type="text" placeholder="package-rollout-001">
-                    </div>
-                </div>
-
-                <div class="security-baseline">
-                    <div class="security-baseline-head">
-                        <h3>Security Baseline (SOC2)</h3>
-                        <span id="securityBaselineOverall" class="security-overall unknown">Not evaluated</span>
-                    </div>
-                    <p id="securityBaselineMeta" class="hint">Select a Windows agent to evaluate baseline controls.</p>
-                    <div id="securityBaselineChecks" class="security-check-list">
-                        <div class="security-check">
-                            <span class="security-check-name">
-                                <span class="security-check-title">No data yet</span>
-                                <span class="security-check-detail">Select an agent to evaluate controls.</span>
-                            </span>
-                            <span class="security-pill na">N/A</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="patch-browser">
-                    <div class="patch-browser-head">
-                        <h3>Patch Management</h3>
-                        <p id="patchInventoryMeta" class="hint">Select an agent to view patch details.</p>
-                    </div>
-                    <div class="patch-tabs" role="tablist" aria-label="Patch views">
-                        <button id="availablePackagesTabBtn" type="button" class="patch-tab active" role="tab" aria-selected="true">Available Packages (0)</button>
-                        <button id="installedPackagesTabBtn" type="button" class="patch-tab" role="tab" aria-selected="false">Installed Packages (0)</button>
-                    </div>
-                    <div class="patch-toolbar">
-                        <input id="patchSearchInput" type="search" placeholder="Search package name, title, label, source, or CVE">
-                        <div class="patch-toolbar-right">
-                            <span id="patchLastUpdatedCopy" class="hint">Last updated: n/a</span>
-                            <button id="refreshSelectedInventoryBtn" type="button" class="btn subtle">Refresh</button>
-                        </div>
-                    </div>
-                    <div class="patch-actions">
-                        <div class="patch-actions-left">
-                            <label class="patch-select-all">
-                                <input id="selectAllVisiblePatches" type="checkbox">
-                                Select visible
-                            </label>
-                            <span id="selectedPackagesCount" class="hint">0 selected</span>
-                        </div>
-                        <div class="patch-actions-right">
-                            <button id="installListedUpdatesBtn" type="button" class="btn primary">Install Selected Packages</button>
-                            <button id="installAllUpdatesBtn" type="button" class="btn subtle">Install All Available Packages</button>
-                        </div>
-                    </div>
-                    <div class="table-wrap compact patch-table-wrap">
-                        <table>
-                            <thead>
-                            <tr>
-                                <th class="patch-checkbox-col">Pick</th>
-                                <th>Name</th>
-                                <th>Label</th>
-                                <th>Classification</th>
-                                <th>Source</th>
-                                <th>Status / Security</th>
-                            </tr>
-                            </thead>
-                            <tbody id="patchPackagesTableBody">
-                            <tr><td colspan="6" class="hint">Select an agent to view package details.</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="software-browser">
-                    <div class="software-browser-head">
-                        <h3>Software Inventory</h3>
-                        <p id="softwareInventoryMeta" class="hint">Select an agent to view installed software and queue installs.</p>
-                    </div>
-                    <div class="software-toolbar">
-                        <input id="softwareSearchInput" type="search" placeholder="Search installed software by name, version, publisher, or source">
-                        <div class="software-toolbar-right">
-                            <span id="softwareLastUpdatedCopy" class="hint">Inventory updated: n/a</span>
-                        </div>
-                    </div>
-                    <div class="software-install-row">
-                        <input id="softwarePackageInput" type="text" placeholder="Install package names or IDs (comma/space separated)">
-                        <div class="software-install-controls">
-                            <select id="softwareManagerSelect">
-                                <option value="auto">auto</option>
-                                <option value="winget">winget (Windows)</option>
-                                <option value="apt">apt (Linux)</option>
-                                <option value="brew">brew (macOS)</option>
-                            </select>
-                            <label class="software-install-toggle">
-                                <input id="softwareAllowUpdateInput" type="checkbox">
-                                Allow update
-                            </label>
-                            <button id="searchSoftwareCatalogBtn" type="button" class="btn subtle">Search Catalog</button>
-                            <button id="queueSoftwareInstallBtn" type="button" class="btn subtle">Install Software</button>
-                        </div>
-                        <p id="softwareInstallHint" class="hint software-install-note">Tip: winget catalog search is instant. apt/brew catalog lookups run as jobs on the selected agent.</p>
-                    </div>
-                    <div id="softwareSearchResultsPanel" class="software-search-results">
-                        <div class="software-search-head">
-                            <span class="software-search-title">Catalog Search Results</span>
-                            <span id="softwareSearchResultsMeta" class="hint">No catalog search has run yet for this agent.</span>
-                        </div>
-                        <p id="softwareSearchResultsSummary" class="hint">Run Search Catalog to list matching package IDs/names here.</p>
-                        <div id="softwareSearchMatchList" class="software-search-match-list"></div>
-                        <details class="software-search-raw">
-                            <summary>Raw Search Output</summary>
-                            <pre id="softwareSearchRawOutput">No output captured yet.</pre>
-                        </details>
-                    </div>
-                    <div class="table-wrap compact software-table-wrap">
-                        <table>
-                            <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Version</th>
-                                <th>Publisher</th>
-                                <th>Source</th>
-                                <th>Installed</th>
-                            </tr>
-                            </thead>
-                            <tbody id="softwareInventoryTableBody">
-                            <tr><td colspan="5" class="hint">Select an agent to view installed software.</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <h3>Script Jobs (Windows/macOS)</h3>
-                <div class="field-grid">
-                    <div class="field-block">
-                        <label for="windowsScriptCorrelationId">Script Correlation ID (optional)</label>
-                        <input id="windowsScriptCorrelationId" type="text" placeholder="windows-provision-001">
-                    </div>
-                    <div class="field-block">
-                        <label for="windowsScriptUrlInput">Script URL (optional)</label>
-                        <input id="windowsScriptUrlInput" type="url" placeholder="https://example.com/provision-script">
-                    </div>
-                </div>
-                <div class="field-grid">
-                    <div class="field-block">
-                        <label for="splashtopInstallerUrlInput">Splashtop Package URL (template helper)</label>
-                        <input id="splashtopInstallerUrlInput" type="url" placeholder="https://example.com/Splashtop_Streamer_Installer.pkg">
-                    </div>
-                    <div class="field-block">
-                        <label for="splashtopDeploymentCodeInput">Splashtop Deploy Code (Windows only, optional)</label>
-                        <input id="splashtopDeploymentCodeInput" type="text" placeholder="123456789012">
-                    </div>
-                </div>
-                <div class="field-block">
-                    <label for="windowsScriptInput">Script Body (PowerShell for Windows, shell for macOS)</label>
-                    <textarea id="windowsScriptInput" placeholder="# shell or PowerShell script body"></textarea>
-                </div>
-                <div class="button-row">
-                    <button id="queueWindowsScriptBtn" type="button" class="btn subtle">Queue Script Job</button>
-                    <button id="queueWindowsScriptAllBtn" type="button" class="btn subtle">Queue on All Windows Agents</button>
-                    <button id="loadGcpwTemplateBtn" type="button" class="btn subtle">Load GCPW Template</button>
-                    <button id="loadSplashtopTemplateBtn" type="button" class="btn subtle">Load Splashtop Template</button>
-                </div>
-                <div id="agentActionStatus" class="status-line"></div>
-            </section>
-
-            <section class="panel jobs-panel jobs-side-panel">
-            <div class="panel-top">
-                <h2>Recent Jobs</h2>
-                <p class="hint">Newest jobs appear first.</p>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>Job ID</th>
-                        <th>Status</th>
-                        <th>Type</th>
-                        <th>Target Device</th>
-                        <th>Target Agent</th>
-                        <th>Created</th>
-                        <th>Actions</th>
-                    </tr>
-                    </thead>
-                    <tbody id="jobsTableBody">
-                    <tr><td colspan="7" class="hint">No jobs loaded.</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div id="jobsActionStatus" class="status-line jobs-panel-status"></div>
-            <div class="job-log-view">
-                <div class="job-log-head">
-                    <h3 id="jobLogTitle">Job Logs</h3>
-                    <p id="jobLogMeta" class="hint">Select a job to inspect completion output.</p>
-                </div>
-                <div class="job-log-grid">
-                    <div class="job-log-block">
-                        <p class="job-log-label">Summary</p>
-                        <pre id="jobLogSummary" class="job-log-text">No job selected.</pre>
-                    </div>
-                    <div class="job-log-block">
-                        <p class="job-log-label">Error Output (stderr)</p>
-                        <pre id="jobLogStderr" class="job-log-text">No job selected.</pre>
-                    </div>
-                    <div class="job-log-block full">
-                        <p class="job-log-label">Standard Output (stdout)</p>
-                        <pre id="jobLogStdout" class="job-log-text">No job selected.</pre>
-                    </div>
-                    <div class="job-log-block full">
-                        <p class="job-log-label">Raw Completion Payload</p>
-                        <pre id="jobLogCompletionJson" class="job-log-text">No job selected.</pre>
-                    </div>
-                </div>
-            </div>
-        </section>
         </section>
     </main>
 </div>
@@ -1568,10 +2011,49 @@
 
     const metricTotalAgents = document.getElementById("metricTotalAgents");
     const metricOnlineAgents = document.getElementById("metricOnlineAgents");
+    const metricNeedsPatching = document.getElementById("metricNeedsPatching");
+    const metricPendingReboot = document.getElementById("metricPendingReboot");
     const metricQueuedJobs = document.getElementById("metricQueuedJobs");
     const metricFailedJobs = document.getElementById("metricFailedJobs");
     const activeOnlineCopy = document.getElementById("activeOnlineCopy");
     const bannerTotalCopy = document.getElementById("bannerTotalCopy");
+    const overviewViewBtn = document.getElementById("overviewViewBtn");
+    const devicesViewBtn = document.getElementById("devicesViewBtn");
+    const patchesViewBtn = document.getElementById("patchesViewBtn");
+    const jobsViewBtn = document.getElementById("jobsViewBtn");
+    const overviewSurface = document.getElementById("overviewSurface");
+    const devicesSurface = document.getElementById("devicesSurface");
+    const patchesSurface = document.getElementById("patchesSurface");
+    const jobsSurface = document.getElementById("jobsSurface");
+    const overviewPatchedCopy = document.getElementById("overviewPatchedCopy");
+    const overviewPatchedBar = document.getElementById("overviewPatchedBar");
+    const overviewCriticalDevices = document.getElementById("overviewCriticalDevices");
+    const overviewMissingDevices = document.getElementById("overviewMissingDevices");
+    const overviewFailedPatchJobs = document.getElementById("overviewFailedPatchJobs");
+    const overviewPendingRebootDevices = document.getElementById("overviewPendingRebootDevices");
+    const overviewMissingSummary = document.getElementById("overviewMissingSummary");
+    const overviewMissingPatchesTableBody = document.getElementById("overviewMissingPatchesTableBody");
+    const overviewVulnerableDevicesTableBody = document.getElementById("overviewVulnerableDevicesTableBody");
+    const overviewRecentJobsTableBody = document.getElementById("overviewRecentJobsTableBody");
+    const patchQueueSummary = document.getElementById("patchQueueSummary");
+    const patchQueueTableBody = document.getElementById("patchQueueTableBody");
+    const topMissingPatchesSummary = document.getElementById("topMissingPatchesSummary");
+    const topMissingPatchesTableBody = document.getElementById("topMissingPatchesTableBody");
+    const patchWorkbenchHint = document.getElementById("patchWorkbenchHint");
+    const selectedAgentHeroName = document.getElementById("selectedAgentHeroName");
+    const selectedAgentHeroCopy = document.getElementById("selectedAgentHeroCopy");
+    const selectedAgentAvailabilityPill = document.getElementById("selectedAgentAvailabilityPill");
+    const selectedAgentDeviceTypePill = document.getElementById("selectedAgentDeviceTypePill");
+    const selectedAgentAvailableCount = document.getElementById("selectedAgentAvailableCount");
+    const selectedAgentPendingReboot = document.getElementById("selectedAgentPendingReboot");
+    const selectedAgentCurrentJob = document.getElementById("selectedAgentCurrentJob");
+    const selectedPatchAgentName = document.getElementById("selectedPatchAgentName");
+    const selectedPatchAgentMeta = document.getElementById("selectedPatchAgentMeta");
+    const selectedPatchAgentAvailability = document.getElementById("selectedPatchAgentAvailability");
+    const selectedPatchAgentType = document.getElementById("selectedPatchAgentType");
+    const selectedPatchAvailableCount = document.getElementById("selectedPatchAvailableCount");
+    const selectedPatchSecurityCount = document.getElementById("selectedPatchSecurityCount");
+    const selectedPatchRebootState = document.getElementById("selectedPatchRebootState");
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshBtn = document.getElementById("refreshBtn");
@@ -1617,6 +2099,7 @@
     let selectedJobId = "";
     let selectedAvailablePackageIds = new Set();
     let activePatchTab = "available";
+    let activeConsoleView = "overview";
     let installActionInFlight = false;
     let signedInUserEmail = "";
     let softwareSearchResultsByAgentId = {};
@@ -1632,6 +2115,18 @@
 
     refreshBtn.addEventListener("click", async () => {
         await loadDashboard();
+    });
+
+    [
+        overviewViewBtn,
+        devicesViewBtn,
+        patchesViewBtn,
+        jobsViewBtn
+    ].forEach((button) => {
+        button.addEventListener("click", () => {
+            const nextView = String(button.getAttribute("data-console-view") || "overview");
+            setConsoleView(nextView);
+        });
     });
 
     agentSearchInput.addEventListener("input", () => {
@@ -2176,6 +2671,8 @@
             pruneSoftwareSearchResultCache(latestAgents);
 
             renderMetrics(latestAgents, latestJobs);
+            renderOverview(latestAgents, latestJobs);
+            renderPatchQueues(latestAgents);
             renderAgents(latestAgents);
             renderJobs(latestJobs);
             syncSelectedAgent();
@@ -2185,6 +2682,8 @@
             latestJobs = [];
             latestAgents = [];
             renderMetrics([], []);
+            renderOverview([], []);
+            renderPatchQueues([]);
             renderAgents([]);
             renderJobs([]);
             syncSelectedAgent();
@@ -2196,15 +2695,210 @@
     function renderMetrics(agents, jobs) {
         const totalAgents = agents.length;
         const onlineAgents = agents.filter((agent) => availabilityState(agent).value === "online").length;
+        const needsPatching = agents.filter((agent) => countAvailablePackages(agent) > 0).length;
+        const pendingReboot = agents.filter((agent) => getAgentPendingReboot(agent)).length;
         const queuedJobs = jobs.filter((job) => String(job.status || "").toLowerCase() === "queued").length;
         const failedJobs = jobs.filter((job) => String(job.status || "").toLowerCase() === "failed").length;
 
         metricTotalAgents.textContent = String(totalAgents);
         metricOnlineAgents.textContent = String(onlineAgents);
+        metricNeedsPatching.textContent = String(needsPatching);
+        metricPendingReboot.textContent = String(pendingReboot);
         metricQueuedJobs.textContent = String(queuedJobs);
         metricFailedJobs.textContent = String(failedJobs);
         activeOnlineCopy.textContent = onlineAgents + " online agents";
         bannerTotalCopy.textContent = totalAgents + " devices";
+    }
+
+    function setConsoleView(viewName) {
+        const supported = ["overview", "devices", "patches", "jobs"];
+        activeConsoleView = supported.includes(viewName) ? viewName : "overview";
+
+        const viewMap = {
+            overview: { button: overviewViewBtn, surface: overviewSurface },
+            devices: { button: devicesViewBtn, surface: devicesSurface },
+            patches: { button: patchesViewBtn, surface: patchesSurface },
+            jobs: { button: jobsViewBtn, surface: jobsSurface }
+        };
+
+        Object.entries(viewMap).forEach(([name, entry]) => {
+            const isActive = name === activeConsoleView;
+            entry.button.classList.toggle("active", isActive);
+            entry.surface.classList.toggle("active", isActive);
+        });
+    }
+
+    function renderOverview(agents, jobs) {
+        const totalAgents = agents.length;
+        const fullyPatched = agents.filter((agent) => countAvailablePackages(agent) === 0).length;
+        const percentPatched = totalAgents > 0 ? Math.round((fullyPatched / totalAgents) * 100) : 0;
+        const criticalDevices = agents.filter((agent) => countSecurityRelevantPackages(agent) > 0).length;
+        const missingDevices = agents.filter((agent) => countAvailablePackages(agent) > 0).length;
+        const pendingReboot = agents.filter((agent) => getAgentPendingReboot(agent)).length;
+        const failedPatchJobs = jobs.filter((job) => isPatchRelatedJob(job) && String(job.status || "").toLowerCase() === "failed").length;
+
+        overviewPatchedCopy.textContent = fullyPatched + " of " + totalAgents + " devices fully patched";
+        overviewPatchedBar.style.width = percentPatched + "%";
+        overviewCriticalDevices.textContent = String(criticalDevices);
+        overviewMissingDevices.textContent = String(missingDevices);
+        overviewFailedPatchJobs.textContent = String(failedPatchJobs);
+        overviewPendingRebootDevices.textContent = String(pendingReboot);
+
+        const vulnerableRows = buildAgentPatchQueue(agents).slice(0, 8);
+        if (!vulnerableRows.length) {
+            overviewVulnerableDevicesTableBody.innerHTML = '<tr><td colspan="5" class="hint">No devices currently report missing patches.</td></tr>';
+        } else {
+            overviewVulnerableDevicesTableBody.innerHTML = vulnerableRows.map((row) => {
+                return "<tr>" +
+                    "<td><div class=\"cell-main\">" + escapeHtml(row.name) + "</div><div class=\"cell-sub\">" + escapeHtml(row.hostname) + "</div></td>" +
+                    "<td><span class=\"pill " + escapeHtml(row.deviceType.value) + "\">" + escapeHtml(row.deviceType.label) + "</span></td>" +
+                    "<td><span class=\"pill " + escapeHtml(row.availability.value) + "\">" + escapeHtml(row.availability.label) + "</span></td>" +
+                    "<td>" + escapeHtml(String(row.availableCount)) + "</td>" +
+                    "<td><button type=\"button\" class=\"btn tiny overview-open-agent-btn\" data-agent-id=\"" + escapeHtml(row.agentId) + "\">Open</button></td>" +
+                    "</tr>";
+            }).join("");
+            bindAgentSelectButtons(".overview-open-agent-btn", "patches");
+        }
+
+        const missingPatchRows = buildMissingPatchRollup(agents).slice(0, 10);
+        overviewMissingSummary.textContent = missingPatchRows.length
+            ? ("Showing " + missingPatchRows.length + " most common missing patch signatures.")
+            : "No missing patches are currently reported.";
+        if (!missingPatchRows.length) {
+            overviewMissingPatchesTableBody.innerHTML = '<tr><td colspan="4" class="hint">No missing patch rows available.</td></tr>';
+        } else {
+            overviewMissingPatchesTableBody.innerHTML = renderMissingPatchRows(missingPatchRows);
+        }
+
+        const recentPatchJobs = jobs.filter((job) => isPatchRelatedJob(job)).slice(0, 8);
+        if (!recentPatchJobs.length) {
+            overviewRecentJobsTableBody.innerHTML = '<tr><td colspan="4" class="hint">No recent patch jobs found.</td></tr>';
+        } else {
+            overviewRecentJobsTableBody.innerHTML = recentPatchJobs.map((job) => {
+                return "<tr>" +
+                    "<td><code class=\"mono\">" + escapeHtml(String(job.job_id || "")) + "</code></td>" +
+                    "<td><span class=\"pill " + escapeHtml(statusToClass(String(job.status || ""))) + "\">" + escapeHtml(String(job.status || "unknown")) + "</span></td>" +
+                    "<td>" + escapeHtml(String(job.type || "")) + "</td>" +
+                    "<td>" + escapeHtml(String(job.target_device_id || job.target_agent_id || "")) + "</td>" +
+                    "</tr>";
+            }).join("");
+        }
+    }
+
+    function renderPatchQueues(agents) {
+        const queueRows = buildAgentPatchQueue(agents);
+        patchQueueSummary.textContent = queueRows.length + " device" + (queueRows.length === 1 ? "" : "s") + " with available patch work";
+
+        if (!queueRows.length) {
+            patchQueueTableBody.innerHTML = '<tr><td colspan="5" class="hint">No devices currently report missing patches.</td></tr>';
+        } else {
+            patchQueueTableBody.innerHTML = queueRows.map((row) => {
+                return "<tr>" +
+                    "<td><div class=\"cell-main\">" + escapeHtml(row.name) + "</div><div class=\"cell-sub\">" + escapeHtml(row.hostname) + "</div></td>" +
+                    "<td><span class=\"pill " + escapeHtml(row.deviceType.value) + "\">" + escapeHtml(row.deviceType.label) + "</span></td>" +
+                    "<td><span class=\"pill " + escapeHtml(row.availability.value) + "\">" + escapeHtml(row.availability.label) + "</span></td>" +
+                    "<td>" + escapeHtml(String(row.availableCount)) + "</td>" +
+                    "<td><button type=\"button\" class=\"btn tiny patch-queue-open-btn\" data-agent-id=\"" + escapeHtml(row.agentId) + "\">Open</button></td>" +
+                    "</tr>";
+            }).join("");
+            bindAgentSelectButtons(".patch-queue-open-btn", "patches");
+        }
+
+        const missingPatchRows = buildMissingPatchRollup(agents).slice(0, 12);
+        topMissingPatchesSummary.textContent = missingPatchRows.length
+            ? ("Showing " + missingPatchRows.length + " common missing patch signatures.")
+            : "No missing patches are currently reported.";
+        if (!missingPatchRows.length) {
+            topMissingPatchesTableBody.innerHTML = '<tr><td colspan="4" class="hint">No missing patch rows available.</td></tr>';
+        } else {
+            topMissingPatchesTableBody.innerHTML = renderMissingPatchRows(missingPatchRows);
+        }
+    }
+
+    function buildAgentPatchQueue(agents) {
+        return agents
+            .map((agent) => ({
+                agentId: String(agent.agent_record_id || ""),
+                name: String(agent.display_name || agent.hostname || "Unnamed device"),
+                hostname: String(agent.hostname || ""),
+                availableCount: countAvailablePackages(agent),
+                securityCount: countSecurityRelevantPackages(agent),
+                availability: availabilityState(agent),
+                deviceType: getDeviceType(agent),
+                pendingReboot: getAgentPendingReboot(agent)
+            }))
+            .filter((row) => row.availableCount > 0)
+            .sort((a, b) => {
+                if (b.securityCount !== a.securityCount) return b.securityCount - a.securityCount;
+                if (b.availableCount !== a.availableCount) return b.availableCount - a.availableCount;
+                return a.name.localeCompare(b.name);
+            });
+    }
+
+    function buildMissingPatchRollup(agents) {
+        const rollup = new Map();
+
+        agents.forEach((agent) => {
+            const agentId = String(agent.agent_record_id || "");
+            getAvailablePatchRows(agent).forEach((row) => {
+                const key = [
+                    String(row.name || ""),
+                    String(row.classification || ""),
+                    String(row.source || "")
+                ].join("||");
+                if (!key.trim()) {
+                    return;
+                }
+
+                const existing = rollup.get(key) || {
+                    name: String(row.name || ""),
+                    classification: String(row.classification || ""),
+                    source: String(row.source || ""),
+                    devices: new Set(),
+                    securityHits: 0
+                };
+                existing.devices.add(agentId);
+                if (String(row.status || "").toLowerCase().includes("cve") || String(row.classification || "").toLowerCase().includes("security")) {
+                    existing.securityHits += 1;
+                }
+                rollup.set(key, existing);
+            });
+        });
+
+        return Array.from(rollup.values())
+            .map((entry) => ({
+                name: entry.name,
+                classification: entry.classification,
+                source: entry.source,
+                deviceCount: entry.devices.size,
+                securityHits: entry.securityHits
+            }))
+            .sort((a, b) => {
+                if (b.deviceCount !== a.deviceCount) return b.deviceCount - a.deviceCount;
+                if (b.securityHits !== a.securityHits) return b.securityHits - a.securityHits;
+                return a.name.localeCompare(b.name);
+            });
+    }
+
+    function renderMissingPatchRows(rows) {
+        return rows.map((row) => {
+            return "<tr>" +
+                "<td><div class=\"cell-main\">" + escapeHtml(row.name) + "</div></td>" +
+                "<td>" + escapeHtml(row.classification || "Package") + "</td>" +
+                "<td>" + escapeHtml(row.source || "") + "</td>" +
+                "<td>" + escapeHtml(String(row.deviceCount)) + "</td>" +
+                "</tr>";
+        }).join("");
+    }
+
+    function bindAgentSelectButtons(selector, destinationView) {
+        document.querySelectorAll(selector).forEach((button) => {
+            button.addEventListener("click", () => {
+                const agentId = button.getAttribute("data-agent-id") || "";
+                selectAgent(agentId);
+                setConsoleView(destinationView);
+            });
+        });
     }
 
     function renderAgents(agents) {
@@ -2279,6 +2973,7 @@
             button.addEventListener("click", () => {
                 const agentId = button.getAttribute("data-agent-id") || "";
                 selectAgent(agentId);
+                setConsoleView("devices");
             });
         });
 
@@ -2385,8 +3080,9 @@
 
         selectedAgentId = nextSelectedAgentId;
         selectedAgentIdInput.value = selectedAgentId;
-        selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
+        selectedAgentDisplayNameInput.value = getAgentDisplayName(agent);
         selectedAgentLoggedInUserInput.value = getAgentLoggedInUser(agent);
+        renderSelectedAgentPanels(agent);
         renderPatchTableForSelectedAgent();
         syncSoftwareManagerForSelectedAgent(agent);
         renderSoftwareInventoryForSelectedAgent();
@@ -2398,7 +3094,10 @@
     function syncSelectedAgent() {
         if (!selectedAgentId) {
             selectedAgentHint.textContent = "Choose an agent from the list to rename it, queue patch or software installs, self-update, run scripts, or connect.";
+            selectedAgentIdInput.value = "";
+            selectedAgentDisplayNameInput.value = "";
             selectedAgentLoggedInUserInput.value = "";
+            renderSelectedAgentPanels(null);
             renderPatchTableForSelectedAgent();
             renderSoftwareInventoryForSelectedAgent();
             return;
@@ -2411,6 +3110,7 @@
             selectedAgentDisplayNameInput.value = "";
             selectedAgentLoggedInUserInput.value = "";
             selectedAvailablePackageIds = new Set();
+            renderSelectedAgentPanels(null);
             renderPatchTableForSelectedAgent();
             renderSoftwareInventoryForSelectedAgent();
             selectedAgentHint.textContent = "Selected agent is no longer present.";
@@ -2419,8 +3119,10 @@
             return;
         }
 
-        selectedAgentDisplayNameInput.value = String(agent.display_name || agent.hostname || "");
+        selectedAgentIdInput.value = String(agent.agent_record_id || "");
+        selectedAgentDisplayNameInput.value = getAgentDisplayName(agent);
         selectedAgentLoggedInUserInput.value = getAgentLoggedInUser(agent);
+        renderSelectedAgentPanels(agent);
         renderPatchTableForSelectedAgent();
         syncSoftwareManagerForSelectedAgent(agent);
         renderSoftwareInventoryForSelectedAgent();
@@ -2544,6 +3246,193 @@
         }
 
         return "";
+    }
+
+    function getAgentDisplayName(agent) {
+        return String(agent?.display_name || agent?.hostname || agent?.agent_record_id || "Unnamed device");
+    }
+
+    function getCurrentJobSummary(agent) {
+        const heartbeat = (typeof agent?.last_heartbeat === "object" && agent.last_heartbeat !== null)
+            ? agent.last_heartbeat
+            : {};
+        const currentJob = (typeof heartbeat.current_job === "object" && heartbeat.current_job !== null)
+            ? heartbeat.current_job
+            : {};
+        if (!currentJob.job_id) {
+            return "None";
+        }
+        return String(currentJob.job_id) + (currentJob.state ? " (" + String(currentJob.state) + ")" : "");
+    }
+
+    function normalizeBooleanLike(value) {
+        if (value === true || value === false) {
+            return value;
+        }
+
+        if (typeof value === "number") {
+            if (value === 1) {
+                return true;
+            }
+            if (value === 0) {
+                return false;
+            }
+        }
+
+        const normalized = String(value || "").trim().toLowerCase();
+        if (!normalized) {
+            return null;
+        }
+
+        if (["true", "1", "yes", "y", "on", "required", "pending"].includes(normalized)) {
+            return true;
+        }
+
+        if (["false", "0", "no", "n", "off", "clear", "none", "not_required"].includes(normalized)) {
+            return false;
+        }
+
+        return null;
+    }
+
+    function getAgentPendingReboot(agent) {
+        if (!agent || typeof agent !== "object") {
+            return false;
+        }
+
+        const inventory = (typeof agent.inventory === "object" && agent.inventory !== null) ? agent.inventory : {};
+        const hardware = getAgentHardwareSection(agent);
+        const windowsUpdate = getWindowsUpdateSection(agent);
+        const linux = getLinuxSection(agent);
+        const macOs = getMacOsSection(agent);
+
+        const candidates = [
+            inventory.pending_reboot,
+            inventory.pendingReboot,
+            inventory.reboot_required,
+            inventory.rebootRequired,
+            hardware.pending_reboot,
+            hardware.pendingReboot,
+            windowsUpdate.pending_reboot,
+            windowsUpdate.pendingReboot,
+            windowsUpdate.reboot_required,
+            windowsUpdate.rebootRequired,
+            linux.pending_reboot,
+            linux.pendingReboot,
+            linux.reboot_required,
+            linux.rebootRequired,
+            macOs.pending_reboot,
+            macOs.pendingReboot,
+            macOs.reboot_required,
+            macOs.rebootRequired
+        ];
+
+        for (const candidate of candidates) {
+            const normalized = normalizeBooleanLike(candidate);
+            if (normalized !== null) {
+                return normalized;
+            }
+        }
+
+        return false;
+    }
+
+    function isSecurityRelevantPatchRow(row) {
+        if (!row || typeof row !== "object") {
+            return false;
+        }
+
+        const status = String(row.status || "").toLowerCase();
+        const classification = String(row.classification || "").toLowerCase();
+        const name = String(row.name || "").toLowerCase();
+        const searchText = String(row.search_text || "").toLowerCase();
+
+        return status.includes("cve")
+            || classification.includes("security")
+            || classification.includes("critical")
+            || name.includes("security")
+            || /cve-\d{4}-\d+/i.test(searchText);
+    }
+
+    function countSecurityRelevantPackages(agent) {
+        return getAvailablePatchRows(agent)
+            .filter((row) => isSecurityRelevantPatchRow(row))
+            .length;
+    }
+
+    function updatePillState(element, tone, label) {
+        if (!element) {
+            return;
+        }
+
+        ["online", "stale", "offline", "unknown", "windows", "linux", "mac"].forEach((className) => {
+            element.classList.remove(className);
+        });
+
+        element.classList.add(String(tone || "unknown"));
+        element.textContent = String(label || "Unknown");
+    }
+
+    function renderSelectedAgentPanels(agent) {
+        if (!agent) {
+            selectedAgentHeroName.textContent = "No device selected";
+            selectedAgentHeroCopy.textContent = "Pick a device to see identity, baseline, and action controls here.";
+            updatePillState(selectedAgentAvailabilityPill, "unknown", "unknown");
+            updatePillState(selectedAgentDeviceTypePill, "unknown", "Unknown");
+            selectedAgentAvailableCount.textContent = "0";
+            selectedAgentPendingReboot.textContent = "No";
+            selectedAgentCurrentJob.textContent = "None";
+
+            patchWorkbenchHint.textContent = "Select a device to inspect packages, run installs, and search software catalogs.";
+            selectedPatchAgentName.textContent = "No device selected";
+            selectedPatchAgentMeta.textContent = "Choose a device from Overview or Devices to focus the patch workbench.";
+            updatePillState(selectedPatchAgentAvailability, "unknown", "unknown");
+            updatePillState(selectedPatchAgentType, "unknown", "Unknown");
+            selectedPatchAvailableCount.textContent = "0";
+            selectedPatchSecurityCount.textContent = "0";
+            selectedPatchRebootState.textContent = "No";
+            return;
+        }
+
+        const displayName = getAgentDisplayName(agent);
+        const hostname = String(agent.hostname || "").trim();
+        const loggedInUser = getAgentLoggedInUser(agent);
+        const availability = availabilityState(agent);
+        const deviceType = getDeviceType(agent);
+        const availableCount = countAvailablePackages(agent);
+        const securityCount = countSecurityRelevantPackages(agent);
+        const pendingReboot = getAgentPendingReboot(agent);
+        const snapshotTimestamp = getInventorySnapshotTimestamp(agent);
+        const heroParts = [];
+
+        if (hostname && hostname !== displayName) {
+            heroParts.push(hostname);
+        }
+        if (loggedInUser) {
+            heroParts.push("User " + loggedInUser);
+        }
+        heroParts.push("Last seen " + describeLastSeen(String(agent.last_seen_at || "")));
+
+        selectedAgentHeroName.textContent = displayName;
+        selectedAgentHeroCopy.textContent = heroParts.join(" | ");
+        updatePillState(selectedAgentAvailabilityPill, availability.value, availability.label);
+        updatePillState(selectedAgentDeviceTypePill, deviceType.value, deviceType.label);
+        selectedAgentAvailableCount.textContent = String(availableCount);
+        selectedAgentPendingReboot.textContent = pendingReboot ? "Yes" : "No";
+        selectedAgentCurrentJob.textContent = getCurrentJobSummary(agent);
+
+        patchWorkbenchHint.textContent = "Inspect packages, queue installs, and review available updates for " + displayName + ".";
+        selectedPatchAgentName.textContent = displayName;
+        selectedPatchAgentMeta.textContent = [
+            hostname && hostname !== displayName ? hostname : "",
+            snapshotTimestamp ? ("Inventory " + describeLastSeen(snapshotTimestamp)) : "Inventory age unknown",
+            securityCount > 0 ? (String(securityCount) + " security-relevant updates") : "No security-tagged updates"
+        ].filter((value) => value !== "").join(" | ");
+        updatePillState(selectedPatchAgentAvailability, availability.value, availability.label);
+        updatePillState(selectedPatchAgentType, deviceType.value, deviceType.label);
+        selectedPatchAvailableCount.textContent = String(availableCount);
+        selectedPatchSecurityCount.textContent = String(securityCount);
+        selectedPatchRebootState.textContent = pendingReboot ? "Yes" : "No";
     }
 
     function getWindowsUpdateSection(agent) {
@@ -4180,6 +5069,19 @@
             return "offline";
         }
         return "unknown";
+    }
+
+    function isPatchRelatedJob(job) {
+        const type = String(job?.type || job?.job_type || "").trim().toLowerCase();
+        if (!type) {
+            return false;
+        }
+
+        return type === "windows_update_install"
+            || type === "mac_software_update"
+            || type === "software_install"
+            || type.includes("patch")
+            || type.includes("update_install");
     }
 
     async function apiFetch(path, options) {

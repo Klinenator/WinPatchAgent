@@ -40,6 +40,12 @@ Current endpoints:
 - `GET /v1/admin/agents/{agentRecordId}/inventory`
 - `GET /v1/admin/evidence/soc2`
 - `GET /v1/admin/evidence/soc2.csv`
+- `GET /v1/admin/evidence/soc2.html`
+- `GET /v1/admin/evidence/patches`
+- `GET /v1/admin/evidence/patches.csv`
+- `GET /v1/admin/evidence/patches.html`
+- `GET /v1/admin/evidence/patches.ticket.md`
+- `POST /v1/admin/evidence/patches.ticket`
 - `POST /v1/admin/agents/{agentRecordId}/rename`
 - `POST /v1/admin/enrollments`
 - `GET /install/linux.sh?enrollment_key=...`
@@ -66,6 +72,12 @@ Environment variables:
 - `PATCH_API_GOOGLE_REDIRECT_URI`: optional OAuth callback URL (defaults to `https://<current-host>/v1/admin/auth/google/callback`)
 - `PATCH_API_GOOGLE_HOSTED_DOMAIN`: optional Google Workspace domain allow-list (example: `accessrrs.com`)
 - `PATCH_API_LEGACY_CONFIG_FILE`: optional path to legacy PHP config include used as fallback for Google OAuth values (default `/var/lib/php/config.php`)
+- `PATCH_API_TICKETS_DB_HOST`, `PATCH_API_TICKETS_DB_PORT`, `PATCH_API_TICKETS_DB_NAME`, `PATCH_API_TICKETS_DB_USER`, `PATCH_API_TICKETS_DB_PASSWORD`: optional ticket DB connection override used by the patch-review ticket creator
+- `PATCH_API_TICKETS_LEGACY_CONFIG_FILE`: optional fallback PHP config include that exposes `connect()` for the Tickets app DB (default `/var/lib/php-fpm/config.php`)
+- `PATCH_API_TICKETS_BASE_URL`: base URL used when returning created ticket links (default `https://tools.accessrrs.com/Tickets`)
+- `PATCH_API_TICKETS_REQUESTER_USERNAME`: local Tickets username to use/create as the requester for generated review tickets (default `PATCHAGENT`)
+- `PATCH_API_TICKETS_DEFAULT_ASSIGNEE_USER_ID`: optional Tickets `users.id` assigned to auto-created patch review tickets
+- `PATCH_API_TICKETS_DEFAULT_CATEGORY`: optional default category for auto-created patch review tickets (default `Patch Management`)
 - `PATCH_API_ADMIN_SESSION_NAME`: optional admin session cookie name (default `patchagent_admin`)
 - `PATCH_API_ADMIN_SESSION_TTL_SECONDS`: optional admin session lifetime seconds (default `28800`)
 - `PATCH_API_ADMIN_TOTP_SECRET`: optional Base32 TOTP secret for admin MFA (Google Authenticator/Authy compatible)
@@ -131,11 +143,14 @@ Admin pages:
 - `/admin/automation` automation profile builder and run-now controls
 - `/admin/seed-jobs` generic job seeding
 - `/admin/install-agent` enrollment key + installer generation
+- `/admin/evidence` audit evidence workspace (SOC2 baseline + patch review exports)
 - `/admin/settings` admin token storage and auth diagnostics
 
 The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution. Linux package rows for Ubuntu/Debian agents include CVE matches from OSV. Windows installer generation now supports both prebuilt mode (default) and source-build mode.
 The main admin page also shows a Windows SOC2 baseline card using reported endpoint posture (Defender, firewall, removable-storage policy, and BitLocker status). Endpoints that do not support BitLocker report `not_supported` instead of failing the baseline outright.
-For audit handoff, the main admin page can download point-in-time SOC2 evidence exports (`JSON` and `CSV`) from `/v1/admin/evidence/soc2` and `/v1/admin/evidence/soc2.csv` with per-agent control outcomes and a report SHA-256 fingerprint.
+For audit handoff, `/admin/evidence` now supports two export tracks:
+- SOC2 baseline evidence (`JSON`, `CSV`, `HTML`) from `/v1/admin/evidence/soc2*` with per-agent Windows control outcomes and a report SHA-256 fingerprint.
+- Patch review evidence (`JSON`, `CSV`, `HTML`) from `/v1/admin/evidence/patches*` plus a Markdown ticket draft from `/v1/admin/evidence/patches.ticket.md` and direct ticket creation via `POST /v1/admin/evidence/patches.ticket`, summarizing missing patches, Linux CVE-linked packages, inventory freshness, pending reboot state, and recent failed patch jobs.
 
 Suggested nginx site:
 

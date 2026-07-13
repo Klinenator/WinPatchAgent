@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PatchAgent Admin - SOC2 Evidence</title>
+    <title>PatchAgent Admin - Audit Evidence</title>
     <style>
         @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
 
@@ -257,6 +257,36 @@
             color: var(--red);
         }
 
+        .evidence-tabs {
+            margin-top: 12px;
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 6px;
+            box-shadow: var(--shadow);
+        }
+
+        .evidence-tab {
+            border: 0;
+            background: transparent;
+            color: #365066;
+            border-radius: 999px;
+            padding: 9px 15px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+        }
+
+        .evidence-tab.active {
+            background: linear-gradient(180deg, #3a97eb 0%, #2d82da 100%);
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(45, 130, 218, 0.22);
+        }
+
         .preview-frame {
             width: 100%;
             min-height: 620px;
@@ -310,7 +340,7 @@
             <a href="/admin/automation" class="side-link">Automation</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
-            <a href="/admin/evidence" class="side-link active">SOC2 Evidence</a>
+            <a href="/admin/evidence" class="side-link active">Audit Evidence</a>
             <a href="/admin/settings" class="side-link">Admin</a>
         </nav>
         <div class="side-foot">
@@ -323,25 +353,32 @@
     <main class="workspace">
         <section class="top-command">
             <div class="top-copy">
-                <h1>SOC2 Evidence</h1>
-                <p>Generate downloadable evidence snapshots and review the HTML report inline.</p>
+                <h1>Audit Evidence</h1>
+                <p id="reportDescription">Review patch posture evidence, generate a ticket draft for weekly review, and keep the SOC2 baseline export available.</p>
+                <div class="evidence-tabs">
+                    <button id="patchReportBtn" type="button" class="evidence-tab active">Patch Review</button>
+                    <button id="soc2ReportBtn" type="button" class="evidence-tab">SOC2 Baseline</button>
+                </div>
             </div>
             <div class="command-actions">
                 <button id="refreshStatusBtn" type="button" class="btn subtle">Refresh Status</button>
                 <button id="openHtmlBtn" type="button" class="btn subtle">Open HTML in New Tab</button>
                 <button id="downloadCsvBtn" type="button" class="btn primary">Download CSV</button>
+                <button id="createTicketBtn" type="button" class="btn primary">Create Ticket</button>
+                <button id="copyTicketBtn" type="button" class="btn subtle">Copy Ticket Draft</button>
+                <button id="downloadTicketBtn" type="button" class="btn subtle">Download Ticket Draft</button>
             </div>
         </section>
         <div id="pageStatus" class="status-line"></div>
 
         <section class="panel">
-            <h2>HTML Evidence Report</h2>
-            <p class="hint">This replaces the old JSON evidence export in the dashboard actions.</p>
+            <h2 id="previewTitle">Patch Review HTML Report</h2>
+            <p id="previewHint" class="hint">Use this for weekly patch review, remediation follow-up, and auditor-ready evidence snapshots.</p>
             <div class="actions">
                 <button id="loadHtmlBtn" type="button" class="btn subtle">Load HTML Report</button>
             </div>
             <div id="exportStatus" class="status-line"></div>
-            <iframe id="htmlPreview" class="preview-frame" title="SOC2 evidence preview"></iframe>
+            <iframe id="htmlPreview" class="preview-frame" title="Audit evidence preview"></iframe>
         </section>
     </main>
 </div>
@@ -349,19 +386,55 @@
 <script>
 (() => {
     const STORAGE_KEY = "patchagent_admin_token";
+    const EVIDENCE_TYPES = {
+        patches: {
+            title: "Patch Review HTML Report",
+            description: "Review patch posture evidence, generate a ticket draft for weekly review, and keep the SOC2 baseline export available.",
+            hint: "Use this for weekly patch review, remediation follow-up, and auditor-ready evidence snapshots.",
+            htmlUrl: "/v1/admin/evidence/patches.html",
+            csvUrl: "/v1/admin/evidence/patches.csv",
+            ticketUrl: "/v1/admin/evidence/patches.ticket.md",
+            createTicketUrl: "/v1/admin/evidence/patches.ticket",
+            htmlStatus: "Loaded patch review HTML report.",
+            csvStatus: "Downloaded patch review CSV evidence.",
+            openStatus: "Opened patch review HTML report in a new tab."
+        },
+        soc2: {
+            title: "SOC2 Baseline HTML Report",
+            description: "Review the Windows control baseline evidence that was already built for SOC2 security controls.",
+            hint: "Use this when you need the Windows baseline control snapshot for auditors or internal control review.",
+            htmlUrl: "/v1/admin/evidence/soc2.html",
+            csvUrl: "/v1/admin/evidence/soc2.csv",
+            ticketUrl: "",
+            createTicketUrl: "",
+            htmlStatus: "Loaded SOC2 HTML report.",
+            csvStatus: "Downloaded SOC2 CSV evidence.",
+            openStatus: "Opened SOC2 HTML report in a new tab."
+        }
+    };
 
     const authUser = document.getElementById("authUser");
     const pageStatus = document.getElementById("pageStatus");
     const exportStatus = document.getElementById("exportStatus");
     const htmlPreview = document.getElementById("htmlPreview");
+    const reportDescription = document.getElementById("reportDescription");
+    const previewTitle = document.getElementById("previewTitle");
+    const previewHint = document.getElementById("previewHint");
 
     const logoutBtn = document.getElementById("logoutBtn");
     const refreshStatusBtn = document.getElementById("refreshStatusBtn");
     const loadHtmlBtn = document.getElementById("loadHtmlBtn");
     const openHtmlBtn = document.getElementById("openHtmlBtn");
     const downloadCsvBtn = document.getElementById("downloadCsvBtn");
+    const createTicketBtn = document.getElementById("createTicketBtn");
+    const patchReportBtn = document.getElementById("patchReportBtn");
+    const soc2ReportBtn = document.getElementById("soc2ReportBtn");
+    const copyTicketBtn = document.getElementById("copyTicketBtn");
+    const downloadTicketBtn = document.getElementById("downloadTicketBtn");
 
+    let activeEvidenceType = "patches";
     let latestHtml = "";
+    let latestTicketMarkdown = "";
 
     logoutBtn.addEventListener("click", async () => {
         try {
@@ -374,6 +447,16 @@
 
     refreshStatusBtn.addEventListener("click", async () => {
         await loadAuthStatus();
+    });
+
+    patchReportBtn.addEventListener("click", async () => {
+        setEvidenceType("patches");
+        await loadEvidenceHtml();
+    });
+
+    soc2ReportBtn.addEventListener("click", async () => {
+        setEvidenceType("soc2");
+        await loadEvidenceHtml();
     });
 
     loadHtmlBtn.addEventListener("click", async () => {
@@ -395,7 +478,7 @@
         if (!popup) {
             setStatus(exportStatus, "Popup blocked by browser. Allow popups and try again.", "error");
         } else {
-            setStatus(exportStatus, "Opened HTML report in a new tab.", "success");
+            setStatus(exportStatus, getActiveConfig().openStatus, "success");
         }
 
         window.setTimeout(() => URL.revokeObjectURL(url), 2000);
@@ -403,17 +486,86 @@
 
     downloadCsvBtn.addEventListener("click", async () => {
         try {
-            const response = await fetchWithAuth("/v1/admin/evidence/soc2.csv", "text/csv");
+            const response = await fetchWithAuth(getActiveConfig().csvUrl, "text/csv");
             const blob = await response.blob();
             const disposition = String(response.headers.get("Content-Disposition") || "");
-            let filename = "soc2_evidence.csv";
+            let filename = activeEvidenceType === "patches" ? "patch_review.csv" : "soc2_evidence.csv";
             const filenameMatch = disposition.match(/filename="?([^\";]+)"?/i);
             if (filenameMatch && filenameMatch[1]) {
                 filename = filenameMatch[1];
             }
 
             triggerDownload(blob, filename);
-            setStatus(exportStatus, "Downloaded SOC2 CSV evidence.", "success");
+            setStatus(exportStatus, getActiveConfig().csvStatus, "success");
+        } catch (error) {
+            setStatus(exportStatus, String(error.message || error), "error");
+        }
+    });
+
+    createTicketBtn.addEventListener("click", async () => {
+        if (activeEvidenceType !== "patches") {
+            return;
+        }
+
+        try {
+            const data = await apiFetchJson(getActiveConfig().createTicketUrl, {
+                method: "POST",
+                body: JSON.stringify({})
+            });
+            const ticket = data && typeof data.ticket === "object" ? data.ticket : null;
+            const ticketKey = String(ticket?.ticket_key || "").trim();
+            const ticketUrl = String(ticket?.ticket_url || "").trim();
+
+            if (ticketUrl) {
+                const popup = window.open(ticketUrl, "_blank", "noopener");
+                if (!popup) {
+                    setStatus(exportStatus, "Created ticket " + (ticketKey || "(unknown)") + ". Popup blocked, but the ticket was created.", "success");
+                } else {
+                    setStatus(exportStatus, "Created ticket " + (ticketKey || "(unknown)") + " and opened it in a new tab.", "success");
+                }
+            } else {
+                setStatus(exportStatus, "Created ticket " + (ticketKey || "(unknown)") + ".", "success");
+            }
+        } catch (error) {
+            setStatus(exportStatus, String(error.message || error), "error");
+        }
+    });
+
+    copyTicketBtn.addEventListener("click", async () => {
+        if (activeEvidenceType !== "patches") {
+            return;
+        }
+
+        try {
+            if (!latestTicketMarkdown) {
+                latestTicketMarkdown = await loadTicketMarkdown();
+            }
+
+            await navigator.clipboard.writeText(latestTicketMarkdown);
+            setStatus(exportStatus, "Copied patch review ticket draft to clipboard.", "success");
+        } catch (error) {
+            setStatus(exportStatus, String(error.message || error), "error");
+        }
+    });
+
+    downloadTicketBtn.addEventListener("click", async () => {
+        if (activeEvidenceType !== "patches") {
+            return;
+        }
+
+        try {
+            const response = await fetchWithAuth(getActiveConfig().ticketUrl, "text/markdown");
+            const markdown = await response.text();
+            const disposition = String(response.headers.get("Content-Disposition") || "");
+            let filename = "patch_review_ticket.md";
+            const filenameMatch = disposition.match(/filename="?([^\";]+)"?/i);
+            if (filenameMatch && filenameMatch[1]) {
+                filename = filenameMatch[1];
+            }
+
+            latestTicketMarkdown = markdown;
+            triggerDownload(new Blob([markdown], { type: "text/markdown;charset=utf-8" }), filename);
+            setStatus(exportStatus, "Downloaded patch review ticket draft.", "success");
         } catch (error) {
             setStatus(exportStatus, String(error.message || error), "error");
         }
@@ -421,15 +573,25 @@
 
     async function loadEvidenceHtml() {
         try {
-            const response = await fetchWithAuth("/v1/admin/evidence/soc2.html", "text/html");
+            latestTicketMarkdown = "";
+            const response = await fetchWithAuth(getActiveConfig().htmlUrl, "text/html");
             latestHtml = await response.text();
             htmlPreview.srcdoc = latestHtml;
-            setStatus(exportStatus, "Loaded SOC2 HTML report.", "success");
+            setStatus(exportStatus, getActiveConfig().htmlStatus, "success");
         } catch (error) {
             latestHtml = "";
             htmlPreview.srcdoc = "";
             setStatus(exportStatus, String(error.message || error), "error");
         }
+    }
+
+    async function loadTicketMarkdown() {
+        if (activeEvidenceType !== "patches") {
+            return "";
+        }
+
+        const response = await fetchWithAuth(getActiveConfig().ticketUrl, "text/markdown");
+        return await response.text();
     }
 
     async function loadAuthStatus() {
@@ -534,6 +696,27 @@
         return response;
     }
 
+    function getActiveConfig() {
+        return EVIDENCE_TYPES[activeEvidenceType];
+    }
+
+    function setEvidenceType(type) {
+        activeEvidenceType = type === "soc2" ? "soc2" : "patches";
+        latestHtml = "";
+        latestTicketMarkdown = "";
+        htmlPreview.srcdoc = "";
+
+        const config = getActiveConfig();
+        reportDescription.textContent = config.description;
+        previewTitle.textContent = config.title;
+        previewHint.textContent = config.hint;
+        patchReportBtn.classList.toggle("active", activeEvidenceType === "patches");
+        soc2ReportBtn.classList.toggle("active", activeEvidenceType === "soc2");
+        createTicketBtn.disabled = activeEvidenceType !== "patches";
+        copyTicketBtn.disabled = activeEvidenceType !== "patches";
+        downloadTicketBtn.disabled = activeEvidenceType !== "patches";
+    }
+
     function triggerDownload(blob, filename) {
         const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -550,6 +733,7 @@
         element.className = "status-line" + (kind ? " " + kind : "");
     }
 
+    setEvidenceType("patches");
     loadAuthStatus().catch(() => {});
     loadEvidenceHtml().catch(() => {});
 })();

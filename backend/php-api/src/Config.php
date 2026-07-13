@@ -17,6 +17,16 @@ final class Config
         public readonly string $dbUser,
         public readonly string $dbPassword,
         public readonly string $dbTable,
+        public readonly string $ticketsDbHost,
+        public readonly int $ticketsDbPort,
+        public readonly string $ticketsDbName,
+        public readonly string $ticketsDbUser,
+        public readonly string $ticketsDbPassword,
+        public readonly string $ticketsLegacyConfigFile,
+        public readonly string $ticketsBaseUrl,
+        public readonly string $ticketsRequesterUsername,
+        public readonly string $ticketsDefaultAssigneeUserId,
+        public readonly string $ticketsDefaultCategory,
         public readonly string $enrollmentKey,
         public readonly string $adminKey,
         public readonly string $googleClientId,
@@ -47,19 +57,33 @@ final class Config
     public static function fromEnvironment(): self
     {
         $defaultRoot = Path::normalize(dirname(__DIR__) . '/storage/runtime');
-        $legacyConfig = self::legacyPhpConfig(
-            self::env('PATCH_API_LEGACY_CONFIG_FILE', '/var/lib/php/config.php')
-        );
+        $legacyConfigFile = self::env('PATCH_API_LEGACY_CONFIG_FILE', '/var/lib/php/config.php');
+        $legacyConfig = self::legacyPhpConfig($legacyConfigFile);
+        $dbHost = self::env('PATCH_API_DB_HOST', '127.0.0.1');
+        $dbPort = max(1, self::envInt('PATCH_API_DB_PORT', 3306));
+        $dbName = self::env('PATCH_API_DB_NAME', '');
+        $dbUser = self::env('PATCH_API_DB_USER', '');
+        $dbPassword = self::env('PATCH_API_DB_PASSWORD', '');
 
         return new self(
             storageRoot: Path::normalize(self::env('PATCH_API_STORAGE_ROOT', $defaultRoot)),
             dbDriver: strtolower(self::env('PATCH_API_DB_DRIVER', '')),
-            dbHost: self::env('PATCH_API_DB_HOST', '127.0.0.1'),
-            dbPort: max(1, self::envInt('PATCH_API_DB_PORT', 3306)),
-            dbName: self::env('PATCH_API_DB_NAME', ''),
-            dbUser: self::env('PATCH_API_DB_USER', ''),
-            dbPassword: self::env('PATCH_API_DB_PASSWORD', ''),
+            dbHost: $dbHost,
+            dbPort: $dbPort,
+            dbName: $dbName,
+            dbUser: $dbUser,
+            dbPassword: $dbPassword,
             dbTable: self::env('PATCH_API_DB_TABLE', 'patchapi_documents'),
+            ticketsDbHost: self::env('PATCH_API_TICKETS_DB_HOST', $dbHost),
+            ticketsDbPort: max(1, self::envInt('PATCH_API_TICKETS_DB_PORT', $dbPort)),
+            ticketsDbName: self::env('PATCH_API_TICKETS_DB_NAME', 'rrs_tickets'),
+            ticketsDbUser: self::env('PATCH_API_TICKETS_DB_USER', $dbUser),
+            ticketsDbPassword: self::env('PATCH_API_TICKETS_DB_PASSWORD', $dbPassword),
+            ticketsLegacyConfigFile: self::env('PATCH_API_TICKETS_LEGACY_CONFIG_FILE', '/var/lib/php-fpm/config.php'),
+            ticketsBaseUrl: rtrim(self::env('PATCH_API_TICKETS_BASE_URL', 'https://tools.accessrrs.com/Tickets'), '/'),
+            ticketsRequesterUsername: strtoupper(self::env('PATCH_API_TICKETS_REQUESTER_USERNAME', 'PATCHAGENT')),
+            ticketsDefaultAssigneeUserId: self::env('PATCH_API_TICKETS_DEFAULT_ASSIGNEE_USER_ID', ''),
+            ticketsDefaultCategory: self::env('PATCH_API_TICKETS_DEFAULT_CATEGORY', 'Patch Management'),
             enrollmentKey: self::env('PATCH_API_ENROLLMENT_KEY', ''),
             adminKey: self::env('PATCH_API_ADMIN_KEY', ''),
             googleClientId: self::env('PATCH_API_GOOGLE_CLIENT_ID', $legacyConfig['google_client_id'] ?? ''),

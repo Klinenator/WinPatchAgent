@@ -190,6 +190,36 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && $path === '/v1/admin/evidence/patches') {
+                $this->requireAdmin($request);
+                $this->handlePatchEvidenceJson();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/evidence/patches.csv') {
+                $this->requireAdmin($request);
+                $this->handlePatchEvidenceCsv();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/evidence/patches.html') {
+                $this->requireAdmin($request);
+                $this->handlePatchEvidenceHtml();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/evidence/patches.ticket.md') {
+                $this->requireAdmin($request);
+                $this->handlePatchEvidenceTicketMarkdown();
+                return;
+            }
+
+            if ($method === 'POST' && $path === '/v1/admin/evidence/patches.ticket') {
+                $this->requireAdmin($request);
+                $this->handleCreatePatchEvidenceTicket($request);
+                return;
+            }
+
             if ($method === 'GET' && preg_match('#^/v1/admin/agents/([^/]+)/inventory$#', $path, $matches) === 1) {
                 $this->requireAdmin($request);
                 $this->handleGetAgentInventory(rawurldecode($matches[1]));
@@ -1466,6 +1496,61 @@ final class App
         echo $html;
     }
 
+    private function handlePatchEvidenceJson(): void
+    {
+        JsonResponse::ok([
+            'evidence' => $this->buildPatchEvidenceReport(),
+        ]);
+    }
+
+    private function handlePatchEvidenceCsv(): void
+    {
+        $report = $this->buildPatchEvidenceReport();
+        $csv = $this->buildPatchEvidenceCsv($report);
+        $filename = 'patch_review_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string) ($report['evidence_id'] ?? 'snapshot')) . '.csv';
+
+        http_response_code(200);
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        echo $csv;
+    }
+
+    private function handlePatchEvidenceHtml(): void
+    {
+        $report = $this->buildPatchEvidenceReport();
+        $html = $this->buildPatchEvidenceHtml($report);
+        $filename = 'patch_review_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string) ($report['evidence_id'] ?? 'snapshot')) . '.html';
+
+        http_response_code(200);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Content-Disposition: inline; filename="' . $filename . '"');
+        echo $html;
+    }
+
+    private function handlePatchEvidenceTicketMarkdown(): void
+    {
+        $report = $this->buildPatchEvidenceReport();
+        $markdown = $this->buildPatchEvidenceTicketMarkdown($report);
+        $filename = 'patch_review_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', (string) ($report['evidence_id'] ?? 'snapshot')) . '.md';
+
+        http_response_code(200);
+        header('Content-Type: text/markdown; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        echo $markdown;
+    }
+
+    private function handleCreatePatchEvidenceTicket(Request $request): void
+    {
+        $body = $request->json();
+        $report = $this->buildPatchEvidenceReport();
+        $ticket = $this->createPatchEvidenceTicket($report, is_array($body) ? $body : []);
+
+        JsonResponse::ok([
+            'ticket' => $ticket,
+            'evidence_id' => (string) ($report['evidence_id'] ?? ''),
+        ]);
+    }
+
     private function buildSoc2EvidenceReport(): array
     {
         $generatedAt = gmdate(DATE_ATOM);
@@ -2009,6 +2094,1169 @@ final class App
     <p class="hash">sha256: ' . $escape($sha256) . '</p>
 </body>
 </html>';
+    }
+
+    private function buildPatchEvidenceReport(): array
+    {
+        $generatedAt = gmdate(DATE_ATOM);
+        $evidenceId = 'patch_review_' . gmdate('Ymd\THis\Z');
+        $adminUser = $this->currentAdminUser();
+        $generatedBy = is_array($adminUser) ? trim((string) ($adminUser['email'] ?? '')) : '';
+        if ($generatedBy === '') {
+            $generatedBy = 'authenticated_admin';
+        }
+
+        $jobs = $this->jobs->listJobs();
+        $jobStatusesById = [];
+        foreach ($jobs as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+
+            $jobId = trim((string) ($job['job_id'] ?? ''));
+            if ($jobId === '') {
+                continue;
+            }
+
+            $jobStatusesById[$jobId] = strtolower(trim((string) ($job['status'] ?? '')));
+        }
+
+        $agents = $this->agents->listAgents();
+        $rows = [];
+        $missingPatchRollup = [];
+        $counts = [
+            'total_agents' => count($agents),
+            'windows_agents' => 0,
+            'linux_agents' => 0,
+            'mac_agents' => 0,
+            'agents_with_inventory' => 0,
+            'agents_missing_inventory' => 0,
+            'agents_stale_inventory' => 0,
+            'agents_needing_patches' => 0,
+            'agents_with_security_updates' => 0,
+            'agents_pending_reboot' => 0,
+            'patch_status_pass' => 0,
+            'patch_status_warn' => 0,
+            'patch_status_fail' => 0,
+        ];
+
+        foreach ($agents as $agent) {
+            if (!is_array($agent)) {
+                continue;
+            }
+
+            $agent = $this->normalizeAgentCurrentJobForDisplay($agent, $jobStatusesById);
+            $agentRecordId = trim((string) ($agent['agent_record_id'] ?? ''));
+            $inventory = $this->inventory->loadSnapshot($agentRecordId);
+            $os = is_array($agent['os'] ?? null) ? $agent['os'] : [];
+            $osFamily = $this->detectOsFamily($os);
+
+            if ($osFamily === 'windows') {
+                $counts['windows_agents']++;
+            } elseif ($osFamily === 'linux') {
+                $counts['linux_agents']++;
+            } elseif ($osFamily === 'mac') {
+                $counts['mac_agents']++;
+            }
+
+            $inventoryStoredAt = '';
+            if (is_array($inventory)) {
+                $inventory['windows_update'] = $this->normalizeWindowsUpdateInventory(
+                    is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : []
+                );
+                $inventory['linux'] = $this->normalizeLinuxInventory(
+                    is_array($inventory['linux'] ?? null) ? $inventory['linux'] : []
+                );
+                $inventory['mac_os'] = $this->normalizeMacOsInventory(
+                    is_array($inventory['mac_os'] ?? null)
+                        ? $inventory['mac_os']
+                        : (is_array($inventory['macos'] ?? null) ? $inventory['macos'] : [])
+                );
+                $inventoryStoredAt = trim((string) ($inventory['stored_at'] ?? ''));
+            } else {
+                $inventory = [];
+            }
+
+            $inventoryState = 'missing';
+            if ($inventoryStoredAt !== '') {
+                $counts['agents_with_inventory']++;
+                $inventoryState = $this->isInventorySnapshotStale($inventoryStoredAt) ? 'stale' : 'fresh';
+                if ($inventoryState === 'stale') {
+                    $counts['agents_stale_inventory']++;
+                }
+            } else {
+                $counts['agents_missing_inventory']++;
+            }
+
+            $patchFacts = $this->collectPatchFacts($inventory, $osFamily);
+            $availablePatchCount = (int) ($patchFacts['available_patch_count'] ?? 0);
+            $securityPatchCount = (int) ($patchFacts['security_patch_count'] ?? 0);
+            $pendingReboot = (bool) ($patchFacts['pending_reboot'] ?? false);
+            $topMissingPatches = array_values(is_array($patchFacts['top_missing_patches'] ?? null) ? $patchFacts['top_missing_patches'] : []);
+            $cveIds = array_values(is_array($patchFacts['cve_ids'] ?? null) ? $patchFacts['cve_ids'] : []);
+
+            if ($availablePatchCount > 0) {
+                $counts['agents_needing_patches']++;
+            }
+            if ($securityPatchCount > 0) {
+                $counts['agents_with_security_updates']++;
+            }
+            if ($pendingReboot) {
+                $counts['agents_pending_reboot']++;
+            }
+
+            $patchStatus = 'pass';
+            if ($inventoryState === 'missing' || $securityPatchCount > 0) {
+                $patchStatus = 'fail';
+            } elseif ($inventoryState === 'stale' || $availablePatchCount > 0 || $pendingReboot) {
+                $patchStatus = 'warn';
+            }
+
+            if ($patchStatus === 'fail') {
+                $counts['patch_status_fail']++;
+            } elseif ($patchStatus === 'warn') {
+                $counts['patch_status_warn']++;
+            } else {
+                $counts['patch_status_pass']++;
+            }
+
+            foreach ($topMissingPatches as $patchName) {
+                $signature = trim((string) $patchName);
+                if ($signature === '') {
+                    continue;
+                }
+
+                $existing = $missingPatchRollup[$signature] ?? [
+                    'name' => $signature,
+                    'source' => (string) ($patchFacts['primary_source'] ?? ''),
+                    'devices' => [],
+                    'security_hits' => 0,
+                ];
+                $existing['devices'][$agentRecordId !== '' ? $agentRecordId : $signature] = true;
+                if ($securityPatchCount > 0) {
+                    $existing['security_hits'] = (int) $existing['security_hits'] + 1;
+                }
+                $missingPatchRollup[$signature] = $existing;
+            }
+
+            $heartbeat = is_array($agent['last_heartbeat'] ?? null) ? $agent['last_heartbeat'] : [];
+            $currentJob = is_array($heartbeat['current_job'] ?? null) ? $heartbeat['current_job'] : [];
+            $currentJobSummary = 'None';
+            if ($currentJob !== []) {
+                $currentJobId = trim((string) ($currentJob['job_id'] ?? ''));
+                $currentJobState = trim((string) ($currentJob['state'] ?? ''));
+                if ($currentJobId !== '') {
+                    $currentJobSummary = $currentJobId . ($currentJobState !== '' ? ' (' . $currentJobState . ')' : '');
+                }
+            }
+
+            $rows[] = [
+                'agent_record_id' => $agentRecordId,
+                'device_id' => (string) ($agent['device_id'] ?? ''),
+                'display_name' => (string) ($agent['display_name'] ?? ''),
+                'hostname' => (string) ($agent['hostname'] ?? ''),
+                'os_family' => $osFamily,
+                'os_description' => trim((string) ($os['description'] ?? '')),
+                'availability' => $this->classifyAgentAvailability((string) ($agent['last_seen_at'] ?? '')),
+                'last_seen_at' => (string) ($agent['last_seen_at'] ?? ''),
+                'inventory_state' => $inventoryState,
+                'inventory_stored_at' => $inventoryStoredAt,
+                'patch_status' => $patchStatus,
+                'available_patch_count' => $availablePatchCount,
+                'security_patch_count' => $securityPatchCount,
+                'pending_reboot' => $pendingReboot,
+                'current_job' => $currentJobSummary,
+                'top_missing_patches' => $topMissingPatches,
+                'cve_ids' => $cveIds,
+            ];
+        }
+
+        $recentFailedPatchJobs = $this->collectRecentFailedPatchJobs($jobs);
+        $counts['recent_failed_patch_jobs'] = count($recentFailedPatchJobs);
+
+        $topMissingPatches = array_values(array_map(
+            static function (array $entry): array {
+                return [
+                    'name' => (string) ($entry['name'] ?? ''),
+                    'source' => (string) ($entry['source'] ?? ''),
+                    'device_count' => count(is_array($entry['devices'] ?? null) ? $entry['devices'] : []),
+                    'security_hits' => (int) ($entry['security_hits'] ?? 0),
+                ];
+            },
+            $missingPatchRollup
+        ));
+
+        usort($topMissingPatches, static function (array $left, array $right): int {
+            $deviceCompare = ((int) ($right['device_count'] ?? 0)) <=> ((int) ($left['device_count'] ?? 0));
+            if ($deviceCompare !== 0) {
+                return $deviceCompare;
+            }
+
+            $securityCompare = ((int) ($right['security_hits'] ?? 0)) <=> ((int) ($left['security_hits'] ?? 0));
+            if ($securityCompare !== 0) {
+                return $securityCompare;
+            }
+
+            return strcmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+        });
+        $topMissingPatches = array_slice($topMissingPatches, 0, 15);
+
+        usort($rows, static function (array $left, array $right): int {
+            $severityRank = ['fail' => 0, 'warn' => 1, 'pass' => 2];
+            $leftRank = $severityRank[(string) ($left['patch_status'] ?? 'pass')] ?? 3;
+            $rightRank = $severityRank[(string) ($right['patch_status'] ?? 'pass')] ?? 3;
+            if ($leftRank !== $rightRank) {
+                return $leftRank <=> $rightRank;
+            }
+
+            $securityCompare = ((int) ($right['security_patch_count'] ?? 0)) <=> ((int) ($left['security_patch_count'] ?? 0));
+            if ($securityCompare !== 0) {
+                return $securityCompare;
+            }
+
+            $availableCompare = ((int) ($right['available_patch_count'] ?? 0)) <=> ((int) ($left['available_patch_count'] ?? 0));
+            if ($availableCompare !== 0) {
+                return $availableCompare;
+            }
+
+            return strcmp(
+                trim((string) ($left['display_name'] ?? $left['hostname'] ?? $left['agent_record_id'] ?? '')),
+                trim((string) ($right['display_name'] ?? $right['hostname'] ?? $right['agent_record_id'] ?? ''))
+            );
+        });
+
+        $overallStatus = 'pass';
+        if ($counts['patch_status_fail'] > 0 || $counts['recent_failed_patch_jobs'] > 0) {
+            $overallStatus = 'fail';
+        } elseif ($counts['patch_status_warn'] > 0) {
+            $overallStatus = 'warn';
+        }
+
+        $report = [
+            'evidence_id' => $evidenceId,
+            'schema_version' => 1,
+            'generated_at' => $generatedAt,
+            'generated_by' => $generatedBy,
+            'overall_status' => $overallStatus,
+            'inventory_freshness_seconds' => max(43200, $this->config->inventorySeconds * 2),
+            'counts' => $counts,
+            'agents' => $rows,
+            'top_missing_patches' => $topMissingPatches,
+            'recent_failed_patch_jobs' => $recentFailedPatchJobs,
+        ];
+
+        $report['sha256'] = hash('sha256', (string) json_encode($report, JSON_UNESCAPED_SLASHES));
+        return $report;
+    }
+
+    private function collectPatchFacts(array $inventory, string $osFamily): array
+    {
+        $pendingReboot = $this->detectPendingReboot($inventory, $osFamily);
+        if ($osFamily === 'windows') {
+            $windowsUpdate = is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : [];
+            $available = is_array($windowsUpdate['available_patches'] ?? null) ? $windowsUpdate['available_patches'] : [];
+            $names = [];
+            foreach ($available as $patch) {
+                if (!is_array($patch)) {
+                    continue;
+                }
+
+                $name = trim((string) ($patch['title'] ?? $patch['update_id'] ?? $patch['kb'] ?? ''));
+                if ($name !== '') {
+                    $names[] = $name;
+                }
+            }
+
+            return [
+                'available_patch_count' => count($available),
+                'security_patch_count' => 0,
+                'pending_reboot' => $pendingReboot,
+                'top_missing_patches' => array_values(array_slice(array_unique($names), 0, 5)),
+                'cve_ids' => [],
+                'primary_source' => 'Windows Update',
+            ];
+        }
+
+        if ($osFamily === 'linux') {
+            $linux = is_array($inventory['linux'] ?? null) ? $inventory['linux'] : [];
+            $details = is_array($linux['available_package_details'] ?? null) ? $linux['available_package_details'] : [];
+            $packageNames = [];
+            $securityPatchCount = 0;
+            $cveIds = [];
+
+            foreach ($details as $detail) {
+                if (!is_array($detail)) {
+                    continue;
+                }
+
+                $name = trim((string) ($detail['name'] ?? $detail['package'] ?? ''));
+                if ($name !== '') {
+                    $packageNames[] = $name;
+                }
+
+                $vulnCountRaw = $detail['vulnerability_count'] ?? null;
+                $vulnCount = is_numeric($vulnCountRaw) ? max(0, (int) $vulnCountRaw) : 0;
+                if ($vulnCount > 0) {
+                    $securityPatchCount++;
+                }
+
+                $detailCves = is_array($detail['cve_ids'] ?? null) ? $detail['cve_ids'] : [];
+                foreach ($detailCves as $cveId) {
+                    $normalized = strtoupper(trim((string) $cveId));
+                    if ($normalized !== '') {
+                        $cveIds[$normalized] = true;
+                    }
+                }
+            }
+
+            if ($packageNames === []) {
+                $packages = is_array($linux['available_packages'] ?? null) ? $linux['available_packages'] : [];
+                foreach ($packages as $packageName) {
+                    $normalized = trim((string) $packageName);
+                    if ($normalized !== '') {
+                        $packageNames[] = $normalized;
+                    }
+                }
+            }
+
+            return [
+                'available_patch_count' => max(count($packageNames), (int) ($linux['available_packages_count'] ?? 0)),
+                'security_patch_count' => $securityPatchCount,
+                'pending_reboot' => $pendingReboot,
+                'top_missing_patches' => array_values(array_slice(array_unique($packageNames), 0, 5)),
+                'cve_ids' => array_values(array_slice(array_keys($cveIds), 0, 12)),
+                'primary_source' => 'APT',
+            ];
+        }
+
+        if ($osFamily === 'mac') {
+            $macOs = is_array($inventory['mac_os'] ?? null) ? $inventory['mac_os'] : [];
+            $labels = is_array($macOs['available_update_labels'] ?? null)
+                ? $macOs['available_update_labels']
+                : (is_array($macOs['availableUpdateLabels'] ?? null) ? $macOs['availableUpdateLabels'] : []);
+
+            $names = [];
+            foreach ($labels as $label) {
+                $normalized = trim((string) $label);
+                if ($normalized !== '') {
+                    $names[] = $normalized;
+                }
+            }
+
+            return [
+                'available_patch_count' => max(count($names), (int) ($macOs['available_updates_count'] ?? 0)),
+                'security_patch_count' => 0,
+                'pending_reboot' => $pendingReboot,
+                'top_missing_patches' => array_values(array_slice(array_unique($names), 0, 5)),
+                'cve_ids' => [],
+                'primary_source' => 'softwareupdate',
+            ];
+        }
+
+        return [
+            'available_patch_count' => 0,
+            'security_patch_count' => 0,
+            'pending_reboot' => $pendingReboot,
+            'top_missing_patches' => [],
+            'cve_ids' => [],
+            'primary_source' => '',
+        ];
+    }
+
+    private function detectPendingReboot(array $inventory, string $osFamily): bool
+    {
+        $candidates = [
+            $inventory['pending_reboot'] ?? null,
+            $inventory['pendingReboot'] ?? null,
+            $inventory['reboot_required'] ?? null,
+            $inventory['rebootRequired'] ?? null,
+        ];
+
+        if ($osFamily === 'windows') {
+            $windowsUpdate = is_array($inventory['windows_update'] ?? null) ? $inventory['windows_update'] : [];
+            $candidates[] = $windowsUpdate['pending_reboot'] ?? null;
+            $candidates[] = $windowsUpdate['pendingReboot'] ?? null;
+            $candidates[] = $windowsUpdate['reboot_required'] ?? null;
+            $candidates[] = $windowsUpdate['rebootRequired'] ?? null;
+        } elseif ($osFamily === 'linux') {
+            $linux = is_array($inventory['linux'] ?? null) ? $inventory['linux'] : [];
+            $candidates[] = $linux['pending_reboot'] ?? null;
+            $candidates[] = $linux['pendingReboot'] ?? null;
+            $candidates[] = $linux['reboot_required'] ?? null;
+            $candidates[] = $linux['rebootRequired'] ?? null;
+        } elseif ($osFamily === 'mac') {
+            $macOs = is_array($inventory['mac_os'] ?? null) ? $inventory['mac_os'] : [];
+            $candidates[] = $macOs['pending_reboot'] ?? null;
+            $candidates[] = $macOs['pendingReboot'] ?? null;
+            $candidates[] = $macOs['reboot_required'] ?? null;
+            $candidates[] = $macOs['rebootRequired'] ?? null;
+        }
+
+        foreach ($candidates as $candidate) {
+            $normalized = $this->coerceNullableBool($candidate);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+
+        return false;
+    }
+
+    private function coerceNullableBool(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            if ((int) $value === 1) {
+                return true;
+            }
+            if ((int) $value === 0) {
+                return false;
+            }
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (in_array($normalized, ['true', '1', 'yes', 'y', 'on', 'required', 'pending'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['false', '0', 'no', 'n', 'off', 'clear', 'none', 'not_required'], true)) {
+            return false;
+        }
+
+        return null;
+    }
+
+    private function classifyAgentAvailability(string $lastSeenAt): string
+    {
+        $timestamp = strtotime(trim($lastSeenAt));
+        if ($timestamp === false) {
+            return 'unknown';
+        }
+
+        $ageSeconds = max(0, time() - $timestamp);
+        if ($ageSeconds <= 300) {
+            return 'online';
+        }
+        if ($ageSeconds <= 1800) {
+            return 'stale';
+        }
+
+        return 'offline';
+    }
+
+    private function isInventorySnapshotStale(string $storedAt): bool
+    {
+        $timestamp = strtotime(trim($storedAt));
+        if ($timestamp === false) {
+            return true;
+        }
+
+        $staleThreshold = max(43200, $this->config->inventorySeconds * 2);
+        return (time() - $timestamp) > $staleThreshold;
+    }
+
+    private function collectRecentFailedPatchJobs(array $jobs): array
+    {
+        $failedJobs = array_values(array_filter($jobs, function (mixed $job): bool {
+            if (!is_array($job)) {
+                return false;
+            }
+
+            $status = strtolower(trim((string) ($job['status'] ?? '')));
+            $type = strtolower(trim((string) ($job['type'] ?? '')));
+            return $status === 'failed' && $this->isPatchRelatedJobType($type);
+        }));
+
+        usort($failedJobs, static function (array $left, array $right): int {
+            return strcmp((string) ($right['created_at'] ?? ''), (string) ($left['created_at'] ?? ''));
+        });
+
+        return array_values(array_map(function (array $job): array {
+            $completion = is_array($job['completion'] ?? null) ? $job['completion'] : [];
+            $result = is_array($completion['result'] ?? null) ? $completion['result'] : [];
+            $error = is_array($completion['error'] ?? null) ? $completion['error'] : [];
+
+            $summary = trim((string) ($result['summary'] ?? ''));
+            if ($summary === '') {
+                $summary = trim((string) ($error['message'] ?? ''));
+            }
+            if ($summary === '') {
+                $summary = 'No failure summary reported.';
+            }
+
+            return [
+                'job_id' => (string) ($job['job_id'] ?? ''),
+                'type' => (string) ($job['type'] ?? ''),
+                'created_at' => (string) ($job['created_at'] ?? ''),
+                'target_agent_id' => (string) ($job['target_agent_id'] ?? ''),
+                'target_device_id' => (string) ($job['target_device_id'] ?? ''),
+                'summary' => $summary,
+            ];
+        }, array_slice($failedJobs, 0, 10)));
+    }
+
+    private function isPatchRelatedJobType(string $type): bool
+    {
+        $normalized = strtolower(trim($type));
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, ['windows_update_install', 'ubuntu_apt_upgrade', 'macos_software_update', 'software_install'], true)
+            || str_contains($normalized, 'patch')
+            || str_contains($normalized, 'update_install');
+    }
+
+    private function buildPatchEvidenceCsv(array $report): string
+    {
+        $handle = fopen('php://temp', 'w+');
+        if ($handle === false) {
+            return '';
+        }
+
+        fputcsv($handle, [
+            'evidence_id',
+            'generated_at',
+            'overall_status',
+            'agent_record_id',
+            'device_id',
+            'display_name',
+            'hostname',
+            'os_family',
+            'availability',
+            'last_seen_at',
+            'inventory_state',
+            'inventory_stored_at',
+            'patch_status',
+            'available_patch_count',
+            'security_patch_count',
+            'pending_reboot',
+            'current_job',
+            'top_missing_patches',
+            'cve_ids',
+        ]);
+
+        $evidenceId = (string) ($report['evidence_id'] ?? '');
+        $generatedAt = (string) ($report['generated_at'] ?? '');
+        $overallStatus = (string) ($report['overall_status'] ?? '');
+        $agents = is_array($report['agents'] ?? null) ? $report['agents'] : [];
+
+        foreach ($agents as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            fputcsv($handle, [
+                $evidenceId,
+                $generatedAt,
+                $overallStatus,
+                (string) ($row['agent_record_id'] ?? ''),
+                (string) ($row['device_id'] ?? ''),
+                (string) ($row['display_name'] ?? ''),
+                (string) ($row['hostname'] ?? ''),
+                (string) ($row['os_family'] ?? ''),
+                (string) ($row['availability'] ?? ''),
+                (string) ($row['last_seen_at'] ?? ''),
+                (string) ($row['inventory_state'] ?? ''),
+                (string) ($row['inventory_stored_at'] ?? ''),
+                (string) ($row['patch_status'] ?? ''),
+                (string) ((int) ($row['available_patch_count'] ?? 0)),
+                (string) ((int) ($row['security_patch_count'] ?? 0)),
+                $this->formatCsvBool($row['pending_reboot'] ?? null),
+                (string) ($row['current_job'] ?? ''),
+                implode(' | ', array_values(is_array($row['top_missing_patches'] ?? null) ? $row['top_missing_patches'] : [])),
+                implode(' | ', array_values(is_array($row['cve_ids'] ?? null) ? $row['cve_ids'] : [])),
+            ]);
+        }
+
+        rewind($handle);
+        $csv = stream_get_contents($handle);
+        fclose($handle);
+
+        return is_string($csv) ? $csv : '';
+    }
+
+    private function buildPatchEvidenceHtml(array $report): string
+    {
+        $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $statusClass = static fn (string $status): string => match ($status) {
+            'pass' => 'status-pass',
+            'fail' => 'status-fail',
+            'warn' => 'status-warn',
+            'na' => 'status-na',
+            default => 'status-unknown',
+        };
+        $statusLabel = static fn (string $status): string => strtoupper($status !== '' ? $status : 'unknown');
+
+        $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
+        $agents = is_array($report['agents'] ?? null) ? $report['agents'] : [];
+        $topMissingPatches = is_array($report['top_missing_patches'] ?? null) ? $report['top_missing_patches'] : [];
+        $recentFailedPatchJobs = is_array($report['recent_failed_patch_jobs'] ?? null) ? $report['recent_failed_patch_jobs'] : [];
+
+        $agentRowsHtml = '';
+        foreach ($agents as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $hostname = trim((string) ($row['hostname'] ?? ''));
+            $label = $displayName !== '' ? $displayName : ($hostname !== '' ? $hostname : (string) ($row['agent_record_id'] ?? ''));
+            $patchStatus = strtolower(trim((string) ($row['patch_status'] ?? 'unknown')));
+            $missingPatches = implode(', ', array_values(is_array($row['top_missing_patches'] ?? null) ? $row['top_missing_patches'] : []));
+            $cveIds = implode(', ', array_values(is_array($row['cve_ids'] ?? null) ? $row['cve_ids'] : []));
+
+            $agentRowsHtml .= '<tr>'
+                . '<td>' . $escape($label) . '</td>'
+                . '<td>' . $escape((string) ($row['os_family'] ?? '')) . '</td>'
+                . '<td><span class="badge ' . $escape($statusClass($patchStatus)) . '">' . $escape($statusLabel($patchStatus)) . '</span></td>'
+                . '<td>' . $escape((string) ($row['availability'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($row['inventory_state'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($row['available_patch_count'] ?? 0)) . '</td>'
+                . '<td>' . $escape((string) ($row['security_patch_count'] ?? 0)) . '</td>'
+                . '<td>' . $escape(($row['pending_reboot'] ?? false) ? 'Yes' : 'No') . '</td>'
+                . '<td>' . $escape((string) ($row['current_job'] ?? '')) . '</td>'
+                . '<td>' . $escape($missingPatches) . '</td>'
+                . '<td>' . $escape($cveIds) . '</td>'
+                . '</tr>';
+        }
+        if ($agentRowsHtml === '') {
+            $agentRowsHtml = '<tr><td colspan="11">No agents found in the evidence snapshot.</td></tr>';
+        }
+
+        $missingRowsHtml = '';
+        foreach ($topMissingPatches as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $missingRowsHtml .= '<tr>'
+                . '<td>' . $escape((string) ($entry['name'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($entry['source'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($entry['device_count'] ?? 0)) . '</td>'
+                . '<td>' . $escape((string) ($entry['security_hits'] ?? 0)) . '</td>'
+                . '</tr>';
+        }
+        if ($missingRowsHtml === '') {
+            $missingRowsHtml = '<tr><td colspan="4">No missing patch signatures are currently reported.</td></tr>';
+        }
+
+        $failedJobsHtml = '';
+        foreach ($recentFailedPatchJobs as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+
+            $failedJobsHtml .= '<tr>'
+                . '<td>' . $escape((string) ($job['job_id'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($job['type'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($job['target_agent_id'] ?? $job['target_device_id'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($job['created_at'] ?? '')) . '</td>'
+                . '<td>' . $escape((string) ($job['summary'] ?? '')) . '</td>'
+                . '</tr>';
+        }
+        if ($failedJobsHtml === '') {
+            $failedJobsHtml = '<tr><td colspan="5">No recent failed patch jobs.</td></tr>';
+        }
+
+        $overallStatus = strtolower(trim((string) ($report['overall_status'] ?? 'unknown')));
+        $evidenceId = (string) ($report['evidence_id'] ?? '');
+        $generatedAt = (string) ($report['generated_at'] ?? '');
+        $generatedBy = (string) ($report['generated_by'] ?? '');
+        $sha256 = (string) ($report['sha256'] ?? '');
+
+        return '<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Patch Review Evidence</title>
+    <style>
+        :root { color-scheme: light; }
+        body { margin: 18px; font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; color: #132236; background: #f4f8fb; }
+        h1, h2 { margin: 0; color: #11375f; }
+        h1 { font-size: 30px; }
+        h2 { font-size: 20px; margin-bottom: 8px; }
+        p { margin: 0; }
+        .meta { margin: 8px 0 0; color: #415472; font-size: 14px; }
+        .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+        .card { background: #fff; border: 1px solid #d6e5f2; border-radius: 12px; padding: 10px; }
+        .card-label { font-size: 12px; color: #60758f; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+        .card-value { font-size: 22px; font-weight: 700; color: #15324f; }
+        .section { margin-top: 16px; }
+        .table-wrap { background: #fff; border: 1px solid #d6e5f2; border-radius: 12px; overflow: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 980px; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #e3edf6; text-align: left; vertical-align: top; font-size: 13px; }
+        th { background: #eef5fb; color: #334e6b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+        .status-pass { background: #dff8eb; color: #0c6b3d; }
+        .status-fail { background: #fde2e5; color: #9c1c2d; }
+        .status-warn { background: #fff1d6; color: #8b5600; }
+        .status-na { background: #eceef3; color: #526178; }
+        .status-unknown { background: #e8eef7; color: #2d4a6d; }
+        .hash { margin-top: 12px; font-family: Menlo, Consolas, monospace; font-size: 12px; color: #3a4d66; word-break: break-all; }
+        @media (max-width: 1000px) {
+            .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+    <h1>Patch Review Evidence</h1>
+    <p class="meta">Evidence ID: ' . $escape($evidenceId) . ' | Generated at: ' . $escape($generatedAt) . ' | Generated by: ' . $escape($generatedBy) . '</p>
+    <p class="meta">Overall status: <span class="badge ' . $escape($statusClass($overallStatus)) . '">' . $escape($statusLabel($overallStatus)) . '</span></p>
+    <div class="cards">
+        <div class="card"><p class="card-label">Total Agents</p><p class="card-value">' . $escape((string) ($counts['total_agents'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Need Patches</p><p class="card-value">' . $escape((string) ($counts['agents_needing_patches'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Security Updates</p><p class="card-value">' . $escape((string) ($counts['agents_with_security_updates'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Pending Reboot</p><p class="card-value">' . $escape((string) ($counts['agents_pending_reboot'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Missing Inventory</p><p class="card-value">' . $escape((string) ($counts['agents_missing_inventory'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Stale Inventory</p><p class="card-value">' . $escape((string) ($counts['agents_stale_inventory'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Recent Failed Jobs</p><p class="card-value">' . $escape((string) ($counts['recent_failed_patch_jobs'] ?? 0)) . '</p></div>
+        <div class="card"><p class="card-label">Snapshot Hash</p><p class="card-value" style="font-size:16px;">SHA-256</p></div>
+    </div>
+
+    <div class="section">
+        <h2>Devices</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Device</th>
+                        <th>OS</th>
+                        <th>Status</th>
+                        <th>Availability</th>
+                        <th>Inventory</th>
+                        <th>Available</th>
+                        <th>Security</th>
+                        <th>Pending Reboot</th>
+                        <th>Current Job</th>
+                        <th>Top Missing Patches</th>
+                        <th>CVEs</th>
+                    </tr>
+                </thead>
+                <tbody>' . $agentRowsHtml . '</tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Top Missing Patches</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Patch</th>
+                        <th>Source</th>
+                        <th>Devices</th>
+                        <th>Security Hits</th>
+                    </tr>
+                </thead>
+                <tbody>' . $missingRowsHtml . '</tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Recent Failed Patch Jobs</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Type</th>
+                        <th>Target</th>
+                        <th>Created</th>
+                        <th>Summary</th>
+                    </tr>
+                </thead>
+                <tbody>' . $failedJobsHtml . '</tbody>
+            </table>
+        </div>
+    </div>
+
+    <p class="hash">sha256: ' . $escape($sha256) . '</p>
+</body>
+</html>';
+    }
+
+    private function buildPatchEvidenceTicketMarkdown(array $report): string
+    {
+        $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
+        $agents = is_array($report['agents'] ?? null) ? $report['agents'] : [];
+        $topMissingPatches = is_array($report['top_missing_patches'] ?? null) ? $report['top_missing_patches'] : [];
+        $recentFailedPatchJobs = is_array($report['recent_failed_patch_jobs'] ?? null) ? $report['recent_failed_patch_jobs'] : [];
+
+        $lines = [];
+        $lines[] = '# Weekly Patch Review - ' . gmdate('Y-m-d');
+        $lines[] = '';
+        $lines[] = '- Evidence ID: ' . (string) ($report['evidence_id'] ?? '');
+        $lines[] = '- Generated at: ' . (string) ($report['generated_at'] ?? '');
+        $lines[] = '- Generated by: ' . (string) ($report['generated_by'] ?? '');
+        $lines[] = '- Overall status: ' . strtoupper((string) ($report['overall_status'] ?? 'unknown'));
+        $lines[] = '- Snapshot hash: ' . (string) ($report['sha256'] ?? '');
+        $lines[] = '';
+        $lines[] = '## Summary';
+        $lines[] = '';
+        $lines[] = '- Total agents: ' . (string) ($counts['total_agents'] ?? 0);
+        $lines[] = '- Agents needing patches: ' . (string) ($counts['agents_needing_patches'] ?? 0);
+        $lines[] = '- Agents with security-relevant updates: ' . (string) ($counts['agents_with_security_updates'] ?? 0);
+        $lines[] = '- Agents pending reboot: ' . (string) ($counts['agents_pending_reboot'] ?? 0);
+        $lines[] = '- Agents missing inventory: ' . (string) ($counts['agents_missing_inventory'] ?? 0);
+        $lines[] = '- Agents with stale inventory: ' . (string) ($counts['agents_stale_inventory'] ?? 0);
+        $lines[] = '- Recent failed patch jobs: ' . (string) ($counts['recent_failed_patch_jobs'] ?? 0);
+        $lines[] = '';
+        $lines[] = '## Devices Requiring Action';
+        $lines[] = '';
+        $lines[] = '| Device | OS | Status | Available | Security | Pending Reboot | Inventory | Notes |';
+        $lines[] = '| --- | --- | --- | ---: | ---: | --- | --- | --- |';
+
+        $actionRows = array_slice(array_values(array_filter($agents, static function (mixed $row): bool {
+            return is_array($row) && (string) ($row['patch_status'] ?? 'pass') !== 'pass';
+        })), 0, 15);
+
+        if ($actionRows === []) {
+            $lines[] = '| None | - | PASS | 0 | 0 | No | fresh | No action items in this snapshot. |';
+        } else {
+            foreach ($actionRows as $row) {
+                $device = trim((string) ($row['display_name'] ?? ''));
+                if ($device === '') {
+                    $device = trim((string) ($row['hostname'] ?? $row['agent_record_id'] ?? ''));
+                }
+                $notesParts = [];
+                $missingPatches = array_values(is_array($row['top_missing_patches'] ?? null) ? $row['top_missing_patches'] : []);
+                $cveIds = array_values(is_array($row['cve_ids'] ?? null) ? $row['cve_ids'] : []);
+                if ($missingPatches !== []) {
+                    $notesParts[] = 'Patches: ' . implode(', ', array_slice($missingPatches, 0, 3));
+                }
+                if ($cveIds !== []) {
+                    $notesParts[] = 'CVEs: ' . implode(', ', array_slice($cveIds, 0, 4));
+                }
+                if ((string) ($row['current_job'] ?? 'None') !== 'None') {
+                    $notesParts[] = 'Current job: ' . (string) $row['current_job'];
+                }
+
+                $lines[] = '| ' . str_replace('|', '/', $device)
+                    . ' | ' . str_replace('|', '/', (string) ($row['os_family'] ?? ''))
+                    . ' | ' . strtoupper((string) ($row['patch_status'] ?? 'unknown'))
+                    . ' | ' . (string) ((int) ($row['available_patch_count'] ?? 0))
+                    . ' | ' . (string) ((int) ($row['security_patch_count'] ?? 0))
+                    . ' | ' . (($row['pending_reboot'] ?? false) ? 'Yes' : 'No')
+                    . ' | ' . str_replace('|', '/', (string) ($row['inventory_state'] ?? 'unknown'))
+                    . ' | ' . str_replace('|', '/', implode(' ; ', $notesParts))
+                    . ' |';
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '## Top Missing Patches';
+        $lines[] = '';
+        if ($topMissingPatches === []) {
+            $lines[] = '- No common missing patch signatures were reported.';
+        } else {
+            foreach (array_slice($topMissingPatches, 0, 10) as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $lines[] = '- ' . (string) ($entry['name'] ?? '')
+                    . ' | Source: ' . (string) ($entry['source'] ?? '')
+                    . ' | Devices: ' . (string) ($entry['device_count'] ?? 0)
+                    . ' | Security hits: ' . (string) ($entry['security_hits'] ?? 0);
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '## Recent Failed Patch Jobs';
+        $lines[] = '';
+        if ($recentFailedPatchJobs === []) {
+            $lines[] = '- No recent failed patch jobs.';
+        } else {
+            foreach ($recentFailedPatchJobs as $job) {
+                if (!is_array($job)) {
+                    continue;
+                }
+                $lines[] = '- ' . (string) ($job['job_id'] ?? '')
+                    . ' | ' . (string) ($job['type'] ?? '')
+                    . ' | Target: ' . (string) ($job['target_agent_id'] ?? $job['target_device_id'] ?? '')
+                    . ' | Created: ' . (string) ($job['created_at'] ?? '')
+                    . ' | ' . (string) ($job['summary'] ?? '');
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '## Reviewer Checklist';
+        $lines[] = '';
+        $lines[] = '- [ ] Review devices with security-relevant updates first.';
+        $lines[] = '- [ ] Confirm any missing or stale inventory snapshots were investigated.';
+        $lines[] = '- [ ] Review failed patch jobs and decide whether to retry, remediate, or defer.';
+        $lines[] = '- [ ] Record reboot follow-up for devices that still require restart.';
+        $lines[] = '- [ ] Document approved maintenance window or risk acceptance for deferred patches.';
+        $lines[] = '';
+        $lines[] = '## Notes';
+        $lines[] = '';
+        $lines[] = '- Maintenance window:';
+        $lines[] = '- Reviewer:';
+        $lines[] = '- Exceptions / deferrals:';
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    private function createPatchEvidenceTicket(array $report, array $input): array
+    {
+        $db = $this->ticketsDbConnection();
+        $subject = trim((string) ($input['subject'] ?? ('Weekly Patch Review - ' . gmdate('Y-m-d'))));
+        if ($subject === '') {
+            $subject = 'Weekly Patch Review - ' . gmdate('Y-m-d');
+        }
+
+        $priority = strtolower(trim((string) ($input['priority'] ?? $this->inferPatchTicketPriority($report))));
+        if (!in_array($priority, ['low', 'normal', 'high', 'urgent'], true)) {
+            $priority = $this->inferPatchTicketPriority($report);
+        }
+
+        $category = trim((string) ($input['category'] ?? $this->config->ticketsDefaultCategory));
+        $requesterUsername = strtoupper(trim((string) ($input['requester_username'] ?? $this->config->ticketsRequesterUsername)));
+        if ($requesterUsername === '') {
+            $requesterUsername = 'PATCHAGENT';
+        }
+
+        $assigneeUserId = trim((string) ($input['assignee_user_id'] ?? $this->config->ticketsDefaultAssigneeUserId));
+        $description = $this->buildPatchEvidenceTicketMarkdown($report);
+
+        $requesterUserId = $this->ticketsEnsureUserId($db, $requesterUsername);
+        $assigneeUserId = $this->ticketsValidateAssigneeUserId($db, $assigneeUserId);
+
+        $db->begin_transaction();
+        try {
+            $tmpKey = 'TMP-' . bin2hex(random_bytes(8));
+            $this->ticketsDbExec(
+                $db,
+                "INSERT INTO tickets (ticket_key, subject, description, status, priority, category, requester_user_id, assignee_user_id) VALUES (?, ?, ?, 'new', ?, ?, ?, ?)",
+                [$tmpKey, $subject, $description, $priority, $category !== '' ? $category : null, $requesterUserId, $assigneeUserId]
+            );
+
+            $id = (int) $db->insert_id;
+            if ($id <= 0) {
+                throw new RuntimeException('Ticket insert did not return a valid id.');
+            }
+
+            $ticketKey = 'RRS-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+            $this->ticketsDbExec($db, 'UPDATE tickets SET ticket_key = ? WHERE id = ?', [$ticketKey, (string) $id]);
+            $db->commit();
+
+            return [
+                'ticket_id' => $id,
+                'ticket_key' => $ticketKey,
+                'ticket_url' => $this->config->ticketsBaseUrl . '/view.php?k=' . rawurlencode($ticketKey),
+                'subject' => $subject,
+                'priority' => $priority,
+                'category' => $category,
+                'requester_username' => $requesterUsername,
+                'assignee_user_id' => $assigneeUserId,
+            ];
+        } catch (\Throwable $exception) {
+            $db->rollback();
+            throw new RuntimeException('Failed to create patch review ticket: ' . $exception->getMessage(), 0, $exception);
+        }
+    }
+
+    private function inferPatchTicketPriority(array $report): string
+    {
+        $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
+        if ((int) ($counts['patch_status_fail'] ?? 0) > 0 || (int) ($counts['recent_failed_patch_jobs'] ?? 0) > 0) {
+            return 'high';
+        }
+
+        if ((int) ($counts['patch_status_warn'] ?? 0) > 0) {
+            return 'normal';
+        }
+
+        return 'low';
+    }
+
+    private function ticketsDbConnection(): \mysqli
+    {
+        static $connection = null;
+        if ($connection instanceof \mysqli) {
+            return $connection;
+        }
+
+        $user = trim($this->config->ticketsDbUser);
+        if ($user !== '') {
+            $connection = @new \mysqli(
+                $this->config->ticketsDbHost,
+                $this->config->ticketsDbUser,
+                $this->config->ticketsDbPassword,
+                $this->config->ticketsDbName,
+                $this->config->ticketsDbPort
+            );
+            if (!($connection instanceof \mysqli) || $connection->connect_errno) {
+                $error = $connection instanceof \mysqli ? $connection->connect_error : 'unknown error';
+                throw new RuntimeException('Ticket DB connect failed: ' . $error);
+            }
+
+            $connection->set_charset('utf8mb4');
+            return $connection;
+        }
+
+        $legacyConnection = $this->ticketsDbConnectionFromLegacyConfig();
+        if ($legacyConnection instanceof \mysqli) {
+            $connection = $legacyConnection;
+            return $connection;
+        }
+
+        throw new RuntimeException('Ticket integration is not configured. Set PATCH_API_TICKETS_DB_* or PATCH_API_TICKETS_LEGACY_CONFIG_FILE.');
+    }
+
+    private function ticketsDbConnectionFromLegacyConfig(): ?\mysqli
+    {
+        static $loadedPaths = [];
+
+        $path = trim($this->config->ticketsLegacyConfigFile);
+        if ($path === '' || !is_file($path) || !is_readable($path)) {
+            return null;
+        }
+
+        if (!isset($loadedPaths[$path])) {
+            include_once $path;
+            $loadedPaths[$path] = true;
+        }
+
+        if (!\function_exists('connect')) {
+            return null;
+        }
+
+        $connection = \connect();
+        if (!($connection instanceof \mysqli) || $connection->connect_errno) {
+            $error = $connection instanceof \mysqli ? $connection->connect_error : 'connect() did not return mysqli';
+            throw new RuntimeException('Ticket legacy DB connect failed: ' . $error);
+        }
+
+        if (!$connection->select_db($this->config->ticketsDbName)) {
+            throw new RuntimeException('Could not select tickets database ' . $this->config->ticketsDbName . ': ' . $connection->error);
+        }
+
+        $connection->set_charset('utf8mb4');
+        return $connection;
+    }
+
+    private function ticketsEnsureUserId(\mysqli $db, string $username): string
+    {
+        $normalized = strtoupper(trim($username));
+        if ($normalized === '') {
+            throw new RuntimeException('Ticket requester username is required.');
+        }
+
+        $row = $this->ticketsDbOne($db, 'SELECT id, is_active FROM users WHERE username = ? LIMIT 1', [$normalized]);
+        if (is_array($row)) {
+            if ((int) ($row['is_active'] ?? 0) !== 1) {
+                throw new RuntimeException('Ticket requester user ' . $normalized . ' is disabled.');
+            }
+
+            return (string) ($row['id'] ?? '');
+        }
+
+        $this->ticketsDbExec($db, "INSERT INTO users (username, role, is_active) VALUES (?, 'requester', 1)", [$normalized]);
+        $created = $this->ticketsDbOne($db, 'SELECT id FROM users WHERE username = ? LIMIT 1', [$normalized]);
+        $userId = trim((string) ($created['id'] ?? ''));
+        if ($userId === '') {
+            throw new RuntimeException('Could not create requester user ' . $normalized . '.');
+        }
+
+        return $userId;
+    }
+
+    private function ticketsValidateAssigneeUserId(\mysqli $db, string $assigneeUserId): ?string
+    {
+        $normalized = trim($assigneeUserId);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $row = $this->ticketsDbOne(
+            $db,
+            "SELECT id FROM users WHERE id = ? AND is_active = 1 AND role IN ('agent','admin') LIMIT 1",
+            [$normalized]
+        );
+        if (!is_array($row)) {
+            throw new RuntimeException('Configured assignee user id ' . $normalized . ' was not found or is not eligible.');
+        }
+
+        return $normalized;
+    }
+
+    private function ticketsDbOne(\mysqli $db, string $sql, array $params = []): ?array
+    {
+        $rows = $this->ticketsDbAll($db, $sql, $params);
+        return $rows[0] ?? null;
+    }
+
+    private function ticketsDbAll(\mysqli $db, string $sql, array $params = []): array
+    {
+        $stmt = $db->prepare($sql);
+        if (!$stmt) {
+            throw new RuntimeException('Ticket DB prepare failed: ' . $db->error);
+        }
+
+        if ($params !== []) {
+            $types = str_repeat('s', count($params));
+            $bound = $params;
+            foreach ($bound as $index => $value) {
+                if ($value !== null) {
+                    $bound[$index] = (string) $value;
+                }
+            }
+            $stmt->bind_param($types, ...$bound);
+        }
+
+        if (!$stmt->execute()) {
+            $error = $stmt->error ?: $db->error;
+            $stmt->close();
+            throw new RuntimeException('Ticket DB execute failed: ' . $error);
+        }
+
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    private function ticketsDbExec(\mysqli $db, string $sql, array $params = []): int
+    {
+        $stmt = $db->prepare($sql);
+        if (!$stmt) {
+            throw new RuntimeException('Ticket DB prepare failed: ' . $db->error);
+        }
+
+        if ($params !== []) {
+            $types = str_repeat('s', count($params));
+            $bound = $params;
+            foreach ($bound as $index => $value) {
+                if ($value !== null) {
+                    $bound[$index] = (string) $value;
+                }
+            }
+            $stmt->bind_param($types, ...$bound);
+        }
+
+        if (!$stmt->execute()) {
+            $error = $stmt->error ?: $db->error;
+            $stmt->close();
+            throw new RuntimeException('Ticket DB execute failed: ' . $error);
+        }
+
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        return $affected;
     }
 
     private function formatNullableBool(?bool $value): string
