@@ -3425,6 +3425,11 @@ final class App
             'provision-mac.sh' => 'text/x-shellscript; charset=utf-8',
             'provision.ps1' => 'text/plain; charset=utf-8',
             'agent-source.tar.gz' => 'application/gzip',
+            // Stdlib-only Python agent for Linux hosts. The .NET agent needs a
+            // build-time SDK on every endpoint to do work that amounts to
+            // reading /proc and shelling out to apt; this is a single file with
+            // no runtime to install. See agents/linux/.
+            'patchagent_linux.py' => 'text/x-python; charset=utf-8',
         ];
 
         if (!isset($allowed[$filename])) {

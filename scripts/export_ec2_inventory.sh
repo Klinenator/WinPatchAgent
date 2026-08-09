@@ -20,6 +20,16 @@
 
 set -uo pipefail
 
+# Force the instance profile rather than any static credentials on the host.
+# The API host carries an IAM user (Route53-Management, for certbot DNS-01) in a
+# shared credentials file, which takes precedence over IMDS and does not have
+# ec2:DescribeInstances. Isolating the credential chain here keeps this export on
+# the narrowly-scoped, auto-rotating instance role instead of widening a
+# long-lived user key.
+export AWS_SHARED_CREDENTIALS_FILE=/dev/null
+export AWS_CONFIG_FILE=/dev/null
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE
+
 OUT="${PATCH_API_EC2_INVENTORY_PATH:-/var/lib/winpatchagent/ec2-inventory.json}"
 REGION="${AWS_REGION:-us-east-1}"
 OWNER="${EC2_INVENTORY_OWNER:-www-data}"
