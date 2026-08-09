@@ -129,6 +129,16 @@ final class FileStore
         return is_file($this->path($relativePath));
     }
 
+    public function driverName(): string
+    {
+        return $this->mysqlStore === null ? 'file' : 'mysql';
+    }
+
+    public function storageRoot(): string
+    {
+        return $this->root;
+    }
+
     private function path(string $relativePath): string
     {
         return $this->root . '/' . ltrim($relativePath, '/');

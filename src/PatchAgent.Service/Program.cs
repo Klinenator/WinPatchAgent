@@ -5,6 +5,25 @@ using PatchAgent.Service.Modules;
 using PatchAgent.Service.Services;
 using Microsoft.Extensions.Options;
 
+int? installerExitCode = null;
+if (OperatingSystem.IsWindows())
+{
+    installerExitCode = await WindowsServiceInstaller.TryRunAsync(args);
+}
+else if (args.Length > 0 && (string.Equals(args[0], "install", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(args[0], "uninstall", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.Error.WriteLine("The install and uninstall commands are only supported on Windows.");
+    Environment.ExitCode = 1;
+    return;
+}
+
+if (installerExitCode.HasValue)
+{
+    Environment.ExitCode = installerExitCode.Value;
+    return;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddWindowsService(options =>

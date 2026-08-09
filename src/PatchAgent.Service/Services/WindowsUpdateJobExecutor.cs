@@ -1,4 +1,7 @@
-using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -11,6 +14,8 @@ namespace PatchAgent.Service.Services;
 
 public sealed class WindowsUpdateJobExecutor : IJobExecutor
 {
+    private const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software'";
+
     private readonly ILogger<WindowsUpdateJobExecutor> _logger;
     private readonly AgentOptions _options;
     private readonly IPolicyClient _policyClient;
@@ -50,6 +55,7 @@ public sealed class WindowsUpdateJobExecutor : IJobExecutor
         };
     }
 
+    [SupportedOSPlatform("windows")]
     private async Task<bool> ExecuteAssignedWindowsUpdateJobAsync(
         AgentState state,
         JobExecutionState job,
@@ -84,7 +90,7 @@ public sealed class WindowsUpdateJobExecutor : IJobExecutor
                 }),
             cancellationToken);
 
-        _logger.LogInformation("Starting windows update execution for job {JobId}", job.JobId);
+        _logger.LogInformation("Starting native Windows Update execution for job {JobId}", job.JobId);
 
         var executionResult = await RunWindowsUpdateWorkflowAsync(job, cancellationToken);
 
@@ -116,10 +122,14 @@ public sealed class WindowsUpdateJobExecutor : IJobExecutor
             cancellationToken);
 
         var completionReport = executionResult.Success
-            ? BuildCompletionReport(job)
+            ? BuildCompletionReport(executionResult)
             : BuildFailureReport(
                 executionResult.ErrorCode ?? "WINDOWS_UPDATE_INSTALL_FAILED",
-                executionResult.ErrorMessage ?? "Windows Update execution failed.");
+                executionResult.ErrorMessage ?? "Windows Update execution failed.",
+                executionResult.RebootRequired,
+                executionResult.Summary,
+                executionResult.Output,
+                executionResult.ErrorOutput);
 
         return await ReportAndClearAsync(state, job, completionReport, cancellationToken);
     }
@@ -152,231 +162,484 @@ public sealed class WindowsUpdateJobExecutor : IJobExecutor
             job.JobId,
             report.FinalState);
 
-        // Force an inventory refresh on the next loop so Windows available/installed
-        // update data is refreshed right after a patch job completes.
         state.LastInventoryAtUtc = null;
         state.CurrentJob = null;
         return true;
     }
 
+    [SupportedOSPlatform("windows")]
     private async Task<WindowsUpdateExecutionResult> RunWindowsUpdateWorkflowAsync(
         JobExecutionState job,
         CancellationToken cancellationToken)
     {
-        var result = await RunProcessAsync(
-            "powershell.exe",
-            [
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                BuildWindowsUpdateScript()
-            ],
-            TimeSpan.FromSeconds(Math.Max(120, _options.WindowsUpdateCommandTimeoutSeconds)),
-            new Dictionary<string, string>
-            {
-                ["PATCHAGENT_WINDOWS_UPDATE_JOB"] = JsonSerializer.Serialize(new
-                {
-                    install_all = job.WindowsInstallAll,
-                    kbs = job.WindowsKbIds
-                })
-            },
-            cancellationToken);
+        var timeout = TimeSpan.FromSeconds(Math.Max(120, _options.WindowsUpdateCommandTimeoutSeconds));
 
-        if (result.TimedOut)
+        try
+        {
+            return await RunOnStaThreadAsync(
+                () => ExecuteWindowsUpdateWorkflow(job, timeout, cancellationToken),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TimeoutException exception)
         {
             return WindowsUpdateExecutionResult.Fail(
                 "WINDOWS_UPDATE_TIMEOUT",
-                "Windows Update command timed out.");
+                exception.Message,
+                summary: exception.Message,
+                errorOutput: exception.ToString());
         }
-
-        if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
+        catch (Exception exception)
         {
+            _logger.LogError(exception, "Native Windows Update execution failed for job {JobId}", job.JobId);
             return WindowsUpdateExecutionResult.Fail(
-                "WINDOWS_UPDATE_COMMAND_FAILED",
-                BuildErrorSummary(result.StandardError, result.StandardOutput));
+                "WINDOWS_UPDATE_EXECUTOR_ERROR",
+                exception.Message,
+                summary: "Native Windows Update execution failed.",
+                errorOutput: exception.ToString());
         }
-
-        return ParseWindowsUpdateResult(result.StandardOutput, result.StandardError);
     }
 
-    private static WindowsUpdateExecutionResult ParseWindowsUpdateResult(string output, string stderr)
+    [SupportedOSPlatform("windows")]
+    private WindowsUpdateExecutionResult ExecuteWindowsUpdateWorkflow(
+        JobExecutionState job,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(output))
+        var startedAt = DateTimeOffset.UtcNow;
+        var requestedKbs = job.WindowsKbIds
+            .Select(NormalizeKbId)
+            .Where(static value => value != string.Empty)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var trackedComObjects = new List<object>();
+
+        static object RequireInstance(object? instance, string label)
         {
-            return WindowsUpdateExecutionResult.Fail(
-                "WINDOWS_UPDATE_EMPTY_RESPONSE",
-                BuildErrorSummary(stderr, output));
+            return instance ?? throw new InvalidOperationException(label + " returned a null COM instance.");
+        }
+
+        object TrackComObject(object instance)
+        {
+            if (Marshal.IsComObject(instance))
+            {
+                trackedComObjects.Add(instance);
+            }
+
+            return instance;
         }
 
         try
         {
-            using var doc = JsonDocument.Parse(output);
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var session = TrackComObject(RequireInstance(CreateComObject("Microsoft.Update.Session"), "Microsoft.Update.Session"));
+            var searcher = TrackComObject(InvokeComMethod<object>(session, "CreateUpdateSearcher"));
+            var searchResult = TrackComObject(InvokeComMethod<object>(searcher, "Search", SearchCriteria));
+            var availableUpdates = TrackComObject(GetComProperty<object>(searchResult, "Updates"));
+            var updatesToInstall = TrackComObject(RequireInstance(CreateComObject("Microsoft.Update.UpdateColl"), "Microsoft.Update.UpdateColl"));
+
+            var selectedUpdates = new List<SelectedWindowsUpdate>();
+            var availableCount = GetComProperty<int>(availableUpdates, "Count");
+
+            for (var index = 0; index < availableCount; index++)
             {
-                return WindowsUpdateExecutionResult.Fail(
-                    "WINDOWS_UPDATE_INVALID_RESPONSE",
-                    "Windows update script returned an unexpected response payload.");
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var update = InvokeComMethod<object>(availableUpdates, "Item", index);
+                try
+                {
+                    var title = GetComProperty<string>(update, "Title");
+                    var kbIds = ReadKbArticleIds(update);
+                    var include = job.WindowsInstallAll || ShouldIncludeUpdate(kbIds, requestedKbs);
+                    if (!include)
+                    {
+                        continue;
+                    }
+
+                    InvokeComMethod<object>(updatesToInstall, "Add", update);
+                    selectedUpdates.Add(new SelectedWindowsUpdate(title, kbIds));
+                }
+                finally
+                {
+                    ReleaseComObject(update);
+                }
             }
 
-            var success = root.TryGetProperty("success", out var successValue)
-                && successValue.ValueKind == JsonValueKind.True;
-            var rebootRequired = root.TryGetProperty("reboot_required", out var rebootValue)
-                && rebootValue.ValueKind == JsonValueKind.True;
+            if (selectedUpdates.Count == 0)
+            {
+                var message = "No matching updates are currently available.";
+                return WindowsUpdateExecutionResult.Fail(
+                    "WINDOWS_UPDATE_NOT_FOUND",
+                    message,
+                    summary: message,
+                    output: JsonSerializer.Serialize(new
+                    {
+                        requested_kbs = requestedKbs.OrderBy(static value => value).ToArray(),
+                        search_criteria = SearchCriteria,
+                        available_updates = availableCount
+                    }));
+            }
+
+            ThrowIfTimedOut(startedAt, timeout, "searching for applicable updates");
+
+            var downloader = TrackComObject(InvokeComMethod<object>(session, "CreateUpdateDownloader"));
+            SetComProperty(downloader, "Updates", updatesToInstall);
+            var downloadResult = TrackComObject(InvokeComMethod<object>(downloader, "Download"));
+            var downloadCode = GetComProperty<int>(downloadResult, "ResultCode");
+
+            if (downloadCode >= 4)
+            {
+                var message = "Windows update download failed with code " + downloadCode + " (" + DescribeResultCode(downloadCode) + ").";
+                return WindowsUpdateExecutionResult.Fail(
+                    "WINDOWS_UPDATE_DOWNLOAD_FAILED",
+                    message,
+                    summary: message,
+                    output: JsonSerializer.Serialize(new
+                    {
+                        requested_kbs = requestedKbs.OrderBy(static value => value).ToArray(),
+                        selected_updates = selectedUpdates,
+                        download_result_code = downloadCode,
+                        download_result_label = DescribeResultCode(downloadCode)
+                    }));
+            }
+
+            ThrowIfTimedOut(startedAt, timeout, "downloading updates");
+
+            var installer = TrackComObject(InvokeComMethod<object>(session, "CreateUpdateInstaller"));
+            SetComProperty(installer, "Updates", updatesToInstall);
+            var installResult = TrackComObject(InvokeComMethod<object>(installer, "Install"));
+            var installCode = GetComProperty<int>(installResult, "ResultCode");
+            var rebootRequired = GetComProperty<bool>(installResult, "RebootRequired");
+            var success = installCode is 2 or 3;
+
+            var perUpdateResults = CollectPerUpdateResults(updatesToInstall, installResult, cancellationToken);
+            var summary = success
+                ? BuildSuccessSummary(selectedUpdates.Count, perUpdateResults, rebootRequired)
+                : "Windows update install failed with code " + installCode + " (" + DescribeResultCode(installCode) + ").";
+            var output = JsonSerializer.Serialize(new
+            {
+                requested_kbs = requestedKbs.OrderBy(static value => value).ToArray(),
+                selected_updates = selectedUpdates,
+                download_result_code = downloadCode,
+                download_result_label = DescribeResultCode(downloadCode),
+                install_result_code = installCode,
+                install_result_label = DescribeResultCode(installCode),
+                reboot_required = rebootRequired,
+                installed = perUpdateResults
+            });
 
             if (success)
             {
-                return WindowsUpdateExecutionResult.Ok(rebootRequired);
+                return WindowsUpdateExecutionResult.Ok(rebootRequired, summary, output);
             }
 
-            var errorCode = root.TryGetProperty("error_code", out var codeValue)
-                ? codeValue.ToString()
-                : "WINDOWS_UPDATE_INSTALL_FAILED";
-            var errorMessage = root.TryGetProperty("error_message", out var messageValue)
-                ? messageValue.ToString()
-                : "Windows Update execution failed.";
-
             return WindowsUpdateExecutionResult.Fail(
-                string.IsNullOrWhiteSpace(errorCode) ? "WINDOWS_UPDATE_INSTALL_FAILED" : errorCode,
-                string.IsNullOrWhiteSpace(errorMessage) ? "Windows Update execution failed." : errorMessage,
-                rebootRequired);
+                "WINDOWS_UPDATE_INSTALL_FAILED",
+                summary,
+                rebootRequired,
+                summary,
+                output,
+                BuildPerUpdateFailureDetails(perUpdateResults));
         }
-        catch (JsonException)
+        finally
         {
-            return WindowsUpdateExecutionResult.Fail(
-                "WINDOWS_UPDATE_INVALID_RESPONSE",
-                BuildErrorSummary(stderr, output));
+            for (var index = trackedComObjects.Count - 1; index >= 0; index--)
+            {
+                ReleaseComObject(trackedComObjects[index]);
+            }
         }
     }
 
-    private static string BuildWindowsUpdateScript()
+    [SupportedOSPlatform("windows")]
+    private static List<InstalledWindowsUpdateResult> CollectPerUpdateResults(
+        object updatesToInstall,
+        object installResult,
+        CancellationToken cancellationToken)
     {
-        return @"
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
+        var results = new List<InstalledWindowsUpdateResult>();
+        var selectedCount = GetComProperty<int>(updatesToInstall, "Count");
 
-try {
-  $jobRaw = [string]$env:PATCHAGENT_WINDOWS_UPDATE_JOB
-  if ([string]::IsNullOrWhiteSpace($jobRaw)) {
-    throw 'Missing PATCHAGENT_WINDOWS_UPDATE_JOB payload.'
-  }
-
-  $job = $jobRaw | ConvertFrom-Json
-  $installAll = [bool]$job.install_all
-  $requestedKbs = @()
-  if ($job.kbs) {
-    $requestedKbs = @($job.kbs | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ -ne '' })
-  }
-
-  $session = New-Object -ComObject Microsoft.Update.Session
-  $searcher = $session.CreateUpdateSearcher()
-  $searchResult = $searcher.Search(""IsInstalled=0 and IsHidden=0 and Type='Software'"")
-
-  $updatesToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
-
-  foreach ($update in $searchResult.Updates) {
-    $updateKbs = @($update.KBArticleIDs | ForEach-Object { ('KB' + $_.ToString().Trim().ToUpperInvariant()) })
-    $include = $installAll
-
-    if (-not $include -and $requestedKbs.Count -gt 0) {
-      foreach ($wanted in $requestedKbs) {
-        $normalizedWanted = if ($wanted.StartsWith('KB')) { $wanted } else { 'KB' + $wanted }
-        if ($updateKbs -contains $normalizedWanted) {
-          $include = $true
-          break
-        }
-      }
-    }
-
-    if ($include) {
-      [void]$updatesToInstall.Add($update)
-    }
-  }
-
-  if ($updatesToInstall.Count -eq 0) {
-    [pscustomobject]@{
-      success = $false
-      error_code = 'WINDOWS_UPDATE_NOT_FOUND'
-      error_message = 'No matching updates are currently available.'
-      reboot_required = $false
-      installed = @()
-    } | ConvertTo-Json -Depth 8 -Compress
-    exit 0
-  }
-
-  $downloader = $session.CreateUpdateDownloader()
-  $downloader.Updates = $updatesToInstall
-  $downloadResult = $downloader.Download()
-  $downloadCode = [int]$downloadResult.ResultCode
-  if ($downloadCode -ge 4) {
-    [pscustomobject]@{
-      success = $false
-      error_code = 'WINDOWS_UPDATE_DOWNLOAD_FAILED'
-      error_message = ('Windows update download failed with code ' + $downloadCode)
-      reboot_required = $false
-      installed = @()
-    } | ConvertTo-Json -Depth 8 -Compress
-    exit 0
-  }
-
-  $installer = $session.CreateUpdateInstaller()
-  $installer.Updates = $updatesToInstall
-  $installResult = $installer.Install()
-
-  $installCode = [int]$installResult.ResultCode
-  $success = ($installCode -eq 2 -or $installCode -eq 3)
-
-  $perUpdate = @()
-  for ($i = 0; $i -lt $updatesToInstall.Count; $i++) {
-    $update = $updatesToInstall.Item($i)
-    $updateResult = $installResult.GetUpdateResult($i)
-    $kbList = @($update.KBArticleIDs | ForEach-Object { ('KB' + $_.ToString().Trim().ToUpperInvariant()) })
-
-    $perUpdate += [pscustomobject]@{
-      title = [string]$update.Title
-      kbs = $kbList
-      result_code = [int]$updateResult.ResultCode
-      hresult = ('0x{0:X8}' -f ([uint32]$updateResult.HResult))
-    }
-  }
-
-  [pscustomobject]@{
-    success = $success
-    error_code = if ($success) { $null } else { 'WINDOWS_UPDATE_INSTALL_FAILED' }
-    error_message = if ($success) { $null } else { ('Windows update install failed with code ' + $installCode) }
-    reboot_required = [bool]$installResult.RebootRequired
-    result_code = $installCode
-    installed = $perUpdate
-  } | ConvertTo-Json -Depth 8 -Compress
-}
-catch {
-  [pscustomobject]@{
-    success = $false
-    error_code = 'WINDOWS_UPDATE_SCRIPT_ERROR'
-    error_message = [string]$_.Exception.Message
-    reboot_required = $false
-    installed = @()
-  } | ConvertTo-Json -Depth 8 -Compress
-}
-";
-    }
-
-    private static string BuildErrorSummary(string stderr, string stdout)
-    {
-        var source = !string.IsNullOrWhiteSpace(stderr) ? stderr : stdout;
-        if (string.IsNullOrWhiteSpace(source))
+        for (var index = 0; index < selectedCount; index++)
         {
-            return "Windows update command failed without output.";
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var update = InvokeComMethod<object>(updatesToInstall, "Item", index);
+            var updateResult = InvokeComMethod<object>(installResult, "GetUpdateResult", index);
+            try
+            {
+                var kbIds = ReadKbArticleIds(update);
+                var title = GetComProperty<string>(update, "Title");
+                var resultCode = GetComProperty<int>(updateResult, "ResultCode");
+                var hResult = GetComProperty<int>(updateResult, "HResult");
+
+                results.Add(new InstalledWindowsUpdateResult(
+                    title,
+                    kbIds,
+                    resultCode,
+                    DescribeResultCode(resultCode),
+                    "0x" + unchecked((uint)hResult).ToString("X8", CultureInfo.InvariantCulture)));
+            }
+            finally
+            {
+                ReleaseComObject(updateResult);
+                ReleaseComObject(update);
+            }
         }
 
-        var sanitized = source.Replace('\r', '\n');
-        var lines = sanitized
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .TakeLast(5);
+        return results;
+    }
 
-        return string.Join(" | ", lines);
+    private static bool ShouldIncludeUpdate(IEnumerable<string> updateKbIds, IReadOnlySet<string> requestedKbs)
+    {
+        if (requestedKbs.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var kbId in updateKbIds)
+        {
+            if (requestedKbs.Contains(kbId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string BuildSuccessSummary(
+        int selectedCount,
+        IReadOnlyCollection<InstalledWindowsUpdateResult> perUpdateResults,
+        bool rebootRequired)
+    {
+        var installedCount = perUpdateResults.Count(result => result.ResultCode is 2 or 3);
+        return "Installed "
+            + installedCount
+            + " of "
+            + selectedCount
+            + " selected update(s). Reboot required: "
+            + (rebootRequired ? "yes" : "no")
+            + ".";
+    }
+
+    private static string BuildPerUpdateFailureDetails(IEnumerable<InstalledWindowsUpdateResult> perUpdateResults)
+    {
+        var builder = new StringBuilder();
+        foreach (var result in perUpdateResults.Where(static item => item.ResultCode is not 2 and not 3))
+        {
+            if (builder.Length > 0)
+            {
+                builder.Append(" | ");
+            }
+
+            builder.Append(result.Title);
+            if (result.Kbs.Count > 0)
+            {
+                builder.Append(" [");
+                builder.Append(string.Join(", ", result.Kbs));
+                builder.Append(']');
+            }
+            builder.Append(": ");
+            builder.Append(result.ResultLabel);
+            builder.Append(" (");
+            builder.Append(result.HResult);
+            builder.Append(')');
+        }
+
+        return builder.Length == 0
+            ? "Windows update install failed without per-update error details."
+            : builder.ToString();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static async Task<T> RunOnStaThreadAsync<T>(Func<T> action, CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.SetResult(action());
+            }
+            catch (Exception exception)
+            {
+                completion.SetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "PatchAgent.WindowsUpdateExecutor"
+        };
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        return await completion.Task.WaitAsync(cancellationToken);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static object CreateComObject(string progId)
+    {
+        var type = Type.GetTypeFromProgID(progId, throwOnError: true)
+            ?? throw new InvalidOperationException("Could not resolve COM ProgID " + progId + ".");
+        return Activator.CreateInstance(type)
+            ?? throw new InvalidOperationException("Could not create COM instance for " + progId + ".");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static T GetComProperty<T>(object target, string propertyName)
+    {
+        var value = target.GetType().InvokeMember(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.GetProperty,
+            binder: null,
+            target,
+            args: null);
+
+        return ConvertComValue<T>(value, propertyName);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void SetComProperty(object target, string propertyName, object? value)
+    {
+        target.GetType().InvokeMember(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.SetProperty,
+            binder: null,
+            target,
+            args: [value]);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static T InvokeComMethod<T>(object target, string methodName, params object?[] args)
+    {
+        var value = target.GetType().InvokeMember(
+            methodName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod,
+            binder: null,
+            target,
+            args);
+
+        return ConvertComValue<T>(value, methodName);
+    }
+
+    private static T ConvertComValue<T>(object? value, string label)
+    {
+        if (value is T typedValue)
+        {
+            return typedValue;
+        }
+
+        if (typeof(T) == typeof(object))
+        {
+            return (T)(value ?? throw new InvalidOperationException(label + " returned null."));
+        }
+
+        if (value is null)
+        {
+            throw new InvalidOperationException(label + " returned null.");
+        }
+
+        var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+        return (T)Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static List<string> ReadKbArticleIds(object update)
+    {
+        var raw = GetComProperty<object>(update, "KBArticleIDs");
+        return EnumerateComStrings(raw)
+            .Select(NormalizeKbId)
+            .Where(static value => value != string.Empty)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> EnumerateComStrings(object? value)
+    {
+        if (value is null)
+        {
+            yield break;
+        }
+
+        if (value is string single)
+        {
+            var normalized = single.Trim();
+            if (normalized != string.Empty)
+            {
+                yield return normalized;
+            }
+
+            yield break;
+        }
+
+        if (value is Array array)
+        {
+            foreach (var item in array)
+            {
+                var normalized = Convert.ToString(item, CultureInfo.InvariantCulture)?.Trim();
+                if (!string.IsNullOrWhiteSpace(normalized))
+                {
+                    yield return normalized;
+                }
+            }
+        }
+    }
+
+    private static string NormalizeKbId(string value)
+    {
+        var trimmed = value.Trim().ToUpperInvariant();
+        if (trimmed == string.Empty)
+        {
+            return string.Empty;
+        }
+
+        return trimmed.StartsWith("KB", StringComparison.Ordinal) ? trimmed : "KB" + trimmed;
+    }
+
+    private static void ThrowIfTimedOut(DateTimeOffset startedAt, TimeSpan timeout, string phase)
+    {
+        if (DateTimeOffset.UtcNow - startedAt <= timeout)
+        {
+            return;
+        }
+
+        throw new TimeoutException("Windows Update exceeded the configured timeout while " + phase + ".");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void ReleaseComObject(object? instance)
+    {
+        if (instance is null || !Marshal.IsComObject(instance))
+        {
+            return;
+        }
+
+        try
+        {
+            Marshal.FinalReleaseComObject(instance);
+        }
+        catch
+        {
+        }
+    }
+
+    private static string DescribeResultCode(int code)
+    {
+        return code switch
+        {
+            0 => "not_started",
+            1 => "in_progress",
+            2 => "succeeded",
+            3 => "succeeded_with_errors",
+            4 => "failed",
+            5 => "aborted",
+            _ => "unknown(" + code.ToString(CultureInfo.InvariantCulture) + ")"
+        };
     }
 
     private static bool IsWindowsUpdateJob(JobExecutionState job)
@@ -402,10 +665,28 @@ catch {
         };
     }
 
+    private static JobCompletionReport BuildCompletionReport(WindowsUpdateExecutionResult result)
+    {
+        return new JobCompletionReport
+        {
+            FinalState = "Succeeded",
+            InstallResult = "success",
+            RebootRequired = result.RebootRequired,
+            RebootPerformed = false,
+            PostRebootValidation = "not_run",
+            Summary = result.Summary,
+            Output = result.Output,
+            ErrorOutput = result.ErrorOutput
+        };
+    }
+
     private static JobCompletionReport BuildFailureReport(
         string code,
         string message,
-        bool rebootRequired = false)
+        bool rebootRequired = false,
+        string? summary = null,
+        string? output = null,
+        string? errorOutput = null)
     {
         return new JobCompletionReport
         {
@@ -414,116 +695,53 @@ catch {
             RebootRequired = rebootRequired,
             RebootPerformed = false,
             PostRebootValidation = "not_run",
+            Summary = summary,
+            Output = output,
+            ErrorOutput = errorOutput,
             ErrorCode = code,
             ErrorMessage = message,
             Retryable = true
         };
     }
 
-    private static async Task<ProcessResult> RunProcessAsync(
-        string executable,
-        IReadOnlyList<string> args,
-        TimeSpan timeout,
-        IReadOnlyDictionary<string, string> environment,
-        CancellationToken cancellationToken)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
+    private sealed record SelectedWindowsUpdate(
+        string Title,
+        List<string> Kbs);
 
-        foreach (var arg in args)
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
-
-        foreach (var variable in environment)
-        {
-            startInfo.Environment[variable.Key] = variable.Value;
-        }
-
-        using var process = new Process { StartInfo = startInfo };
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-
-        process.OutputDataReceived += (_, eventArgs) =>
-        {
-            if (eventArgs.Data is not null)
-            {
-                stdout.AppendLine(eventArgs.Data);
-            }
-        };
-        process.ErrorDataReceived += (_, eventArgs) =>
-        {
-            if (eventArgs.Data is not null)
-            {
-                stderr.AppendLine(eventArgs.Data);
-            }
-        };
-
-        if (!process.Start())
-        {
-            return new ProcessResult(-1, stdout.ToString(), stderr.ToString(), TimedOut: false);
-        }
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout);
-
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-            return new ProcessResult(process.ExitCode, stdout.ToString(), stderr.ToString(), TimedOut: false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            TryKill(process);
-            return new ProcessResult(-1, stdout.ToString(), stderr.ToString(), TimedOut: true);
-        }
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-        }
-    }
-
-    private readonly record struct ProcessResult(
-        int ExitCode,
-        string StandardOutput,
-        string StandardError,
-        bool TimedOut);
+    private sealed record InstalledWindowsUpdateResult(
+        string Title,
+        List<string> Kbs,
+        int ResultCode,
+        string ResultLabel,
+        string HResult);
 
     private readonly record struct WindowsUpdateExecutionResult(
         bool Success,
         bool RebootRequired,
         string? ErrorCode,
-        string? ErrorMessage)
+        string? ErrorMessage,
+        string? Summary,
+        string? Output,
+        string? ErrorOutput)
     {
-        public static WindowsUpdateExecutionResult Ok(bool rebootRequired)
+        public static WindowsUpdateExecutionResult Ok(
+            bool rebootRequired,
+            string? summary = null,
+            string? output = null,
+            string? errorOutput = null)
         {
-            return new WindowsUpdateExecutionResult(true, rebootRequired, null, null);
+            return new WindowsUpdateExecutionResult(true, rebootRequired, null, null, summary, output, errorOutput);
         }
 
         public static WindowsUpdateExecutionResult Fail(
             string code,
             string message,
-            bool rebootRequired = false)
+            bool rebootRequired = false,
+            string? summary = null,
+            string? output = null,
+            string? errorOutput = null)
         {
-            return new WindowsUpdateExecutionResult(false, rebootRequired, code, message);
+            return new WindowsUpdateExecutionResult(false, rebootRequired, code, message, summary, output, errorOutput);
         }
     }
 }

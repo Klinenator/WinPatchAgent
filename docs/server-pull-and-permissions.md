@@ -110,9 +110,26 @@ include /etc/winpatchagent/patchapi-secrets.conf;
 Use this repo template to populate it:
 
 - `docs/examples/patchapi-secrets.conf.example`
+- `docs/mysql-storage-cutover.md`
 
 Then run:
 
 ```bash
 winpatch-pull
 ```
+
+## Switching production storage to MySQL
+
+Once the repo is updated on the server and your MySQL database is ready, run:
+
+```bash
+cd /var/www/WinPatchAgent
+sudo bash backend/php-api/scripts/enable_mysql_storage.sh \
+  --app-root /var/www/WinPatchAgent \
+  --db-host 127.0.0.1 \
+  --db-port 3306 \
+  --db-name winpatchagent \
+  --db-user winpatch_app
+```
+
+That script backs up the runtime files, imports them into MySQL, updates the nginx FastCGI config, reloads services, and verifies `/healthz` reports `storage_driver=mysql`.

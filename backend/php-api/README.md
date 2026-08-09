@@ -12,6 +12,7 @@ Current endpoints:
 - `GET /admin/settings`
 - `GET /admin/login` (Google login page for admin)
 - `GET /v1/admin/auth/status`
+- `GET /v1/admin/storage/status`
 - `GET /v1/admin/auth/google/start`
 - `GET /v1/admin/auth/google/callback`
 - `POST /v1/admin/auth/logout`
@@ -52,7 +53,7 @@ Current endpoints:
 - `GET /install/macos.sh?enrollment_key=...`
 - `GET /install/windows.ps1?enrollment_key=...&mode=prebuilt|source` (`mode` optional, default `prebuilt`)
   - In `mode=source`, installer logic auto-repairs missing/disabled NuGet sources (`nuget.org`) when publish fails with common restore errors (for example `NU1100`), then retries once before prebuilt fallback.
-- `GET /healthz`
+- `GET /healthz` (includes `storage_driver`)
 
 Storage model:
 - File-backed JSON and NDJSON under `storage/runtime/` by default
@@ -120,6 +121,28 @@ php backend/php-api/scripts/migrate_runtime_to_mysql.php \
 
 The script prompts for the DB password via env/arg if omitted and imports current runtime files into typed MySQL tables (with document fallback table for uncategorized paths such as CVE cache blobs).
 
+MySQL cutover helper:
+
+```bash
+sudo bash backend/php-api/scripts/enable_mysql_storage.sh \
+  --app-root /var/www/WinPatchAgent \
+  --db-host 127.0.0.1 \
+  --db-port 3306 \
+  --db-name winpatchagent \
+  --db-user winpatch_app
+```
+
+The cutover script:
+- Backs up `storage/runtime/` before changing anything
+- Imports runtime state into MySQL
+- Updates `/etc/winpatchagent/patchapi-secrets.conf` with a managed MySQL block
+- Reloads `php-fpm` and nginx
+- Verifies `/healthz` reports `"storage_driver":"mysql"`
+
+For the full runbook, see:
+- `docs/mysql-storage-cutover.md`
+- `docs/server-pull-and-permissions.md`
+
 Local run example once PHP is installed:
 
 ```bash
@@ -146,7 +169,7 @@ Admin pages:
 - `/admin/evidence` audit evidence workspace (SOC2 baseline + patch review exports)
 - `/admin/settings` admin token storage and auth diagnostics
 
-The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution. Linux package rows for Ubuntu/Debian agents include CVE matches from OSV. Windows installer generation now supports both prebuilt mode (default) and source-build mode.
+The admin UI can generate one-time enrollment keys, rename agents, show installed package inventory, queue package install jobs by platform (Windows, Linux, macOS), queue script jobs for Windows and macOS agents (including GCPW and Splashtop templates), launch Splashtop connections for Windows/macOS agents via URI (`st-business://...`), and manage automation profiles with recurring schedules and run-now execution. Automation profiles can also run once on newly registered Windows agents and queue `software_install` onboarding jobs alongside scripts, which is useful for first-day builds. Linux package rows for Ubuntu/Debian agents include CVE matches from OSV. Windows installer generation now supports both prebuilt mode (default) and source-build mode, and the staged Windows bootstrap now delegates service registration to `PatchAgent.Service.exe install` instead of embedding service creation in PowerShell.
 The main admin page also shows a Windows SOC2 baseline card using reported endpoint posture (Defender, firewall, removable-storage policy, and BitLocker status). Endpoints that do not support BitLocker report `not_supported` instead of failing the baseline outright.
 For audit handoff, `/admin/evidence` now supports two export tracks:
 - SOC2 baseline evidence (`JSON`, `CSV`, `HTML`) from `/v1/admin/evidence/soc2*` with per-agent Windows control outcomes and a report SHA-256 fingerprint.

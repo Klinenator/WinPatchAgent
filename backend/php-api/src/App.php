@@ -82,6 +82,7 @@ final class App
                 JsonResponse::ok([
                     'status' => 'ok',
                     'time' => gmdate(DATE_ATOM),
+                    'storage_driver' => $this->store->driverName(),
                 ]);
                 return;
             }
@@ -116,6 +117,20 @@ final class App
                 return;
             }
 
+            if ($method === 'GET' && ($path === '/admin/servers' || $path === '/admin/servers/')) {
+                $this->handleAdminServersView();
+                return;
+            }
+
+            // Provisioning artefacts, fetched by machines being enrolled. These
+            // are deliberately unauthenticated: the host has no admin session at
+            // enrolment time. They must therefore never contain a secret — the
+            // enrollment key is passed as an argument by the operator.
+            if ($method === 'GET' && preg_match('#^/scripts/([A-Za-z0-9._-]+)$#', $path, $scriptMatch) === 1) {
+                $this->handleProvisioningArtifact($scriptMatch[1]);
+                return;
+            }
+
             if ($method === 'GET' && ($path === '/admin/login' || $path === '/admin/login/')) {
                 $this->handleAdminLoginView();
                 return;
@@ -123,6 +138,12 @@ final class App
 
             if ($method === 'GET' && $path === '/v1/admin/auth/status') {
                 $this->handleAdminAuthStatus();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/storage/status') {
+                $this->requireAdmin($request);
+                $this->handleAdminStorageStatus();
                 return;
             }
 
@@ -163,6 +184,12 @@ final class App
             if ($method === 'GET' && $path === '/v1/admin/agents') {
                 $this->requireAdmin($request);
                 $this->handleListAgents();
+                return;
+            }
+
+            if ($method === 'GET' && $path === '/v1/admin/servers') {
+                $this->requireAdmin($request);
+                $this->handleAdminServers();
                 return;
             }
 
@@ -462,11 +489,21 @@ final class App
     {
         $body = $request->json();
 
+        // Resolved here rather than in the repository because "pending reboot"
+        // is OS-specific; the repository only needs the answer so it can keep
+        // the since-timestamp that patch SLAs are measured against.
+        $osFamily = $this->detectOsFamily(is_array($body['os'] ?? null) ? $body['os'] : []);
+        $pendingRebootEffective = $this->detectPendingReboot(
+            is_array($body) ? $body : [],
+            $osFamily
+        );
+
         $this->inventory->storeSnapshot($agent['agent_record_id'], [
             'agent_id' => (string) ($body['agent_id'] ?? ''),
             'device_id' => (string) ($body['device_id'] ?? ''),
             'mode' => (string) ($body['mode'] ?? 'full'),
             'collected_at' => (string) ($body['collected_at'] ?? ''),
+            'pending_reboot_effective' => $pendingRebootEffective,
             'os' => is_array($body['os'] ?? null) ? $body['os'] : [],
             'windows_update' => is_array($body['windows_update'] ?? null) ? $body['windows_update'] : [],
             'windows_security' => is_array($body['windows_security'] ?? null) ? $body['windows_security'] : [],
@@ -1025,6 +1062,29 @@ final class App
                         'target_agent_id' => $targetAgentId,
                         'target_device_id' => $targetDeviceId,
                         'payload' => $payload,
+                        'policy' => [],
+                    ]);
+                    $jobsQueued++;
+                    $agentJobsQueued++;
+                }
+
+                $softwarePackages = array_values(array_filter(
+                    is_array($windowsTask['software_packages'] ?? null) ? $windowsTask['software_packages'] : [],
+                    static fn (mixed $value): bool => is_string($value) && trim($value) !== ''
+                ));
+                if (count($softwarePackages) > 0) {
+                    $this->jobs->createJob([
+                        'type' => 'software_install',
+                        'correlation_id' => $correlationPrefix . '-win-software',
+                        'target_agent_id' => $targetAgentId,
+                        'target_device_id' => $targetDeviceId,
+                        'payload' => [
+                            'software_install' => [
+                                'manager' => (string) ($windowsTask['software_manager'] ?? 'winget'),
+                                'allow_update' => $this->toBool($windowsTask['software_allow_update'] ?? false),
+                                'packages' => $softwarePackages,
+                            ],
+                        ],
                         'policy' => [],
                     ]);
                     $jobsQueued++;
@@ -3342,6 +3402,302 @@ final class App
         $this->handleAdminProtectedView('admin-evidence.html', 'Admin evidence page is missing.');
     }
 
+    private function handleAdminServersView(): void
+    {
+        $this->handleAdminProtectedView('admin-servers.html', 'Admin servers page is missing.');
+    }
+
+    /**
+     * Serves provisioning artefacts from public/scripts/.
+     *
+     * The admin UI has advertised /scripts/provision.ps1 and
+     * /scripts/provision-mac.sh for some time, but no route existed, so those
+     * URLs returned 405 from the catch-all. This serves them for real.
+     *
+     * Allowlisted by exact filename rather than by extension: this endpoint is
+     * unauthenticated, so it should expose exactly the files intended for it and
+     * nothing else that happens to land in the directory.
+     */
+    private function handleProvisioningArtifact(string $filename): void
+    {
+        $allowed = [
+            'provision-ubuntu.sh' => 'text/x-shellscript; charset=utf-8',
+            'provision-mac.sh' => 'text/x-shellscript; charset=utf-8',
+            'provision.ps1' => 'text/plain; charset=utf-8',
+            'agent-source.tar.gz' => 'application/gzip',
+        ];
+
+        if (!isset($allowed[$filename])) {
+            JsonResponse::error(404, 'not_found', 'Unknown provisioning artifact.');
+            return;
+        }
+
+        $base = dirname(__DIR__) . '/public/scripts';
+        $full = $base . '/' . $filename;
+        $real = realpath($full);
+        $realBase = realpath($base);
+
+        // Defence in depth: the filename pattern already excludes traversal, but
+        // confirm the resolved path really sits inside the scripts directory.
+        if ($real === false || $realBase === false || !str_starts_with($real, $realBase . DIRECTORY_SEPARATOR)) {
+            JsonResponse::error(404, 'not_found', 'Provisioning artifact is not installed on this server.');
+            return;
+        }
+
+        header('Content-Type: ' . $allowed[$filename]);
+        header('Content-Length: ' . (string) filesize($real));
+        header('Cache-Control: no-store');
+        header('X-Content-Type-Options: nosniff');
+        readfile($real);
+    }
+
+    /**
+     * Server fleet view: the EC2 inventory joined to agent state.
+     *
+     * Deliberately driven from the EC2 export rather than from agent check-ins.
+     * A list built only from agents cannot show a server that is not reporting —
+     * an unenrolled or dead-agent host would simply be absent rather than
+     * flagged, which is the failure mode this page exists to catch.
+     */
+    private function handleAdminServers(): void
+    {
+        $slaDays = (int) ($this->envInt('PATCH_API_REBOOT_SLA_DAYS', 7));
+        $staleAfterMinutes = (int) ($this->envInt('PATCH_API_AGENT_STALE_MINUTES', 120));
+
+        $instances = $this->loadEc2Inventory();
+
+        // Index agents by every identifier we might match on.
+        $agentsByHost = [];
+        foreach ($this->agents->listAgents() as $agent) {
+            $hostname = strtolower(trim((string) ($agent['hostname'] ?? '')));
+            if ($hostname !== '') {
+                $agentsByHost[$hostname] = $agent;
+                // EC2 default hostnames encode the private IP: ip-172-31-29-35
+                if (preg_match('/^ip-(\d+)-(\d+)-(\d+)-(\d+)/', $hostname, $m) === 1) {
+                    $agentsByHost['ip:' . $m[1] . '.' . $m[2] . '.' . $m[3] . '.' . $m[4]] = $agent;
+                }
+            }
+        }
+
+        $rows = [];
+        $matchedAgentIds = [];
+
+        foreach ($instances as $instance) {
+            $privateIp = (string) ($instance['private_ip'] ?? '');
+            $agent = $agentsByHost['ip:' . $privateIp] ?? null;
+            if ($agent === null) {
+                $name = strtolower(trim((string) ($instance['name'] ?? '')));
+                $agent = $name !== '' ? ($agentsByHost[$name] ?? null) : null;
+            }
+
+            if ($agent !== null) {
+                $matchedAgentIds[(string) ($agent['agent_record_id'] ?? '')] = true;
+            }
+
+            $rows[] = $this->buildServerRow($instance, $agent, $slaDays, $staleAfterMinutes);
+        }
+
+        // Agents that report but are not in the EC2 export (on-prem, other
+        // accounts, or a stale export) still belong on the page.
+        foreach ($this->agents->listAgents() as $agent) {
+            $recordId = (string) ($agent['agent_record_id'] ?? '');
+            if ($recordId === '' || isset($matchedAgentIds[$recordId])) {
+                continue;
+            }
+
+            $inventory = $this->inventory->loadSnapshot($recordId) ?? [];
+            $osFamily = $this->detectOsFamily(is_array($inventory['os'] ?? null) ? $inventory['os'] : []);
+            if ($osFamily !== 'linux') {
+                continue; // desktops belong on the main Agents view
+            }
+
+            $rows[] = $this->buildServerRow([], $agent, $slaDays, $staleAfterMinutes);
+        }
+
+        $summary = [
+            'total' => count($rows),
+            'reporting' => 0,
+            'stale' => 0,
+            'not_enrolled' => 0,
+            'pending_reboot' => 0,
+            'sla_breach' => 0,
+        ];
+
+        foreach ($rows as $row) {
+            $status = (string) $row['reporting_status'];
+            if (isset($summary[$status])) {
+                $summary[$status]++;
+            }
+            if ($row['pending_reboot'] === true) {
+                $summary['pending_reboot']++;
+            }
+            if ($row['sla_status'] === 'breach') {
+                $summary['sla_breach']++;
+            }
+        }
+
+        JsonResponse::ok([
+            'generated_at' => gmdate(DATE_ATOM),
+            'reboot_sla_days' => $slaDays,
+            'ec2_inventory' => $this->ec2InventoryStatus(),
+            'summary' => $summary,
+            'servers' => $rows,
+        ]);
+    }
+
+    private function buildServerRow(array $instance, ?array $agent, int $slaDays, int $staleAfterMinutes): array
+    {
+        $row = [
+            'instance_id' => (string) ($instance['instance_id'] ?? ''),
+            'name' => (string) ($instance['name'] ?? ''),
+            'instance_state' => (string) ($instance['state'] ?? ''),
+            'private_ip' => (string) ($instance['private_ip'] ?? ''),
+            'public_ip' => (string) ($instance['public_ip'] ?? ''),
+            'enrolled' => $agent !== null,
+            'agent_record_id' => '',
+            'hostname' => '',
+            'last_seen_at' => '',
+            'os_family' => '',
+            'os_name' => '',
+            'kernel' => '',
+            'available_patch_count' => null,
+            'security_patch_count' => null,
+            'pending_reboot' => null,
+            'pending_reboot_since' => null,
+            'pending_reboot_days' => null,
+            'sla_status' => 'unknown',
+            'reporting_status' => 'not_enrolled',
+        ];
+
+        if ($agent === null) {
+            return $row;
+        }
+
+        $recordId = (string) ($agent['agent_record_id'] ?? '');
+        $row['agent_record_id'] = $recordId;
+        $row['hostname'] = (string) ($agent['hostname'] ?? '');
+        $row['last_seen_at'] = (string) ($agent['last_seen_at'] ?? '');
+        if ($row['name'] === '') {
+            $row['name'] = (string) ($agent['display_name'] ?? $agent['hostname'] ?? '');
+        }
+
+        $row['reporting_status'] = $this->isAgentStale($row['last_seen_at'], $staleAfterMinutes)
+            ? 'stale'
+            : 'reporting';
+
+        $inventory = $this->inventory->loadSnapshot($recordId) ?? [];
+        $os = is_array($inventory['os'] ?? null) ? $inventory['os'] : [];
+        $osFamily = $this->detectOsFamily($os);
+        $linux = is_array($inventory['linux'] ?? null) ? $inventory['linux'] : [];
+
+        $row['os_family'] = $osFamily;
+        $row['os_name'] = trim(
+            (string) ($linux['distro_id'] ?? $os['name'] ?? '')
+            . ' ' . (string) ($linux['distro_version_id'] ?? $os['version'] ?? '')
+        );
+        $row['kernel'] = (string) ($linux['kernel_version'] ?? $os['kernel'] ?? '');
+
+        $facts = $this->collectPatchFacts($inventory, $osFamily);
+        $row['available_patch_count'] = (int) ($facts['available_patch_count'] ?? 0);
+        $row['security_patch_count'] = (int) ($facts['security_patch_count'] ?? 0);
+        $row['pending_reboot'] = (bool) ($facts['pending_reboot'] ?? false);
+
+        $since = $inventory['pending_reboot_since'] ?? null;
+        if ($row['pending_reboot'] === true && is_string($since) && trim($since) !== '') {
+            $row['pending_reboot_since'] = $since;
+            $sinceTs = strtotime($since);
+            if ($sinceTs !== false) {
+                $days = (time() - $sinceTs) / 86400;
+                $row['pending_reboot_days'] = round($days, 1);
+                $row['sla_status'] = $days >= $slaDays
+                    ? 'breach'
+                    : ($days >= max(1, $slaDays - 2) ? 'due' : 'ok');
+            }
+        } elseif ($row['pending_reboot'] === false) {
+            $row['sla_status'] = 'ok';
+        }
+
+        return $row;
+    }
+
+    private function isAgentStale(string $lastSeenAt, int $staleAfterMinutes): bool
+    {
+        if (trim($lastSeenAt) === '') {
+            return true;
+        }
+
+        $ts = strtotime($lastSeenAt);
+        if ($ts === false) {
+            return true;
+        }
+
+        return (time() - $ts) > ($staleAfterMinutes * 60);
+    }
+
+    /**
+     * Reads the EC2 export written periodically by scripts/export_ec2_inventory.sh.
+     * Absence is not an error — the page still renders from agent data alone and
+     * reports that the export is missing, rather than silently showing a short list.
+     */
+    private function loadEc2Inventory(): array
+    {
+        $path = $this->envString('PATCH_API_EC2_INVENTORY_PATH', '/var/lib/winpatchagent/ec2-inventory.json');
+        if ($path === '' || !is_readable($path)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) file_get_contents($path), true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $instances = is_array($decoded['instances'] ?? null) ? $decoded['instances'] : $decoded;
+        $out = [];
+        foreach ($instances as $instance) {
+            if (!is_array($instance)) {
+                continue;
+            }
+
+            $out[] = [
+                'instance_id' => (string) ($instance['instance_id'] ?? ''),
+                'name' => (string) ($instance['name'] ?? ''),
+                'state' => (string) ($instance['state'] ?? ''),
+                'private_ip' => (string) ($instance['private_ip'] ?? ''),
+                'public_ip' => (string) ($instance['public_ip'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    private function ec2InventoryStatus(): array
+    {
+        $path = $this->envString('PATCH_API_EC2_INVENTORY_PATH', '/var/lib/winpatchagent/ec2-inventory.json');
+        $readable = $path !== '' && is_readable($path);
+
+        return [
+            'path' => $path,
+            'available' => $readable,
+            'generated_at' => $readable ? gmdate(DATE_ATOM, (int) filemtime($path)) : null,
+        ];
+    }
+
+    private function envString(string $key, string $default): string
+    {
+        $value = getenv($key);
+        if ($value === false) {
+            $value = $_SERVER[$key] ?? $_ENV[$key] ?? null;
+        }
+
+        return is_string($value) && trim($value) !== '' ? trim($value) : $default;
+    }
+
+    private function envInt(string $key, int $default): int
+    {
+        $value = $this->envString($key, (string) $default);
+        return is_numeric($value) ? (int) $value : $default;
+    }
+
     private function handleAdminProtectedView(string $filename, string $missingMessage): void
     {
         if ($this->isGoogleOAuthEnabled() && !$this->isAdminSessionAuthenticated()) {
@@ -3415,6 +3771,24 @@ final class App
             'passkey_list_url' => '/v1/admin/auth/passkeys',
             'redirect_uri' => $this->googleRedirectUri(),
             'hosted_domain' => $this->config->googleHostedDomain,
+        ]);
+    }
+
+    private function handleAdminStorageStatus(): void
+    {
+        $driver = $this->store->driverName();
+
+        JsonResponse::ok([
+            'driver' => $driver,
+            'storage_root' => $this->store->storageRoot(),
+            'mysql' => [
+                'enabled' => $driver === 'mysql',
+                'host' => $driver === 'mysql' ? $this->config->dbHost : '',
+                'port' => $driver === 'mysql' ? $this->config->dbPort : null,
+                'database' => $driver === 'mysql' ? $this->config->dbName : '',
+                'table' => $driver === 'mysql' ? $this->config->dbTable : '',
+            ],
+            'recommended_mode' => 'mysql',
         ]);
     }
 
@@ -4455,6 +4829,7 @@ download_file() {
 }
 
 ARCHIVE_URL="$(build_archive_url "\${REPO_URL}" "\${REPO_REF}")"
+SELF_HOSTED_ARCHIVE_URL="\${BACKEND_URL%/}/scripts/agent-source.tar.gz"
 TMP_ARCHIVE="$(mktemp /tmp/winpatchagent-src.XXXXXX.tar.gz)"
 TMP_EXTRACT="$(mktemp -d /tmp/winpatchagent-src.XXXXXX)"
 
@@ -4464,8 +4839,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! download_file "\${ARCHIVE_URL}" "\${TMP_ARCHIVE}"; then
-  echo "Failed to download source archive: \${ARCHIVE_URL}" >&2
+# Prefer the archive served by the PatchAgent API so enrolling hosts fetch from
+# inside your own perimeter. Falls back to the public repo if the API host has
+# not published one yet (see docs: git archive into public/scripts/).
+if download_file "\${SELF_HOSTED_ARCHIVE_URL}" "\${TMP_ARCHIVE}"; then
+  echo "Fetched agent source from \${SELF_HOSTED_ARCHIVE_URL}"
+elif download_file "\${ARCHIVE_URL}" "\${TMP_ARCHIVE}"; then
+  echo "Fetched agent source from \${ARCHIVE_URL} (self-hosted archive unavailable)"
+else
+  echo "Failed to download source archive from \${SELF_HOSTED_ARCHIVE_URL} or \${ARCHIVE_URL}" >&2
   exit 1
 fi
 
@@ -4548,15 +4930,6 @@ function Resolve-PackageInstallRoot {
     }
 
     throw "Package did not contain PatchAgent.Service.exe."
-}
-
-function Stop-And-RemoveService {
-    \$existing = Get-Service -Name \$ServiceName -ErrorAction SilentlyContinue
-    if (\$existing) {
-        Stop-Service -Name \$ServiceName -Force -ErrorAction SilentlyContinue
-        sc.exe delete \$ServiceName | Out-Null
-        Start-Sleep -Seconds 2
-    }
 }
 
 function Get-DotnetCommand {
@@ -4791,33 +5164,27 @@ function Install-FromSource {
     throw ("dotnet publish failed with exit code {0} and no prebuilt package fallback URL is configured." -f \$publishExitCode)
 }
 
-function Write-AgentConfig {
-    \$configPath = Join-Path \$InstallDir "appsettings.Production.json"
-    \$configObject = @{
-        Agent = @{
-            ServiceName = "PatchAgentSvc"
-            BackendBaseUrl = \$BackendUrl
-            EnrollmentKey = \$EnrollmentKey
-            AgentChannel = "stable"
-            StorageRoot = \$StateDir
-            RequestTimeoutSeconds = 30
-            LoopDelaySeconds = 15
-            HeartbeatIntervalSeconds = 300
-            InventoryIntervalSeconds = 21600
-            JobPollIntervalSeconds = 120
-            EnableStubJobExecution = \$true
-            StubJobDurationSeconds = 20
-            EnableAptJobExecution = \$false
-            EnableWindowsUpdateJobExecution = \$true
-            WindowsUpdateCommandTimeoutSeconds = 5400
-            EnableWindowsPowerShellScriptExecution = \$true
-            WindowsPowerShellScriptCommandTimeoutSeconds = 3600
-            EnableMacSoftwareUpdateJobExecution = \$false
-            MacSoftwareUpdateCommandTimeoutSeconds = 5400
-            WindowsSelfUpdatePackageUrl = \$WindowsAgentPackageUrl
-        }
+function Invoke-AgentInstaller {
+    \$exePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
+    if (-not (Test-Path \$exePath)) {
+        throw "Expected service binary not found: \$exePath"
     }
-    \$configObject | ConvertTo-Json -Depth 8 | Set-Content -Path \$configPath -Encoding UTF8
+
+    \$installerArgs = @(
+        "install",
+        "--backend-url", \$BackendUrl,
+        "--enrollment-key", \$EnrollmentKey,
+        "--service-name", \$ServiceName,
+        "--install-dir", \$InstallDir,
+        "--storage-root", \$StateDir,
+        "--agent-channel", "stable",
+        "--windows-self-update-package-url", \$WindowsAgentPackageUrl
+    )
+
+    \$installerProc = Start-Process -FilePath \$exePath -ArgumentList \$installerArgs -Wait -PassThru
+    if (\$installerProc.ExitCode -ne 0) {
+        throw ("PatchAgent native installer failed with exit code {0}." -f \$installerProc.ExitCode)
+    }
 }
 
 function Install-Splashtop {
@@ -5044,36 +5411,24 @@ function Ensure-WindowsDefender {
     }
 }
 
-function Ensure-ServiceAndStart {
-    \$exePath = Join-Path \$InstallDir "PatchAgent.Service.exe"
-    if (-not (Test-Path \$exePath)) {
-        throw "Expected service binary not found: \$exePath"
-    }
-
-    sc.exe create \$ServiceName binPath= "`"\$exePath`"" start= auto | Out-Null
-    sc.exe description \$ServiceName "WinPatchAgent endpoint service" | Out-Null
-    Start-Service -Name \$ServiceName
-}
-
 New-Item -ItemType Directory -Path \$InstallDir -Force | Out-Null
 New-Item -ItemType Directory -Path \$StateDir -Force | Out-Null
 
-Stop-And-RemoveService
 if (\$InstallMode -eq "source") {
     Install-FromSource
 } else {
     Install-FromPrebuilt
 }
 
-Write-AgentConfig
 Install-Splashtop
 Apply-RemovableStoragePolicy
 Ensure-WindowsDefender
-Ensure-ServiceAndStart
+Invoke-AgentInstaller
 
 Write-Host "Install complete."
 Write-Host "Install mode: \$InstallMode"
 Write-Host "Service: \$ServiceName"
+Write-Host "Service install method: native agent installer"
 Write-Host "Status:  Get-Service -Name \$ServiceName"
 POWERSHELL;
     }

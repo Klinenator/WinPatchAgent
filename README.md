@@ -116,6 +116,18 @@ Default output:
 
 Publish that zip as your GitHub Release asset (same filename), or host it at your own HTTPS URL and set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server.
 
+Windows service registration is now handled by the agent binary itself, not by an external PowerShell service-install script. The generated `/install/windows.ps1` flow still bootstraps download and staging, but it now hands service creation and config writing to:
+
+```powershell
+PatchAgent.Service.exe install --backend-url https://patch-api.example.com --enrollment-key change-me
+```
+
+To remove the Windows service from an elevated prompt:
+
+```powershell
+PatchAgent.Service.exe uninstall
+```
+
 ## Backend (PHP + nginx)
 
 API scaffold is under `backend/php-api/`.
@@ -123,10 +135,11 @@ It now includes a basic admin web view at `/admin` for viewing agents, generatin
 Admin access supports Google OAuth login (`/admin/login`) and/or admin bearer token auth, with optional TOTP second factor and optional Touch ID/passkey (WebAuthn) as an MFA alternative.
 The admin UI also supports agent renaming, viewing installed package inventory, and queuing package install jobs by platform.
 It now also supports software inventory (installed applications) and cross-platform software installation jobs (`software_install`) using Winget (Windows), APT (Linux), and Homebrew (macOS).
+Automation profiles can now also queue Windows software onboarding packages and run once on newly registered agents, which makes a `New PC Onboarding` workflow practical for fresh Windows builds.
 Linux available package inventory is now CVE-enriched through OSV lookups (Ubuntu/Debian) with on-disk caching on the API server.
 It now also supports queueing script jobs for Windows and macOS (inline script or script URL), including built-in GCPW and Splashtop install templates.
 It now also supports per-agent self-update jobs (`agent_self_update`) from the main admin page.
-Server-generated endpoint installers and self-update workflows now pull artifacts over HTTPS (curl/wget/Invoke-WebRequest), so Git is not required on endpoints.
+Server-generated endpoint installers and self-update workflows now pull artifacts over HTTPS (curl/wget/Invoke-WebRequest), so Git is not required on endpoints. On Windows, PowerShell is now just the bootstrap layer; the agent executable performs native service install/uninstall.
 It also includes an agent-row `Connect` button that launches the Splashtop Business app URI for Windows/macOS agents.
 If you set `PATCH_API_WINDOWS_SPLASHTOP_MSI_URL` on the API server, Windows agent installs from `/install/windows.ps1` will auto-install Splashtop during provisioning. The URL can point to either an Easy Deployment `.exe` installer or a deployable `.msi`.
 Set `PATCH_API_WINDOWS_AGENT_PACKAGE_URL` on the API server to your published Windows agent zip (default points to GitHub Releases latest asset `winpatchagent-windows-x64.zip`).
@@ -137,6 +150,17 @@ Windows install links from `/install/windows.ps1` support `mode=prebuilt` (defau
 In `mode=source`, the installer now detects common NuGet source issues (`NU1100` / "No sources found"), auto-configures `nuget.org`, and retries `dotnet publish` once before falling back to prebuilt mode.
 Admin pages are split into `/admin` (main), `/admin/automation`, `/admin/seed-jobs`, `/admin/install-agent`, and `/admin/settings`.
 Backend storage now supports either file mode (`storage/runtime`) or MySQL relational mode (`PATCH_API_DB_DRIVER=mysql`) for more durable production persistence and easier SQL debugging.
+
+For production cutover, use the helper script:
+
+```bash
+sudo bash backend/php-api/scripts/enable_mysql_storage.sh \
+  --app-root /var/www/WinPatchAgent \
+  --db-host 127.0.0.1 \
+  --db-port 3306 \
+  --db-name winpatchagent \
+  --db-user winpatch_app
+```
 
 To migrate current runtime files into MySQL:
 
@@ -159,5 +183,6 @@ php -S 127.0.0.1:8080 -t public
 See backend details and endpoints in:
 - `backend/php-api/README.md`
 - `docs/php-backend-api.md`
+- `docs/mysql-storage-cutover.md` (MySQL storage migration + rollback runbook)
 - `docs/server-pull-and-permissions.md` (server pull + permission fix runbook)
 - `docs/examples/patchapi-secrets.conf.example` (nginx `fastcgi_param` secrets template for `/etc/winpatchagent/`)

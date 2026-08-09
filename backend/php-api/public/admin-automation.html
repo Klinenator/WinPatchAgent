@@ -513,6 +513,7 @@
         </div>
         <nav class="side-nav">
             <a href="/admin" class="side-link">Main</a>
+            <a href="/admin/servers" class="side-link">Servers</a>
             <a href="/admin/automation" class="side-link active">Automation</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
@@ -535,6 +536,7 @@
             <div class="command-actions">
                 <button id="refreshBtn" type="button" class="btn subtle">Refresh</button>
                 <button id="newProfileBtn" type="button" class="btn subtle">New Profile</button>
+                <button id="newOnboardingProfileBtn" type="button" class="btn subtle">New PC Onboarding Preset</button>
                 <button id="saveProfileBtn" type="button" class="btn primary">Save Profile</button>
                 <button id="runNowBtn" type="button" class="btn subtle">Run Now</button>
                 <button id="deleteProfileBtn" type="button" class="btn danger">Delete</button>
@@ -559,7 +561,7 @@
 
             <section class="panel">
                 <h2>Edit Automation Profile</h2>
-                <p class="hint">This creates jobs using the same patch + script executors already available in the agent.</p>
+                <p class="hint">This creates jobs using the same patch, software, and script executors already available in the agent.</p>
 
                 <div class="editor-grid">
                     <div class="field-block">
@@ -636,8 +638,28 @@
                     <label class="check-item"><input id="taskRebootIfNeeded" type="checkbox">Reboot if needed (metadata only)</label>
                 </div>
 
+                <h3>Windows Software Onboarding</h3>
+                <p class="hint">These create `software_install` jobs for Windows agents. Use one package or winget ID per line.</p>
+                <div class="editor-grid">
+                    <div class="field-block">
+                        <label for="windowsSoftwareManager">Windows Software Manager</label>
+                        <select id="windowsSoftwareManager">
+                            <option value="winget">winget</option>
+                            <option value="auto">auto</option>
+                        </select>
+                    </div>
+                    <div class="field-block">
+                        <label>&nbsp;</label>
+                        <label class="check-item"><input id="windowsSoftwareAllowUpdate" type="checkbox">Allow upgrade if already installed</label>
+                    </div>
+                </div>
+                <div class="field-block">
+                    <label for="windowsSoftwarePackages">Windows Packages</label>
+                    <textarea id="windowsSoftwarePackages" placeholder="Omnissa.HorizonClient&#10;Citrix.Workspace&#10;Linphone.Linphone"></textarea>
+                </div>
+
                 <h3>Windows Scripts</h3>
-                <p class="hint">Scripts create `windows_powershell_script` jobs for targeted Windows agents.</p>
+                <p class="hint">Scripts create `windows_powershell_script` jobs for targeted Windows agents. The onboarding preset seeds a GCPW install script you can review before saving.</p>
                 <button id="addScriptBtn" type="button" class="btn subtle">Add Script</button>
                 <div id="scriptsList" class="scripts-list"></div>
             </section>
@@ -657,6 +679,7 @@
 
     const refreshBtn = document.getElementById("refreshBtn");
     const newProfileBtn = document.getElementById("newProfileBtn");
+    const newOnboardingProfileBtn = document.getElementById("newOnboardingProfileBtn");
     const saveProfileBtn = document.getElementById("saveProfileBtn");
     const runNowBtn = document.getElementById("runNowBtn");
     const deleteProfileBtn = document.getElementById("deleteProfileBtn");
@@ -686,6 +709,9 @@
     const taskMacInstallAllInput = document.getElementById("taskMacInstallAll");
     const taskLinuxUpgradeAllInput = document.getElementById("taskLinuxUpgradeAll");
     const taskRebootIfNeededInput = document.getElementById("taskRebootIfNeeded");
+    const windowsSoftwareManagerInput = document.getElementById("windowsSoftwareManager");
+    const windowsSoftwareAllowUpdateInput = document.getElementById("windowsSoftwareAllowUpdate");
+    const windowsSoftwarePackagesInput = document.getElementById("windowsSoftwarePackages");
 
     const STORAGE_KEY = "patchagent_admin_token";
     let profiles = [];
@@ -709,6 +735,13 @@
         applyProfileToForm(defaultProfile());
         renderProfileList();
         setStatus("Draft profile ready. Save to create it.", "");
+    });
+
+    newOnboardingProfileBtn.addEventListener("click", () => {
+        selectedProfileId = "";
+        applyProfileToForm(buildNewPcOnboardingProfile());
+        renderProfileList();
+        setStatus("Loaded new-PC onboarding preset. Review package IDs and GCPW domain settings, then save.", "success");
     });
 
     saveProfileBtn.addEventListener("click", async () => {
@@ -930,11 +963,60 @@
                 linux: true
             },
             tasks: {
-                windows: { install_all_updates: false },
+                windows: {
+                    install_all_updates: false,
+                    software_manager: "winget",
+                    software_allow_update: false,
+                    software_packages: []
+                },
                 mac: { install_all_updates: false },
                 linux: { upgrade_all: false },
                 maintenance: { reboot_if_needed: false },
                 windows_scripts: []
+            }
+        };
+    }
+
+    function buildNewPcOnboardingProfile() {
+        return {
+            name: "New PC Onboarding",
+            description: "Runs once on newly enrolled Windows PCs to seed GCPW and install core remote-access apps.",
+            active: true,
+            run_on_new_agents: true,
+            time_zone: "America/New_York",
+            schedule: {
+                mode: "manual",
+                interval_hours: 24,
+                time_of_day: "03:00",
+                days_of_week: ["mon"]
+            },
+            targets: {
+                windows: true,
+                mac: false,
+                linux: false
+            },
+            tasks: {
+                windows: {
+                    install_all_updates: false,
+                    software_manager: "winget",
+                    software_allow_update: false,
+                    software_packages: [
+                        "Omnissa Horizon Client",
+                        "Citrix Workspace",
+                        "Linphone"
+                    ]
+                },
+                mac: { install_all_updates: false },
+                linux: { upgrade_all: false },
+                maintenance: { reboot_if_needed: false },
+                windows_scripts: [
+                    {
+                        name: "Install GCPW",
+                        enabled: true,
+                        script: gcpwAutomationScriptTemplate(),
+                        script_url: ""
+                    }
+                ]
             }
         };
     }
@@ -969,6 +1051,9 @@
         targetLinuxInput.checked = targets.linux !== false;
 
         taskWindowsInstallAllInput.checked = !!windowsTasks.install_all_updates;
+        windowsSoftwareManagerInput.value = String(windowsTasks.software_manager || "winget");
+        windowsSoftwareAllowUpdateInput.checked = !!windowsTasks.software_allow_update;
+        windowsSoftwarePackagesInput.value = formatPackageLines(windowsTasks.software_packages);
         taskMacInstallAllInput.checked = !!macTasks.install_all_updates;
         taskLinuxUpgradeAllInput.checked = !!linuxTasks.upgrade_all;
         taskRebootIfNeededInput.checked = !!maintenanceTasks.reboot_if_needed;
@@ -1011,7 +1096,10 @@
             },
             tasks: {
                 windows: {
-                    install_all_updates: !!taskWindowsInstallAllInput.checked
+                    install_all_updates: !!taskWindowsInstallAllInput.checked,
+                    software_manager: String(windowsSoftwareManagerInput.value || "winget"),
+                    software_allow_update: !!windowsSoftwareAllowUpdateInput.checked,
+                    software_packages: readPackageLines(windowsSoftwarePackagesInput.value)
                 },
                 mac: {
                     install_all_updates: !!taskMacInstallAllInput.checked
@@ -1126,6 +1214,39 @@
         });
 
         return result;
+    }
+
+    function readPackageLines(raw) {
+        return String(raw || "")
+            .split(/\r?\n|,/)
+            .map((value) => String(value || "").trim())
+            .filter((value, index, array) => value && array.indexOf(value) === index);
+    }
+
+    function formatPackageLines(packages) {
+        if (!Array.isArray(packages)) {
+            return "";
+        }
+
+        return packages
+            .map((value) => String(value || "").trim())
+            .filter((value) => value)
+            .join("\n");
+    }
+
+    function gcpwAutomationScriptTemplate() {
+        return [
+            "$ErrorActionPreference = 'Stop'",
+            "$allowedDomains = 'accessrrs.com'",
+            "$msiUrl = 'https://dl.google.com/credentialprovider/gcpwstandaloneenterprise64.msi'",
+            "$msiPath = Join-Path $env:TEMP 'gcpwstandaloneenterprise64.msi'",
+            "Invoke-WebRequest -UseBasicParsing -Uri $msiUrl -OutFile $msiPath",
+            "$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $msiPath, '/qn', '/norestart') -Wait -PassThru",
+            "if ($proc.ExitCode -ne 0) { throw \"GCPW install failed with exit code $($proc.ExitCode).\" }",
+            "New-Item -Path 'HKLM:\\Software\\Google\\GCPW' -Force | Out-Null",
+            "New-ItemProperty -Path 'HKLM:\\Software\\Google\\GCPW' -Name 'domains_allowed_to_login' -Value $allowedDomains -PropertyType String -Force | Out-Null",
+            "Write-Host 'GCPW installation complete.'"
+        ].join("\n");
     }
 
     async function apiFetch(path, options) {

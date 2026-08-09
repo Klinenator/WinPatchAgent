@@ -408,6 +408,16 @@ final class AutomationProfileRepository
                     $windowsInput['install_all_updates'] ?? ($windowsExisting['install_all_updates'] ?? null),
                     false
                 ),
+                'software_manager' => $this->normalizeSoftwareManager(
+                    (string) ($windowsInput['software_manager'] ?? ($windowsExisting['software_manager'] ?? 'winget'))
+                ),
+                'software_allow_update' => $this->boolOrDefault(
+                    $windowsInput['software_allow_update'] ?? ($windowsExisting['software_allow_update'] ?? null),
+                    false
+                ),
+                'software_packages' => $this->normalizeSoftwarePackages(
+                    $windowsInput['software_packages'] ?? ($windowsExisting['software_packages'] ?? [])
+                ),
             ],
             'linux' => [
                 'upgrade_all' => $this->boolOrDefault(
@@ -491,6 +501,46 @@ final class AutomationProfileRepository
         }
 
         return array_slice(array_keys($result), -1000);
+    }
+
+    private function normalizeSoftwareManager(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        if (!in_array($normalized, ['auto', 'winget'], true)) {
+            return 'winget';
+        }
+
+        return $normalized;
+    }
+
+    private function normalizeSoftwarePackages(mixed $value): array
+    {
+        $candidates = [];
+        if (is_string($value)) {
+            $candidates = preg_split('/[\r\n,]+/', $value) ?: [];
+        } elseif (is_array($value)) {
+            $candidates = $value;
+        }
+
+        $normalized = [];
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+
+            $package = trim($candidate);
+            if ($package === '') {
+                continue;
+            }
+
+            if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+@\/ -]{0,127}$/', $package) !== 1) {
+                continue;
+            }
+
+            $normalized[strtolower($package)] = $package;
+        }
+
+        return array_slice(array_values($normalized), 0, 25);
     }
 
     private function normalizeTimeZone(string $timeZone): string
@@ -657,4 +707,3 @@ final class AutomationProfileRepository
         return sprintf('%s_%s', $prefix, bin2hex(random_bytes(10)));
     }
 }
-

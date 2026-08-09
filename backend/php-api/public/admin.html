@@ -454,6 +454,58 @@
             padding: 12px;
         }
 
+        /* Summary cards are buttons that drill into the devices/jobs table.
+           Reset the button chrome so they read identically to the old cards. */
+        button.summary-card {
+            width: 100%;
+            text-align: left;
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+            transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease;
+        }
+
+        button.summary-card:hover,
+        button.summary-card:focus-visible {
+            border-color: var(--blue, #2d82da);
+            box-shadow: 0 6px 18px rgba(8, 31, 44, .10);
+            transform: translateY(-1px);
+        }
+
+        button.summary-card::after {
+            content: "View \2192";
+            display: block;
+            margin-top: 8px;
+            font-size: 11px;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            color: var(--blue, #2d82da);
+            opacity: 0;
+            transition: opacity .12s ease;
+        }
+
+        button.summary-card:hover::after,
+        button.summary-card:focus-visible::after {
+            opacity: 1;
+        }
+
+        .drill-note {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            margin: 0 0 10px;
+            padding: 8px 12px;
+            border: 1px solid var(--line);
+            border-left: 4px solid var(--blue, #2d82da);
+            border-radius: 8px;
+            background: var(--panel);
+            font-size: 13px;
+        }
+
+        .drill-note.active {
+            display: flex;
+        }
+
         .summary-card strong {
             display: block;
             font-family: "Space Grotesk", "Gill Sans", sans-serif;
@@ -1405,6 +1457,7 @@
         </div>
         <nav class="side-nav">
             <a href="/admin" class="side-link active">Main</a>
+            <a href="/admin/servers" class="side-link">Servers</a>
             <a href="/admin/automation" class="side-link">Automation</a>
             <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
             <a href="/admin/install-agent" class="side-link">Install Agent</a>
@@ -1490,22 +1543,22 @@
                             <div id="overviewPatchedBar" class="overview-progress-fill"></div>
                         </div>
                         <div class="overview-summary-grid">
-                            <article class="summary-card danger">
+                            <button type="button" class="summary-card danger drillable" data-drill="security" title="Show these devices">
                                 <strong id="overviewCriticalDevices">0</strong>
                                 <span>Devices missing security-relevant updates</span>
-                            </article>
-                            <article class="summary-card warn">
+                            </button>
+                            <button type="button" class="summary-card warn drillable" data-drill="missing" title="Show these devices">
                                 <strong id="overviewMissingDevices">0</strong>
                                 <span>Devices missing any OS patches</span>
-                            </article>
-                            <article class="summary-card danger">
+                            </button>
+                            <button type="button" class="summary-card danger drillable" data-drill="failed-jobs" title="Show these jobs">
                                 <strong id="overviewFailedPatchJobs">0</strong>
                                 <span>Failed patch-related jobs</span>
-                            </article>
-                            <article class="summary-card info">
+                            </button>
+                            <button type="button" class="summary-card info drillable" data-drill="reboot" title="Show these devices">
                                 <strong id="overviewPendingRebootDevices">0</strong>
                                 <span>Devices pending reboot</span>
-                            </article>
+                            </button>
                         </div>
                     </section>
 
@@ -1587,6 +1640,10 @@
                     <div class="panel-top">
                         <h2>Agents</h2>
                         <p class="hint" id="agentsSummary">Showing 0 of 0 agents</p>
+                    </div>
+                    <div id="agentsDrillNote" class="drill-note">
+                        <span id="agentsDrillLabel"></span>
+                        <button type="button" id="agentsDrillClear" class="btn ghost">Clear filter</button>
                     </div>
                     <div class="toolbar-row">
                         <input id="agentSearchInput" type="search" placeholder="Search by name, user, hostname, or agent ID">
@@ -1927,7 +1984,11 @@
             <section class="panel jobs-panel jobs-full-panel">
                 <div class="panel-top">
                     <h2>Recent Jobs</h2>
-                    <p class="hint">Newest jobs appear first.</p>
+                    <p class="hint" id="jobsSummary">Newest jobs appear first.</p>
+                </div>
+                <div id="jobsDrillNote" class="drill-note">
+                    <span id="jobsDrillLabel"></span>
+                    <button type="button" id="jobsDrillClear" class="btn ghost">Clear filter</button>
                 </div>
                 <div class="table-wrap">
                     <table>
@@ -2089,6 +2150,71 @@
     const splashtopDeploymentCodeInput = document.getElementById("splashtopDeploymentCodeInput");
     const agentSearchInput = document.getElementById("agentSearchInput");
     const availabilityFilterInput = document.getElementById("availabilityFilter");
+    const agentsDrillNote = document.getElementById("agentsDrillNote");
+    const agentsDrillLabel = document.getElementById("agentsDrillLabel");
+    const agentsDrillClear = document.getElementById("agentsDrillClear");
+    const jobsDrillNote = document.getElementById("jobsDrillNote");
+    const jobsDrillLabel = document.getElementById("jobsDrillLabel");
+    const jobsDrillClear = document.getElementById("jobsDrillClear");
+    const jobsSummary = document.getElementById("jobsSummary");
+
+    function syncDrillNote(noteEl, labelEl, drill, count) {
+        if (!noteEl || !labelEl) {
+            return;
+        }
+
+        if (!drill) {
+            noteEl.classList.remove("active");
+            labelEl.textContent = "";
+            return;
+        }
+
+        noteEl.classList.add("active");
+        labelEl.textContent = "Filtered: " + drill.label + " (" + count + ")";
+    }
+
+    function applyDrill(key) {
+        if (DEVICE_DRILLS[key]) {
+            deviceDrill = key;
+            jobDrill = "all";
+            // A drill-down that silently competes with an existing text search
+            // would show fewer devices than the card promised.
+            agentSearchInput.value = "";
+            availabilityFilterInput.value = "all";
+            setConsoleView("devices");
+            renderAgents(latestAgents);
+            renderJobs(latestJobs);
+            return;
+        }
+
+        if (JOB_DRILLS[key]) {
+            jobDrill = key;
+            deviceDrill = "all";
+            setConsoleView("jobs");
+            renderJobs(latestJobs);
+            renderAgents(latestAgents);
+        }
+    }
+
+    document.querySelectorAll("[data-drill]").forEach((card) => {
+        card.addEventListener("click", () => {
+            applyDrill(String(card.getAttribute("data-drill") || ""));
+        });
+    });
+
+    if (agentsDrillClear) {
+        agentsDrillClear.addEventListener("click", () => {
+            deviceDrill = "all";
+            renderAgents(latestAgents);
+        });
+    }
+
+    if (jobsDrillClear) {
+        jobsDrillClear.addEventListener("click", () => {
+            jobDrill = "all";
+            renderJobs(latestJobs);
+        });
+    }
 
     const STORAGE_KEY = "patchagent_admin_token";
     const SPLASHTOP_ACCOUNT_STORAGE_KEY = "patchagent_splashtop_account_email";
@@ -2100,6 +2226,34 @@
     let selectedAvailablePackageIds = new Set();
     let activePatchTab = "available";
     let activeConsoleView = "overview";
+
+    // Drill-down state driven by the overview summary cards. Each card filters
+    // the table it describes, so the counts are answerable in place instead of
+    // sending you off to search for the devices they refer to.
+    let deviceDrill = "all";
+    let jobDrill = "all";
+
+    const DEVICE_DRILLS = {
+        security: {
+            label: "Devices missing security-relevant updates",
+            match: (agent) => countSecurityRelevantPackages(agent) > 0
+        },
+        missing: {
+            label: "Devices missing any OS patches",
+            match: (agent) => countAvailablePackages(agent) > 0
+        },
+        reboot: {
+            label: "Devices pending reboot",
+            match: (agent) => getAgentPendingReboot(agent)
+        }
+    };
+
+    const JOB_DRILLS = {
+        "failed-jobs": {
+            label: "Failed patch-related jobs",
+            match: (job) => isPatchRelatedJob(job) && String(job.status || "").toLowerCase() === "failed"
+        }
+    };
     let installActionInFlight = false;
     let signedInUserEmail = "";
     let softwareSearchResultsByAgentId = {};
@@ -2904,8 +3058,12 @@
     function renderAgents(agents) {
         const query = agentSearchInput.value.trim().toLowerCase();
         const availabilityFilter = availabilityFilterInput.value;
+        const drill = DEVICE_DRILLS[deviceDrill] || null;
 
         const filtered = agents.filter((agent) => {
+            if (drill && !drill.match(agent)) {
+                return false;
+            }
             const displayName = String(agent.display_name || agent.hostname || "");
             const agentId = String(agent.agent_record_id || "");
             const hostname = String(agent.hostname || "");
@@ -2921,6 +3079,7 @@
         });
 
         agentsSummary.textContent = "Showing " + filtered.length + " of " + agents.length + " agents";
+        syncDrillNote(agentsDrillNote, agentsDrillLabel, drill, filtered.length);
 
         if (!filtered.length) {
             agentsTableBody.innerHTML = '<tr><td colspan="10" class="hint">No agents match your filters.</td></tr>';
@@ -2992,12 +3151,24 @@
     }
 
     function renderJobs(jobs) {
-        if (!jobs.length) {
-            jobsTableBody.innerHTML = '<tr><td colspan="7" class="hint">No jobs found.</td></tr>';
+        const drill = JOB_DRILLS[jobDrill] || null;
+        const filtered = drill ? jobs.filter((job) => drill.match(job)) : jobs;
+
+        syncDrillNote(jobsDrillNote, jobsDrillLabel, drill, filtered.length);
+        if (jobsSummary) {
+            jobsSummary.textContent = drill
+                ? "Showing " + filtered.length + " of " + jobs.length + " jobs"
+                : "Newest jobs appear first.";
+        }
+
+        if (!filtered.length) {
+            jobsTableBody.innerHTML = '<tr><td colspan="7" class="hint">'
+                + (drill ? "No jobs match this filter." : "No jobs found.")
+                + '</td></tr>';
             return;
         }
 
-        jobsTableBody.innerHTML = jobs.map((job) => {
+        jobsTableBody.innerHTML = filtered.map((job) => {
             const status = String(job.status || "");
             const statusClass = statusToClass(status);
             const jobId = String(job.job_id || "");

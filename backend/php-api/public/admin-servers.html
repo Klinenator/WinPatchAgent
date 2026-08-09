@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PatchAgent Admin - Servers</title>
+    <style>
+        @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+
+        :root {
+            color-scheme: light;
+            --bg: #ecf2f4;
+            --ink: #111827;
+            --muted: #5c687f;
+            --line: #d6e1e7;
+            --panel: #ffffff;
+            --brand-900: #00373f;
+            --brand-800: #04505a;
+            --blue: #2d82da;
+            --green: #1f9d66;
+            --red: #cc3042;
+            --shadow: 0 14px 40px rgba(8, 31, 44, 0.08);
+            --radius: 14px;
+            --radius-sm: 10px;
+            --sidebar-width: 240px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 18% 0%, #d7eff7 0, rgba(215, 239, 247, 0) 45%),
+                radial-gradient(circle at 78% 14%, #d9f1ea 0, rgba(217, 241, 234, 0) 48%),
+                var(--bg);
+            color: var(--ink);
+            font-family: "IBM Plex Sans", "Trebuchet MS", "Gill Sans", sans-serif;
+        }
+
+        .app-shell {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            padding: 18px 12px;
+            background: linear-gradient(180deg, var(--brand-900) 0%, var(--brand-800) 58%, #034950 100%);
+            color: #d6f5f8;
+            border-right: 1px solid rgba(255, 255, 255, 0.14);
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            color: #f0fdff;
+        }
+
+        .brand-mark {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .side-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .side-link {
+            text-decoration: none;
+            color: #dbf7f9;
+            border-radius: 11px;
+            padding: 10px 12px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid transparent;
+            transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .side-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.16);
+            transform: translateX(2px);
+        }
+
+        .side-link.active {
+            background: rgba(174, 239, 244, 0.18);
+            border-color: rgba(174, 239, 244, 0.44);
+            color: #ffffff;
+        }
+
+        .side-foot {
+            margin-top: auto;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 10px;
+        }
+
+        .side-foot-label {
+            margin: 0;
+            color: #b8e7eb;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .side-foot-user {
+            margin: 5px 0 10px;
+            font-size: 13px;
+            color: #fff;
+            word-break: break-word;
+        }
+
+        .workspace {
+            padding: 16px 20px 26px;
+        }
+
+        .top-command {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            animation: rise 0.42s ease;
+        }
+
+        .top-copy h1 {
+            margin: 0;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 28px;
+            letter-spacing: -0.02em;
+        }
+
+        .top-copy p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .command-actions {
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .panel {
+            margin-top: 12px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
+        }
+
+        .panel h2 {
+            margin: 0 0 6px;
+            font-family: "Space Grotesk", "Gill Sans", sans-serif;
+            font-size: 20px;
+            letter-spacing: -0.01em;
+        }
+
+        .hint {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            border: 1px solid transparent;
+            border-radius: 999px;
+            padding: 9px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn.primary {
+            background: linear-gradient(180deg, #3a97eb 0%, #2d82da 100%);
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(45, 130, 218, 0.28);
+        }
+
+        .btn.subtle {
+            background: #fff;
+            color: #1f3658;
+            border-color: #c5d8ea;
+        }
+
+        .btn.ghost {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+        }
+
+        .status-line {
+            min-height: 20px;
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .status-line.success {
+            color: var(--green);
+        }
+
+        .status-line.error {
+            color: var(--red);
+        }
+
+        .evidence-tabs {
+            margin-top: 12px;
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 6px;
+            box-shadow: var(--shadow);
+        }
+
+        .evidence-tab {
+            border: 0;
+            background: transparent;
+            color: #365066;
+            border-radius: 999px;
+            padding: 9px 15px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+        }
+
+        .evidence-tab.active {
+            background: linear-gradient(180deg, #3a97eb 0%, #2d82da 100%);
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(45, 130, 218, 0.22);
+        }
+
+        .preview-frame {
+            width: 100%;
+            min-height: 620px;
+            margin-top: 10px;
+            border: 1px solid #d6e1e7;
+            border-radius: 10px;
+            background: #fff;
+        }
+
+        @keyframes rise {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 980px) {
+            .app-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+                height: auto;
+            }
+
+            .workspace {
+                padding: 12px;
+            }
+
+            .command-actions {
+                justify-content: flex-start;
+                width: 100%;
+            }
+        }
+
+        /* Servers page */
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0 6px; }
+        .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+        button.tile { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color .12s ease, transform .12s ease; }
+        button.tile:hover, button.tile:focus-visible { border-color: var(--blue); transform: translateY(-1px); }
+        button.tile.selected { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(45,130,218,.18); }
+        .tile-label { margin: 0 0 6px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+        .tile-value { margin: 0; font-size: 26px; font-weight: 700; font-family: "Space Grotesk", sans-serif; }
+        .tile.warn .tile-value { color: var(--red); }
+        .tile.good .tile-value { color: var(--green); }
+        .srv-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .srv-table th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        .srv-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+        .srv-table tr:last-child td { border-bottom: none; }
+        .srv-name { font-weight: 600; }
+        .srv-sub { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+        .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+        .pill.ok { background: rgba(31,157,102,.12); color: var(--green); }
+        .pill.warn { background: rgba(204,48,66,.10); color: var(--red); }
+        .pill.mid { background: rgba(45,130,218,.12); color: var(--blue); }
+        .pill.idle { background: rgba(92,104,127,.12); color: var(--muted); }
+        .table-wrap { overflow-x: auto; }
+        .banner { border: 1px solid var(--line); border-left: 4px solid var(--blue); background: var(--panel); border-radius: 10px; padding: 12px 14px; margin: 14px 0; font-size: 14px; }
+        .banner.warn { border-left-color: var(--red); }
+    </style>
+</head>
+<body>
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand-mark">WP</span>
+            <span>PATCH AGENT</span>
+        </div>
+        <nav class="side-nav">
+            <a href="/admin" class="side-link">Main</a>
+            <a href="/admin/servers" class="side-link active">Servers</a>
+            <a href="/admin/automation" class="side-link">Automation</a>
+            <a href="/admin/seed-jobs" class="side-link">Seed Jobs</a>
+            <a href="/admin/install-agent" class="side-link">Install Agent</a>
+            <a href="/admin/evidence" class="side-link">Audit Evidence</a>
+            <a href="/admin/settings" class="side-link">Admin</a>
+        </nav>
+        <div class="side-foot">
+            <p class="side-foot-label">Signed In User</p>
+            <p id="authUser" class="side-foot-user">checking...</p>
+            <button id="logoutBtn" type="button" class="btn ghost">Sign Out</button>
+        </div>
+    </aside>
+
+    <main class="workspace">
+        <section class="top-command">
+            <div class="top-copy">
+                <h1>Servers</h1>
+                <p>Server fleet from the EC2 inventory, joined to agent reporting. Hosts that exist but are not reporting appear here as well &mdash; a list built only from agent check-ins cannot show what is missing.</p>
+            </div>
+            <div class="command-actions">
+                <button id="refreshBtn" type="button" class="btn primary">Refresh</button>
+            </div>
+        </section>
+
+        <p id="pageStatus" class="status-line"></p>
+        <div id="sourceBanner" class="banner" hidden></div>
+
+        <div class="tiles">
+            <button type="button" class="tile" data-filter="all"><p class="tile-label">Servers</p><p id="tTotal" class="tile-value">-</p></button>
+            <button type="button" class="tile good" data-filter="reporting"><p class="tile-label">Reporting</p><p id="tReporting" class="tile-value">-</p></button>
+            <button type="button" class="tile" data-filter="stale"><p class="tile-label">Stale</p><p id="tStale" class="tile-value">-</p></button>
+            <button type="button" class="tile warn" data-filter="not_enrolled"><p class="tile-label">Not Enrolled</p><p id="tUnenrolled" class="tile-value">-</p></button>
+            <button type="button" class="tile" data-filter="pending_reboot"><p class="tile-label">Pending Reboot</p><p id="tReboot" class="tile-value">-</p></button>
+            <button type="button" class="tile warn" data-filter="sla_breach"><p class="tile-label">SLA Breach</p><p id="tBreach" class="tile-value">-</p></button>
+        </div>
+        <div id="filterNote" class="banner" hidden></div>
+
+        <section class="panel">
+            <div class="table-wrap">
+                <table class="srv-table">
+                    <thead>
+                        <tr>
+                            <th>Server</th>
+                            <th>Instance</th>
+                            <th>Status</th>
+                            <th>OS / Kernel</th>
+                            <th>Updates</th>
+                            <th>Reboot Required</th>
+                            <th>SLA</th>
+                        </tr>
+                    </thead>
+                    <tbody id="srvBody">
+                        <tr><td colspan="7" class="subtle">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p id="slaHint" class="hint"></p>
+        </section>
+    </main>
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    const STORAGE_KEY = "patchagent_admin_token";
+    const authUser = document.getElementById("authUser");
+    const pageStatus = document.getElementById("pageStatus");
+    const sourceBanner = document.getElementById("sourceBanner");
+    const srvBody = document.getElementById("srvBody");
+    const slaHint = document.getElementById("slaHint");
+
+    function setStatus(element, message, kind) {
+        element.textContent = message;
+        element.className = "status-line" + (kind ? " " + kind : "");
+    }
+
+    async function apiFetchJson(path, options) {
+        const headers = new Headers(options?.headers || {});
+        headers.set("Accept", "application/json");
+        const token = String(localStorage.getItem(STORAGE_KEY) || "").trim();
+        if (token) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+        const response = await fetch(path, { method: options?.method || "GET", headers: headers });
+        const raw = await response.text();
+        let data = {};
+        if (raw.trim() !== "") {
+            try { data = JSON.parse(raw); } catch { throw new Error("Server returned non-JSON response."); }
+        }
+        if (!response.ok) {
+            if (response.status === 401 && data?.error?.code === "admin_auth_required") {
+                window.location.href = "/admin/login";
+                throw new Error("Admin authentication required.");
+            }
+            throw new Error(data?.error?.message || ("Request failed with status " + response.status));
+        }
+        return data;
+    }
+
+    function esc(value) {
+        return String(value == null ? "" : value).replace(/[&<>"]/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+        });
+    }
+
+    function statusPill(row) {
+        if (row.reporting_status === "reporting") return '<span class="pill ok">Reporting</span>';
+        if (row.reporting_status === "stale") return '<span class="pill mid">Stale</span>';
+        return '<span class="pill warn">Not enrolled</span>';
+    }
+
+    function slaPill(row) {
+        if (row.sla_status === "breach") return '<span class="pill warn">Breach</span>';
+        if (row.sla_status === "due") return '<span class="pill mid">Due</span>';
+        if (row.sla_status === "ok") return '<span class="pill ok">OK</span>';
+        return '<span class="pill idle">&mdash;</span>';
+    }
+
+    function rebootCell(row) {
+        if (row.pending_reboot === true) {
+            const age = row.pending_reboot_days == null ? "" :
+                '<span class="srv-sub">' + esc(row.pending_reboot_days) + ' days</span>';
+            return '<span class="pill warn">Yes</span>' + age;
+        }
+        if (row.pending_reboot === false) return '<span class="pill ok">No</span>';
+        return '<span class="subtle">&mdash;</span>';
+    }
+
+    function updatesCell(row) {
+        if (row.available_patch_count == null) return '<span class="subtle">&mdash;</span>';
+        const sec = Number(row.security_patch_count || 0);
+        const secHtml = sec > 0 ? '<span class="srv-sub">' + sec + ' security</span>' : "";
+        return esc(row.available_patch_count) + secHtml;
+    }
+
+    // Each tile filters the table it describes, so a count is answerable in
+    // place rather than sending you off to search for the rows behind it.
+    const FILTERS = {
+        all: { label: "All servers", match: () => true },
+        reporting: { label: "Reporting", match: (r) => r.reporting_status === "reporting" },
+        stale: { label: "Stale", match: (r) => r.reporting_status === "stale" },
+        not_enrolled: { label: "Not enrolled", match: (r) => r.reporting_status === "not_enrolled" },
+        pending_reboot: { label: "Pending reboot", match: (r) => r.pending_reboot === true },
+        sla_breach: { label: "SLA breach", match: (r) => r.sla_status === "breach" }
+    };
+
+    let activeFilter = "all";
+    let latestPayload = null;
+
+    function render(payload) {
+        latestPayload = payload;
+        const all = Array.isArray(payload.servers) ? payload.servers : [];
+        const filter = FILTERS[activeFilter] || FILTERS.all;
+        const servers = all.filter(filter.match);
+        const summary = payload.summary || {};
+
+        document.querySelectorAll("[data-filter]").forEach(function (tile) {
+            tile.classList.toggle("selected", tile.getAttribute("data-filter") === activeFilter);
+        });
+
+        const filterNote = document.getElementById("filterNote");
+        if (activeFilter === "all") {
+            filterNote.hidden = true;
+        } else {
+            filterNote.hidden = false;
+            filterNote.className = "banner";
+            filterNote.textContent = "Filtered: " + filter.label + " (" + servers.length + " of " + all.length + ") - click Servers to clear.";
+        }
+
+        document.getElementById("tTotal").textContent = summary.total ?? all.length;
+        document.getElementById("tReporting").textContent = summary.reporting ?? 0;
+        document.getElementById("tStale").textContent = summary.stale ?? 0;
+        document.getElementById("tUnenrolled").textContent = summary.not_enrolled ?? 0;
+        document.getElementById("tReboot").textContent = summary.pending_reboot ?? 0;
+        document.getElementById("tBreach").textContent = summary.sla_breach ?? 0;
+
+        slaHint.textContent = "Reboot SLA: " + (payload.reboot_sla_days ?? 7) +
+            " days from when a host first reported reboot-required. The clock is kept server-side, so reinstalling an agent does not reset it.";
+
+        const src = payload.ec2_inventory || {};
+        if (src.available === false) {
+            sourceBanner.hidden = false;
+            sourceBanner.className = "banner warn";
+            sourceBanner.textContent = "EC2 inventory export not found at " + (src.path || "(unset)") +
+                " - showing reporting agents only. Servers that exist but are not enrolled cannot be detected until the export runs.";
+        } else {
+            sourceBanner.hidden = false;
+            sourceBanner.className = "banner";
+            sourceBanner.textContent = "EC2 inventory last exported " + (src.generated_at || "unknown") + ".";
+        }
+
+        if (servers.length === 0) {
+            srvBody.innerHTML = '<tr><td colspan="7" class="subtle">'
+                + (activeFilter === "all" ? "No servers found." : "No servers match this filter.")
+                + '</td></tr>';
+            return;
+        }
+
+        const order = { breach: 0, due: 1, unknown: 2, ok: 3 };
+        servers.sort(function (a, b) {
+            const ra = a.reporting_status === "not_enrolled" ? 0 : 1;
+            const rb = b.reporting_status === "not_enrolled" ? 0 : 1;
+            if (ra !== rb) return ra - rb;
+            return (order[a.sla_status] ?? 9) - (order[b.sla_status] ?? 9);
+        });
+
+        srvBody.innerHTML = servers.map(function (row) {
+            return "<tr>" +
+                '<td><span class="srv-name">' + esc(row.name || row.hostname || "(unnamed)") + "</span>" +
+                    (row.hostname ? '<span class="srv-sub">' + esc(row.hostname) + "</span>" : "") + "</td>" +
+                "<td>" + (row.instance_id ? esc(row.instance_id) : '<span class="subtle">not in EC2</span>') +
+                    (row.private_ip ? '<span class="srv-sub">' + esc(row.private_ip) + "</span>" : "") + "</td>" +
+                "<td>" + statusPill(row) +
+                    (row.last_seen_at ? '<span class="srv-sub">' + esc(row.last_seen_at) + "</span>" : "") + "</td>" +
+                "<td>" + (row.os_name ? esc(row.os_name) : '<span class="subtle">&mdash;</span>') +
+                    (row.kernel ? '<span class="srv-sub">' + esc(row.kernel) + "</span>" : "") + "</td>" +
+                "<td>" + updatesCell(row) + "</td>" +
+                "<td>" + rebootCell(row) + "</td>" +
+                "<td>" + slaPill(row) + "</td>" +
+            "</tr>";
+        }).join("");
+    }
+
+    async function load() {
+        setStatus(pageStatus, "Loading server fleet...", "");
+        try {
+            const data = await apiFetchJson("/v1/admin/servers", { method: "GET" });
+            render(data);
+            setStatus(pageStatus, "Updated " + (data.generated_at || ""), "success");
+        } catch (error) {
+            srvBody.innerHTML = '<tr><td colspan="7" class="subtle">Could not load servers.</td></tr>';
+            setStatus(pageStatus, error.message || "Failed to load servers.", "error");
+        }
+    }
+
+    async function loadAuthStatus() {
+        try {
+            const data = await apiFetchJson("/v1/admin/auth/status", { method: "GET" });
+            const user = data && typeof data.user === "object" ? data.user : null;
+            if (data.logged_in === true && user) {
+                const email = String(user.email || "").trim();
+                const name = String(user.name || "").trim();
+                authUser.textContent = name ? (name + " <" + email + ">") : email;
+                return;
+            }
+            authUser.textContent = data.oauth_enabled === true ? "Not signed in" : "OAuth not configured";
+        } catch {
+            authUser.textContent = "Unknown";
+        }
+    }
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+        try { await apiFetchJson("/v1/admin/auth/logout", { method: "POST" }); } catch {}
+        window.location.href = "/admin/login";
+    });
+    document.getElementById("refreshBtn").addEventListener("click", load);
+
+    document.querySelectorAll("[data-filter]").forEach(function (tile) {
+        tile.addEventListener("click", function () {
+            const next = String(tile.getAttribute("data-filter") || "all");
+            activeFilter = (activeFilter === next && next !== "all") ? "all" : next;
+            if (latestPayload) {
+                render(latestPayload);
+            }
+        });
+    });
+
+    loadAuthStatus();
+    load();
+})();
+</script>
+</body>
+</html>
