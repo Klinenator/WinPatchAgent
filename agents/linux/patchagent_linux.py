@@ -38,12 +38,16 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 
-AGENT_VERSION = "1.0.0-python"
+AGENT_VERSION = "1.1.0-python"
 STATE_PATH = "/etc/patchagent/agent.json"
 HEARTBEAT_SECONDS = 300
 INVENTORY_SECONDS = 21600
 JOB_POLL_SECONDS = 60
 HTTP_TIMEOUT = 30
+# IMDS is link-local and answers in single-digit milliseconds or not at all, so
+# this only needs to be long enough to distinguish "not on EC2" from a slow reply.
+IMDS_TIMEOUT = 2
+IMDS_BASE = "http://169.254.169.254/latest"
 
 
 # ---------------------------------------------------------------- utilities
@@ -146,12 +150,51 @@ def os_release() -> dict:
 
 def device_identity(state: dict) -> tuple[str, str]:
     """Stable device id. Prefers the machine-id so reinstalling the agent does
-    not create a duplicate device record on the backend."""
+    not create a duplicate device record on the backend.
+
+    Caveat worth knowing: a host imaged from another carries the *same*
+    machine-id, and two such hosts then share one device record, each silently
+    overwriting the other. Seed state['device_id'] before registering to break
+    the tie. Checked on 2026-08-09 after exactly this happened to the two VPN
+    boxes.
+    """
     device_id = state.get("device_id") or ""
     if not device_id:
         device_id = read_file("/etc/machine-id") or read_file("/var/lib/dbus/machine-id")
         device_id = device_id or str(uuid.uuid4())
     return device_id, socket.getfqdn() or platform.node()
+
+
+def ec2_instance_id() -> str:
+    """The EC2 instance-id via IMDSv2, or "" when this is not an EC2 host.
+
+    The backend joins agents to EC2 rows on this. Without it the join has to
+    infer identity from the hostname, and socket.getfqdn() is routinely useless
+    for that - observed in this fleet as "localhost", as the EC2 *public* DNS
+    name, and once as "127.0.0.1localhost". Any failure here is non-fatal: the
+    backend still falls back to the old hostname matching.
+    """
+    try:
+        token_req = urllib.request.Request(
+            f"{IMDS_BASE}/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
+        )
+        with urllib.request.urlopen(token_req, timeout=IMDS_TIMEOUT) as resp:
+            token = resp.read().decode("utf-8", errors="replace").strip()
+
+        # IMDSv2 only. Hosts still allowing v1 answer v2 as well, and the newer
+        # ones (marketing was launched with HttpTokens=required) answer nothing else.
+        id_req = urllib.request.Request(
+            f"{IMDS_BASE}/meta-data/instance-id",
+            headers={"X-aws-ec2-metadata-token": token},
+        )
+        with urllib.request.urlopen(id_req, timeout=IMDS_TIMEOUT) as resp:
+            value = resp.read().decode("utf-8", errors="replace").strip()
+
+        return value if re.fullmatch(r"i-[0-9a-f]{8,32}", value) else ""
+    except Exception:  # noqa: BLE001 - not being on EC2 is normal, not an error
+        return ""
 
 
 def collect_os() -> dict:
@@ -295,9 +338,15 @@ def collect_applications() -> list[dict]:
 def do_register(base_url: str, enrollment_key: str) -> dict:
     state = load_state()
     device_id, hostname = device_identity(state)
+    instance_id = ec2_instance_id()
     payload = {
         "enrollment_key": enrollment_key,
-        "device": {"device_id": device_id, "hostname": hostname, "domain": ""},
+        "device": {
+            "device_id": device_id,
+            "hostname": hostname,
+            "domain": "",
+            "instance_id": instance_id,
+        },
         "os": collect_os(),
         "agent": {"version": AGENT_VERSION, "channel": "linux-python"},
         "capabilities": ["apt", "inventory", "reboot_report"],
@@ -312,20 +361,30 @@ def do_register(base_url: str, enrollment_key: str) -> dict:
             "backend_url": base_url.rstrip("/"),
             "device_id": device_id,
             "hostname": hostname,
+            "instance_id": instance_id,
             "agent_token": token,
             "registered_at": utcnow(),
         }
     )
-    log(f"registered {hostname} ({device_id}) -> {STATE_PATH}")
+    log(f"registered {hostname} ({device_id}) instance={instance_id or 'none'} -> {STATE_PATH}")
     return resp
 
 
 def do_heartbeat(state: dict) -> None:
+    # instance_id rides along on the heartbeat, not just registration, so an
+    # already-enrolled host picks it up by upgrading the agent - no re-register
+    # and therefore no fresh enrollment key per host.
+    instance_id = state.get("instance_id") or ec2_instance_id()
+    if instance_id and not state.get("instance_id"):
+        state["instance_id"] = instance_id
+        save_state(state)
+
     post(
         state["backend_url"],
         "/v1/agents/heartbeat",
         {
             "device_id": state["device_id"],
+            "instance_id": instance_id,
             "agent_version": AGENT_VERSION,
             "service_state": "running",
             "sent_at": utcnow(),

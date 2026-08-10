@@ -32,6 +32,11 @@ final class AgentRepository
             'agent_record_id' => $agentRecordId,
             'device_id' => $registration['device_id'],
             'hostname' => $registration['hostname'],
+            // Falls back to whatever was already stored, so a re-register from an
+            // older agent that does not send it does not erase a known instance id.
+            'instance_id' => (string) (($registration['instance_id'] ?? '') !== ''
+                ? $registration['instance_id']
+                : ($existing['instance_id'] ?? '')),
             'display_name' => (string) ($existing['display_name'] ?? $registration['hostname']),
             'domain' => $registration['domain'],
             'os' => $registration['os'],
@@ -81,6 +86,17 @@ final class AgentRepository
 
             $agent['last_seen_at'] = gmdate(DATE_ATOM);
             $agent['updated_at'] = gmdate(DATE_ATOM);
+
+            // Promoted from the heartbeat rather than requiring a re-register, so
+            // upgrading the agent is enough for an enrolled host to gain its
+            // instance id. Folded into this existing read-modify-write on purpose:
+            // a second write per heartbeat would only widen the window in which
+            // concurrent agents can clobber each other's updates.
+            $reported = trim((string) ($heartbeat['instance_id'] ?? ''));
+            if ($reported !== '' && preg_match('/^i-[0-9a-f]{8,32}$/', $reported) === 1) {
+                $agent['instance_id'] = $reported;
+            }
+
             $agent['last_heartbeat'] = $heartbeat;
             $agents['agents'][$index] = $agent;
 

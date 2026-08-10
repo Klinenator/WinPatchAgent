@@ -432,9 +432,18 @@ final class App
             throw new ApiException(403, 'invalid_enrollment_key', 'The enrollment key is invalid.');
         }
 
+        // Authoritative identity when present. The Servers view joins on this in
+        // preference to guessing from the hostname, which agents report via
+        // getfqdn() and is frequently not the EC2 form the join can parse.
+        $instanceId = trim((string) ($device['instance_id'] ?? ''));
+        if ($instanceId !== '' && preg_match('/^i-[0-9a-f]{8,32}$/', $instanceId) !== 1) {
+            $instanceId = '';
+        }
+
         $record = $this->agents->upsertRegistration([
             'device_id' => $deviceId,
             'hostname' => $hostname,
+            'instance_id' => $instanceId,
             'domain' => (string) ($device['domain'] ?? ''),
             'os' => [
                 'family' => (string) ($os['family'] ?? ''),
@@ -470,6 +479,7 @@ final class App
 
         $this->agents->recordHeartbeat($agent['agent_record_id'], [
             'device_id' => (string) ($body['device_id'] ?? ''),
+            'instance_id' => (string) ($body['instance_id'] ?? ''),
             'agent_version' => (string) ($body['agent_version'] ?? ''),
             'service_state' => (string) ($body['service_state'] ?? 'unknown'),
             'sent_at' => (string) ($body['sent_at'] ?? ''),
@@ -3472,8 +3482,14 @@ final class App
         $instances = $this->loadEc2Inventory();
 
         // Index agents by every identifier we might match on.
+        $agentsByInstance = [];
         $agentsByHost = [];
         foreach ($this->agents->listAgents() as $agent) {
+            $instanceId = strtolower(trim((string) ($agent['instance_id'] ?? '')));
+            if ($instanceId !== '') {
+                $agentsByInstance[$instanceId] = $agent;
+            }
+
             $hostname = strtolower(trim((string) ($agent['hostname'] ?? '')));
             if ($hostname !== '') {
                 $agentsByHost[$hostname] = $agent;
@@ -3488,8 +3504,16 @@ final class App
         $matchedAgentIds = [];
 
         foreach ($instances as $instance) {
-            $privateIp = (string) ($instance['private_ip'] ?? '');
-            $agent = $agentsByHost['ip:' . $privateIp] ?? null;
+            // instance_id first: it is reported by the agent itself and cannot be
+            // wrong. The two below are inference, and both have mismatched in
+            // practice - a hostname of "localhost" matches nothing, and the Name
+            // tag once let a dead agent hold a live instance's row for two months.
+            $agent = $agentsByInstance[strtolower(trim((string) ($instance['instance_id'] ?? '')))] ?? null;
+
+            if ($agent === null) {
+                $privateIp = (string) ($instance['private_ip'] ?? '');
+                $agent = $agentsByHost['ip:' . $privateIp] ?? null;
+            }
             if ($agent === null) {
                 $name = strtolower(trim((string) ($instance['name'] ?? '')));
                 $agent = $name !== '' ? ($agentsByHost[$name] ?? null) : null;
@@ -3516,7 +3540,16 @@ final class App
                 continue; // desktops belong on the main Agents view
             }
 
-            $rows[] = $this->buildServerRow([], $agent, $slaDays, $staleAfterMinutes);
+            // Carry the agent's own instance id onto the row. An agent reporting
+            // an instance that the export does not list means the instance is
+            // stopped or the export is stale - both worth seeing, and both more
+            // informative than a blank "not in EC2".
+            $rows[] = $this->buildServerRow(
+                ['instance_id' => (string) ($agent['instance_id'] ?? '')],
+                $agent,
+                $slaDays,
+                $staleAfterMinutes
+            );
         }
 
         $summary = [
