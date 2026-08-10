@@ -154,6 +154,11 @@ final class AgentRepository
                 'agent_record_id' => (string) ($agent['agent_record_id'] ?? ''),
                 'device_id' => (string) ($agent['device_id'] ?? ''),
                 'hostname' => (string) ($agent['hostname'] ?? ''),
+                // This projection is a whitelist: a field absent here is invisible
+                // to every caller no matter what is stored. handleAdminServers
+                // joins on instance_id, so omitting it made the join silently fall
+                // back to hostname guessing with no error anywhere.
+                'instance_id' => (string) ($agent['instance_id'] ?? ''),
                 'display_name' => (string) ($agent['display_name'] ?? ($agent['hostname'] ?? '')),
                 'domain' => (string) ($agent['domain'] ?? ''),
                 'os' => is_array($agent['os'] ?? null) ? $agent['os'] : [],
