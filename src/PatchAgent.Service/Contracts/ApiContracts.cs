@@ -24,6 +24,12 @@ public sealed class RegisterDevice
     public string Hostname { get; set; } = string.Empty;
 
     public string Domain { get; set; } = string.Empty;
+
+    /// <summary>
+    /// EC2 instance id, or "" off EC2. The backend joins on this in preference to
+    /// guessing from the hostname, which never works for a default EC2 Windows name.
+    /// </summary>
+    public string InstanceId { get; set; } = string.Empty;
 }
 
 public sealed class RegisterOs
@@ -65,6 +71,13 @@ public sealed class HeartbeatRequest
     public string AgentId { get; set; } = string.Empty;
 
     public string DeviceId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Sent on every heartbeat, not just registration, so an already-enrolled host
+    /// gains its instance id by updating the agent alone - no re-enrolment and no
+    /// fresh single-use key per machine.
+    /// </summary>
+    public string InstanceId { get; set; } = string.Empty;
 
     public DateTimeOffset SentAt { get; set; }
 

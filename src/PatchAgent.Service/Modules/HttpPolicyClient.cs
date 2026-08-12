@@ -46,7 +46,8 @@ public sealed class HttpPolicyClient : IPolicyClient
             {
                 DeviceId = state.DeviceId,
                 Hostname = Environment.MachineName,
-                Domain = Environment.UserDomainName
+                Domain = Environment.UserDomainName,
+                InstanceId = await Ec2InstanceMetadata.GetInstanceIdAsync(cancellationToken).ConfigureAwait(false)
             },
             Os = new RegisterOs
             {
@@ -102,6 +103,7 @@ public sealed class HttpPolicyClient : IPolicyClient
         {
             AgentId = GetAgentId(state),
             DeviceId = state.DeviceId,
+            InstanceId = await Ec2InstanceMetadata.GetInstanceIdAsync(cancellationToken).ConfigureAwait(false),
             SentAt = DateTimeOffset.UtcNow,
             AgentVersion = GetAgentVersion(),
             SystemState = new HeartbeatSystemState

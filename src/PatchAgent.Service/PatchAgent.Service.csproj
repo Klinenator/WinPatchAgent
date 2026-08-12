@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>PatchAgent.Service</RootNamespace>
     <AssemblyName>PatchAgent.Service</AssemblyName>
+    <!-- Reported to the backend as the agent version. Without it every agent
+         reports 1.0.0.0 and a rolled-out update is indistinguishable from a
+         machine that never took it. 1.1.0 == first build that sends instance_id. -->
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
